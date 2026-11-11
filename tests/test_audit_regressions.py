@@ -65,14 +65,14 @@ class AuditRegressions(unittest.TestCase):
         self.assertNotIn('plasma-workspace-wayland', provision)
         self.assertNotIn('kwin-wayland', provision)
         self.assertIn('kde:full)', provision)
-        self.assertIn('install_environment kde-desktop-environment', provision)
+        self.assertIn('@kde-desktop-environment', provision)
         self.assertIn('gnome:full)', provision)
-        self.assertIn('install_environment workstation-product-environment', provision)
+        self.assertIn('@workstation-product-environment', provision)
         self.assertIn('gnome-session-wayland-session', provision)
         self.assertIn('upgrade_required gsettings-desktop-schemas gnome-desktop3 gnome-desktop4', provision)
         self.assertIn('XSession=', provision)
         self.assertIn('/var/lib/sddm/state.conf', provision)
-        self.assertIn('sway:full) install_environment sway-desktop-environment', provision)
+        self.assertIn('@sway-desktop-environment', provision)
         self.assertIn('/etc/blazeos-selected-session', helper)
         self.assertIn('DONE="$STATE_DIR/install-choices-applied"', helper)
 
@@ -270,6 +270,160 @@ class AuditRegressions(unittest.TestCase):
         for name, digest in expected.items():
             payload = (ROOT / 'packages' / name).read_bytes()
             self.assertEqual(hashlib.sha256(payload).hexdigest(), digest)
+
+
+class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
+    def test_berp_and_sentinel_cli_and_no_eager_canary(self):
+        import json
+        recovery_bin = OVERLAY / 'usr/bin/blaze-recovery'
+        sentinel_bin = OVERLAY / 'usr/bin/blaze-sentinel'
+        self.assertTrue(recovery_bin.is_file())
+        self.assertTrue(sentinel_bin.is_file())
+
+        for flag in ('--help', '--version', '--status', '--list-snapshots', '--verify'):
+            res = subprocess.run([str(recovery_bin), flag], capture_output=True, text=True, timeout=10)
+            self.assertEqual(res.returncode, 0, f'blaze-recovery {flag} failed: {res.stderr}')
+
+        # Ensure /var/tmp/.blaze_canary is never created by status or --help
+        var_tmp_canary = Path('/var/tmp/.blaze_canary')
+        if var_tmp_canary.exists():
+            try:
+                var_tmp_canary.unlink()
+            except OSError:
+                pass
+
+        for args in (['--help'], ['--version'], ['status'], ['status', '--json'], ['policy', 'list'], ['verify', '--json']):
+            res = subprocess.run([str(sentinel_bin), *args], capture_output=True, text=True, timeout=10)
+            self.assertEqual(res.returncode, 0, f'blaze-sentinel {args} failed: {res.stderr}')
+            if '--json' in args and 'status' in args:
+                data = json.loads(res.stdout)
+                self.assertEqual(data.get('total'), 7)
+                self.assertEqual(len(data.get('controls', [])), 7)
+
+        self.assertFalse(var_tmp_canary.exists(), '/var/tmp/.blaze_canary must not be created!')
+
+    def test_bere_grub_and_snapshot_hardening(self):
+        # 11_berp must not exist in work_f45/rootfs
+        self.assertFalse((ROOT / 'work_f45/rootfs/etc/grub.d/11_berp').exists())
+        grub_99 = (OVERLAY / 'etc/grub.d/99_berp').read_text()
+        self.assertIn('systemd.mask=sddm.service', grub_99)
+        self.assertIn('systemd.mask=display-manager.service', grub_99)
+
+        bere_gui = (OVERLAY / 'usr/bin/berp-recovery-gui').read_text()
+        compile(bere_gui, 'berp-recovery-gui', 'exec')
+        self.assertIn('strip_btrfs_source', bere_gui)
+        self.assertIn('tempfile.mkdtemp', bere_gui)
+        self.assertNotIn('?token={API_TOKEN}', bere_gui)
+        self.assertNotIn('chmod -R 777', bere_gui)
+        self.assertIn('userdel', bere_gui)
+        self.assertIn('99-blaze-setup', bere_gui)
+        self.assertIn('gen_grub_cfgstub', bere_gui)
+        self.assertIn('efibootmgr', bere_gui)
+
+        snap_script = (OVERLAY / 'usr/local/bin/blaze-snapshot').read_text()
+        self.assertIn("sed 's/\\[.*//'", snap_script)
+        self.assertIn('ro false', snap_script)
+        self.assertIn('dnf-pre', snap_script)
+
+    def test_solarui_shells_omnibar_and_niri_validation(self):
+        # Validate all niri.kdl files
+        niri_files = [
+            ROOT / 'solarui/data/niri.kdl',
+            OVERLAY / 'etc/solarui/niri.kdl',
+            OVERLAY / 'usr/share/solarui/niri.kdl',
+            OVERLAY / 'etc/skel/.config/solarui/niri.kdl',
+        ]
+        for nf in niri_files:
+            self.assertTrue(nf.is_file(), f'Missing {nf}')
+            res = subprocess.run(['niri', 'validate', '-c', str(nf)], capture_output=True, text=True, timeout=10)
+            self.assertEqual(res.returncode, 0, f'niri validate failed for {nf}: {res.stderr}')
+
+        # Verify SolarEnginePage.qml consistency and zero 'hybrid' references
+        qml_paths = [
+            ROOT / 'solarui/vendor/caelestia-shell/modules/nexus/pages/solarui/SolarEnginePage.qml',
+            OVERLAY / 'etc/skel/.config/quickshell/caelestia/modules/nexus/pages/solarui/SolarEnginePage.qml',
+            OVERLAY / 'etc/xdg/quickshell/caelestia/modules/nexus/pages/solarui/SolarEnginePage.qml',
+        ]
+        qml_contents = [p.read_text() for p in qml_paths]
+        self.assertEqual(qml_contents[0], qml_contents[1])
+        self.assertEqual(qml_contents[0], qml_contents[2])
+        self.assertIn('"end4-pc"', qml_contents[0])
+        self.assertNotIn('"hybrid"', qml_contents[0])
+
+        # Verify icons and fastfetch logos exist
+        self.assertTrue((OVERLAY / 'usr/share/solarui/icons/blaze-logo-256.png').is_file())
+        self.assertTrue((OVERLAY / 'usr/share/solarui/icons/blaze-logo-wide.png').is_file())
+        self.assertTrue((OVERLAY / 'usr/share/solarui/icons/living-flow/nav-shell.png').is_file())
+        self.assertTrue((OVERLAY / 'usr/share/blazeos/ascii-logo.txt').is_file())
+        self.assertTrue((OVERLAY / 'usr/share/blazeos/fastfetch/logo.ans').is_file())
+
+        # Test solar-shell omnibar CLI status/disable/enable in isolated HOME
+        solar_shell = OVERLAY / 'usr/bin/solar-shell'
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {**os.environ, 'HOME': tmp, 'XDG_RUNTIME_DIR': tmp}
+            r1 = subprocess.run([str(solar_shell), 'omnibar', 'disable'], env=env, capture_output=True, text=True, timeout=10)
+            self.assertEqual(r1.returncode, 0)
+            r2 = subprocess.run([str(solar_shell), 'omnibar', 'status'], env=env, capture_output=True, text=True, timeout=10)
+            self.assertIn('enabled=false', r2.stdout)
+            r3 = subprocess.run([str(solar_shell), 'omnibar', 'enable'], env=env, capture_output=True, text=True, timeout=10)
+            self.assertEqual(r3.returncode, 0)
+            r4 = subprocess.run([str(solar_shell), 'omnibar', 'status'], env=env, capture_output=True, text=True, timeout=10)
+            self.assertIn('enabled=true', r4.stdout)
+
+    def test_oobe_multide_firehub_and_continuum_hardening(self):
+        setup_py = (OVERLAY / 'usr/bin/blaze-setup').read_text()
+        compile(setup_py, 'blaze-setup', 'exec')
+        self.assertIn('allow_reuse_address = True', setup_py)
+        self.assertIn('tempfile.mkdtemp', setup_py)
+
+        setup_js = (OVERLAY / 'usr/share/blaze-setup/app.js').read_text()
+        self.assertIn('let desktopStarting = false', setup_js)
+
+        plymouth_svc = (OVERLAY / 'etc/systemd/system/blazeos-plymouth-failsafe.service').read_text()
+        self.assertNotIn('Before=display-manager.service', plymouth_svc)
+
+        anaconda_conf = (OVERLAY / 'etc/anaconda/conf.d/99-blazeos.conf').read_text()
+        self.assertIn('efi_dir = fedora', anaconda_conf)
+
+        self.assertTrue(os.access(OVERLAY / 'usr/bin/blaze-system-monitor', os.X_OK))
+        self.assertTrue(os.access(OVERLAY / 'usr/bin/solar-settings', os.X_OK))
+        self.assertTrue(os.access(OVERLAY / 'usr/bin/blaze-house', os.X_OK))
+        self.assertTrue((OVERLAY / 'opt/FireHub/resources/app.asar').is_file())
+
+        continuum_bin = OVERLAY / 'usr/bin/blaze-continuum'
+        res = subprocess.run([str(continuum_bin), 'check'], capture_output=True, text=True, timeout=10)
+        self.assertEqual(res.returncode, 0, res.stderr)
+
+    def test_welcome_firehub_license_and_oobe_autologin_integrity(self):
+        # 1. Welcome GUI integrity: no wide logo and no 'Sistem Hazır' badge
+        welcome_rs = (ROOT / 'solarui/crates/solar-shell/src/welcome_gui.rs').read_text()
+        self.assertNotIn('LOGO_WIDE_PNG', welcome_rs)
+        self.assertNotIn('FluidCloud::new("Sistem Hazır")', welcome_rs)
+        self.assertIn('SolarUI Masaüstü Rehberi', welcome_rs)
+
+        # 2. FireHub license integrity: GPL-3.0 present, GitHub repo linked, no proprietary claims
+        firehub_asar = (OVERLAY / 'opt/FireHub/resources/app.asar').read_bytes()
+        self.assertIn(b'GNU General Public License v3.0', firehub_asar)
+        self.assertIn(b'DarkMorpheus-pc/Blaze-Fire-Hub', firehub_asar)
+        self.assertNotIn(b'proprietary and confidential', firehub_asar)
+
+        # 3. OOBE and SDDM autologin integrity
+        oobe_sddm = (OVERLAY / 'etc/sddm.conf.d/00-blaze-oobe.conf').read_text()
+        self.assertIn('Session=blaze-oobe.desktop', oobe_sddm)
+        self.assertIn('User=blaze-setup', oobe_sddm)
+        self.assertIn('MinimumUid=900', oobe_sddm)
+
+        sddm_pam = (OVERLAY / 'etc/pam.d/sddm-autologin').read_text()
+        self.assertIn('user in blaze-setup:liveuser', sddm_pam)
+
+        postinstall_svc = (OVERLAY / 'etc/systemd/system/blazeos-postinstall.service').read_text()
+        self.assertIn('Before=display-manager.service gdm.service sddm.service', postinstall_svc)
+        self.assertIn('After=local-fs.target', postinstall_svc)
+        self.assertNotIn('After=NetworkManager.service', postinstall_svc)
+
+        inst_py = (OVERLAY / 'usr/lib64/python3.15/site-packages/pyanaconda/modules/boss/installation.py').read_text()
+        self.assertIn('blazeos-apply-install-choices.service', inst_py)
+        self.assertIn('target_autologin', inst_py)
 
 
 if __name__ == '__main__':

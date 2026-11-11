@@ -89,10 +89,21 @@ impl SolarShellSupervisor {
             .desired_profile
             .parse()
             .map_err(|e: String| anyhow::anyhow!(e))?;
+        let matching_provider = match state.desired_engine {
+            ShellEngine::Noctalia => solar_common::SurfaceProvider::Noctalia,
+            ShellEngine::Caelestia => solar_common::SurfaceProvider::Caelestia,
+            ShellEngine::End4Pc => solar_common::SurfaceProvider::End4Pc,
+        };
         SolarConfig::update(|cfg| {
             cfg.shell.engine = state.desired_engine;
+            cfg.shell.launcher_provider = matching_provider;
+            cfg.shell.dashboard_provider = matching_provider;
+            cfg.shell.bar_provider = matching_provider;
+            cfg.shell.notifications_provider = matching_provider;
+            cfg.shell.osd_provider = matching_provider;
             cfg.performance.profile = profile;
         })?;
+        Self::sync_noctalia_state_file(state.desired_engine, matching_provider);
         // Config is authoritative; a diagnostic mirror failure must not undo a
         // successful transition or make the watchdog rewrite the configuration.
         if let Err(e) = solar_common::persistence::atomic_write(
@@ -102,6 +113,77 @@ impl SolarShellSupervisor {
             warn!("Could not update diagnostic shell state: {e}");
         }
         Ok(())
+    }
+
+    fn sync_noctalia_state_file(engine: ShellEngine, provider: solar_common::SurfaceProvider) {
+        let Ok(home) = std::env::var("HOME") else {
+            return;
+        };
+        let path = PathBuf::from(home).join(".local/state/noctalia/settings.toml");
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(mut doc) = content.parse::<toml::Value>() {
+                if let Some(table) = doc.as_table_mut() {
+                    if !table.contains_key("solarui") {
+                        table.insert(
+                            "solarui".to_string(),
+                            toml::Value::Table(toml::map::Map::new()),
+                        );
+                    }
+                    if let Some(s) = table.get_mut("solarui").and_then(|v| v.as_table_mut()) {
+                        s.insert(
+                            "shell_engine".to_string(),
+                            toml::Value::String(engine.as_str().to_string()),
+                        );
+                        s.insert(
+                            "launcher_provider".to_string(),
+                            toml::Value::String(provider.as_str().to_string()),
+                        );
+                        s.insert(
+                            "dashboard_provider".to_string(),
+                            toml::Value::String(provider.as_str().to_string()),
+                        );
+                    }
+                }
+                if let Ok(serialized) = toml::to_string_pretty(&doc) {
+                    let _ = std::fs::write(&path, serialized);
+                }
+            }
+        }
+    }
+
+    pub fn reconcile_niri_config_symlink() {
+        let Ok(home) = std::env::var("HOME") else {
+            return;
+        };
+        let home_path = PathBuf::from(&home);
+        let solar_cfg = home_path.join(".config/solarui/niri.kdl");
+        let niri_dir = home_path.join(".config/niri");
+        let std_cfg = niri_dir.join("config.kdl");
+
+        if !solar_cfg.exists() {
+            return;
+        }
+
+        if let Ok(meta) = std::fs::symlink_metadata(&std_cfg) {
+            if !meta.file_type().is_symlink() {
+                let std_mtime = meta.modified().ok();
+                let solar_mtime = std::fs::metadata(&solar_cfg).ok().and_then(|m| m.modified().ok());
+                if let (Some(n_time), Some(s_time)) = (std_mtime, solar_mtime) {
+                    if n_time > s_time {
+                        info!("Detected user edit to ~/.config/niri/config.kdl; syncing to ~/.config/solarui/niri.kdl");
+                        let _ = std::fs::copy(&std_cfg, &solar_cfg);
+                        let _ = std::process::Command::new("niri")
+                            .args(["msg", "action", "load-config-file"])
+                            .status();
+                    }
+                }
+                let _ = std::fs::remove_file(&std_cfg);
+                let _ = std::os::unix::fs::symlink("../solarui/niri.kdl", &std_cfg);
+            }
+        } else {
+            let _ = std::fs::create_dir_all(&niri_dir);
+            let _ = std::os::unix::fs::symlink("../solarui/niri.kdl", &std_cfg);
+        }
     }
 
     pub fn is_reconciled(desired: ShellEngine, actual: &ActualEngine) -> bool {
@@ -128,6 +210,7 @@ impl SolarShellSupervisor {
     }
 
     pub async fn reconcile(&self) -> Result<()> {
+        Self::reconcile_niri_config_symlink();
         let desired = self.load_desired_state()?;
         let actual = self.detect_actual_engine().await;
         if Self::is_reconciled(desired.desired_engine, &actual) {
@@ -138,7 +221,16 @@ impl SolarShellSupervisor {
 
     pub fn is_gamezone_active() -> bool {
         let runtime_lock = solar_common::get_solar_runtime_dir().join("gamezone-active.lock");
-        runtime_lock.exists() || std::path::Path::new("/tmp/solar-gamezone-active.lock").exists()
+        if let Ok(raw_pid) = std::fs::read_to_string(&runtime_lock) {
+            if let Ok(pid) = raw_pid.trim().parse::<u32>() {
+                if pid > 1 && std::path::Path::new(&format!("/proc/{}/stat", pid)).exists() {
+                    return true;
+                }
+            }
+            let _ = std::fs::remove_file(&runtime_lock);
+        }
+        let _ = std::fs::remove_file("/tmp/solar-gamezone-active.lock");
+        false
     }
 
     pub fn start_watchdog_loop(self: std::sync::Arc<Self>) -> tokio::task::JoinHandle<()> {

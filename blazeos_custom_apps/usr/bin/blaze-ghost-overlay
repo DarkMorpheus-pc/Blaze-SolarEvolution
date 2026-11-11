@@ -181,9 +181,12 @@ class GhostOverlayApp(Gtk.Application):
             "timestamp_ms": int(time.time() * 1000),
             "event": event_data
         }
-        print(f"[Input Intercept]: {json.dumps(entry)}")
         if self.event_log:
-            with open(self.event_log, "a") as f:
+            log_dir = os.path.dirname(os.path.abspath(self.event_log))
+            if log_dir:
+                os.makedirs(log_dir, mode=0o700, exist_ok=True)
+            fd = os.open(self.event_log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with os.fdopen(fd, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")
 
     def on_click_pressed(self, gesture, n_press, x, y):
@@ -211,14 +214,15 @@ class GhostOverlayApp(Gtk.Application):
         return GLib.SOURCE_REMOVE
 
 def main():
+    default_img = os.path.join(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"), "bctp_ghost_surface.jpg")
     parser = argparse.ArgumentParser(description="Blaze Ghost Surface Overlay")
-    parser.add_argument("--image", default="/tmp/bctp_ghost_surface.jpg", help="Captured JPEG path")
+    parser.add_argument("--image", default=default_img, help="Captured JPEG path")
     parser.add_argument("--epoch", type=int, default=2, help="Fencing Epoch")
     parser.add_argument("--latency", type=float, default=1.2, help="T_ghost latency in ms")
     parser.add_argument("--inputs", type=int, default=0, help="Initial input queue count")
     parser.add_argument("--status", default="syncing", choices=["syncing", "stable", "error"], help="HUD status")
     parser.add_argument("--dismiss-after-ms", type=int, default=0, help="Auto dismiss timer in ms (0 for persistent)")
-    parser.add_argument("--event-log", default="/tmp/bctp_input_events.jsonl", help="Input replay JSON log")
+    parser.add_argument("--event-log", default=None, help="Optional private input replay JSONL path (0600)")
     args = parser.parse_args()
 
     app = GhostOverlayApp(
@@ -230,7 +234,6 @@ def main():
         auto_dismiss_ms=args.dismiss_after_ms,
         event_log=args.event_log
     )
-    chmod_x = os.chmod(sys.argv[0], 0o755)
     return app.run(None)
 
 if __name__ == "__main__":

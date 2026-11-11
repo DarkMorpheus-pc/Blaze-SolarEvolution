@@ -13,7 +13,7 @@ PageBase {
     title: qsTr("SolarUI Engine")
     
     // We can use a Process to check current engine status
-    property string currentEngine: "hybrid"
+    property string currentEngine: "noctalia"
     property bool taskbarEnabled: false
     
     ColumnLayout {
@@ -73,12 +73,12 @@ PageBase {
                 }
             }
             RowButton {
-                text: qsTr("Hybrid (Recommended)")
-                subtext: qsTr("Noctalia top bar & widgets + Caelestia dashboard & launcher.")
-                icon: "join_inner"
-                trailingIcon: root.currentEngine === "hybrid" ? "check_circle" : ""
+                text: qsTr("end4-pC (Material 3 Expressive)")
+                subtext: qsTr("Material 3 Expressive Quickshell desktop shell with rich animations and panels.")
+                icon: "palette"
+                trailingIcon: root.currentEngine === "end4-pc" ? "check_circle" : ""
                 onClicked: {
-                    Quickshell.execDetached(["solar-shell", "switch", "hybrid"]);
+                    Quickshell.execDetached(["solar-shell", "switch", "end4-pc"]);
                     engineStatus.running = true;
                 }
             }

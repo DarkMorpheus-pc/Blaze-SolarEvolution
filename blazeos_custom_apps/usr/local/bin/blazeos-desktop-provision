@@ -237,10 +237,11 @@ if [ -n "$TRY_EXEC" ] && ! command -v "$TRY_EXEC" >/dev/null 2>&1; then
     exit 1
 fi
 
-printf '%s\n' "$SESSION" >/etc/blazeos-selected-session
+SESSION_DESKTOP="$SESSION"
+printf '%s\n' "$SESSION_DESKTOP" >/etc/blazeos-selected-session
 for account in /var/lib/AccountsService/users/*; do
     [ -f "$account" ] || continue
-    session_name=${SESSION%.desktop}
+    session_name=${SESSION_DESKTOP%.desktop}
     if grep -q '^Session=' "$account"; then
         sed -i "s/^Session=.*/Session=$session_name/" "$account"
     else
@@ -257,11 +258,30 @@ for account in /var/lib/AccountsService/users/*; do
         printf 'SessionType=%s\n' "$SESSION_TYPE" >>"$account"
     fi
 done
+
+if [ -f /etc/sddm.conf.d/autologin.conf ]; then
+    if grep -q '^Session=' /etc/sddm.conf.d/autologin.conf; then
+        sed -i "s/^Session=.*/Session=${SESSION_DESKTOP}/" /etc/sddm.conf.d/autologin.conf
+    else
+        printf 'Session=%s\n' "${SESSION_DESKTOP}" >>/etc/sddm.conf.d/autologin.conf
+    fi
+fi
+
 mkdir -p /var/lib/sddm
-cat >/var/lib/sddm/state.conf <<EOF
-[Last]
-Session=$SESSION
-EOF
+LAST_USER=""
+if [ -f /var/lib/sddm/state.conf ]; then
+    LAST_USER=$(sed -n 's/^User=//p' /var/lib/sddm/state.conf | head -n1)
+fi
+if [ -z "$LAST_USER" ] && [ -f /etc/blazeos-setup-completed ]; then
+    LAST_USER=$(sed -n 's/^username=//p' /etc/blazeos-setup-completed | head -n1)
+fi
+{
+    printf '[Last]\nSession=%s\n' "$SESSION_DESKTOP"
+    if [ -n "$LAST_USER" ]; then
+        printf 'User=%s\n' "$LAST_USER"
+    fi
+} >/var/lib/sddm/state.conf
+
 if [ "$REMOVE_SOLARUI" = yes ]; then /usr/local/bin/blazeos-remove-solarui; fi
 
 case "$DESKTOP" in
@@ -276,12 +296,12 @@ systemctl disable blazeos-desktop-provision.service 2>/dev/null || true
 logger -t blazeos "Desktop preparation completed: $DESKTOP ($PROFILE)"
 echo "Desktop preparation completed. It will be selected at the next login."
 
-# If SDDM greeter is currently on screen without a logged-in human user, restart SDDM
-# so the new desktop session appears in the session list immediately without rebooting
-if [ "${BLAZEOS_FORCE_PROVISION:-0}" != 1 ]; then
+# If SDDM greeter is currently on screen without a logged-in human user (and OOBE is already complete),
+# restart SDDM so the new desktop session appears in the session list immediately without rebooting.
+if [ "${BLAZEOS_FORCE_PROVISION:-0}" != 1 ] && [ -f /etc/blazeos-setup-completed ]; then
     has_active_user=0
     for uid in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}'); do
-        if [ -n "$uid" ] && [ "$uid" -ge 1000 ] && [ "$uid" -lt 65534 ]; then
+        if [ -n "$uid" ] && { [ "$uid" -eq 961 ] || { [ "$uid" -ge 1000 ] && [ "$uid" -lt 65534 ]; }; }; then
             has_active_user=1
             break
         fi

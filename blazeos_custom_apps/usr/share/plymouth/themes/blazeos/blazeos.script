@@ -18,11 +18,14 @@ subtitle = Sprite();
 percent = Sprite();
 message = Sprite();
 security_footer = Sprite();
+prompt_sprite = Sprite();
+bullets_sprite = Sprite();
 track_image = Image("progress-track.png");
 fill_image = Image("progress-fill.png");
 track = Sprite();
 fill = Sprite();
 update_progress = 0;
+is_password_prompt = 0;
 
 fun center_text(sprite, image, y, z) {
     sprite.SetImage(image);
@@ -58,7 +61,11 @@ fun layout() {
         center_text(security_footer, security_image, sh - 64, 4);
     } else {
         logo.SetImage(logo_image);
-        logo.SetPosition((sw - lw) / 2 + 24, (sh - lh) / 2, 1);
+        if (is_password_prompt) {
+            logo.SetPosition((sw - lw) / 2 + 24, (sh - lh) / 2 - 48, 1);
+        } else {
+            logo.SetPosition((sw - lw) / 2 + 24, (sh - lh) / 2, 1);
+        }
         title.SetOpacity(0.0);
         subtitle.SetOpacity(0.0);
         percent.SetOpacity(0.0);
@@ -87,6 +94,9 @@ fun refresh_callback() { layout(); }
 Plymouth.SetRefreshFunction(refresh_callback);
 
 fun display_normal_callback() {
+    is_password_prompt = 0;
+    prompt_sprite.SetOpacity(0.0);
+    bullets_sprite.SetOpacity(0.0);
     logo.SetOpacity(1.0);
     layout();
 }
@@ -108,6 +118,7 @@ fun hide_message_callback(text) { message.SetOpacity(0.0); }
 Plymouth.SetHideMessageFunction(hide_message_callback);
 
 fun quit_callback() {
+    is_password_prompt = 0;
     logo.SetOpacity(0.0);
     title.SetOpacity(0.0);
     subtitle.SetOpacity(0.0);
@@ -116,12 +127,60 @@ fun quit_callback() {
     fill.SetOpacity(0.0);
     message.SetOpacity(0.0);
     security_footer.SetOpacity(0.0);
+    prompt_sprite.SetOpacity(0.0);
+    bullets_sprite.SetOpacity(0.0);
 }
 Plymouth.SetQuitFunction(quit_callback);
 
-fun display_password_callback(prompt, bullets) {}
+fun display_password_callback(prompt, bullets) {
+    is_password_prompt = 1;
+    sw = Window.GetWidth();
+    sh = Window.GetHeight();
+    logo.SetImage(logo_image);
+    logo.SetPosition((sw - lw) / 2 + 24, (sh - lh) / 2 - 48, 1);
+    logo.SetOpacity(1.0);
+
+    prompt_text = prompt;
+    if (!prompt_text || prompt_text == "") {
+        prompt_text = "Disk sifreleme parolasini girin:";
+    }
+    prompt_img = Image.Text(prompt_text, 0.92, 0.94, 0.98);
+    center_text(prompt_sprite, prompt_img, sh / 2 + lh / 2 - 16, 5);
+    prompt_sprite.SetOpacity(1.0);
+
+    bullet_str = "";
+    for (i = 0; i < bullets; i++) {
+        bullet_str += "* ";
+    }
+    if (bullets == 0) {
+        bullet_str = "_";
+    }
+    bullets_img = Image.Text(bullet_str, 1.0, 0.78, 0.22);
+    center_text(bullets_sprite, bullets_img, sh / 2 + lh / 2 + 18, 5);
+    bullets_sprite.SetOpacity(1.0);
+}
 Plymouth.SetDisplayPasswordFunction(display_password_callback);
-fun display_question_callback(prompt, entry) {}
+
+fun display_question_callback(prompt, entry) {
+    is_password_prompt = 1;
+    sw = Window.GetWidth();
+    sh = Window.GetHeight();
+    logo.SetImage(logo_image);
+    logo.SetPosition((sw - lw) / 2 + 24, (sh - lh) / 2 - 48, 1);
+    logo.SetOpacity(1.0);
+
+    prompt_img = Image.Text(prompt, 0.92, 0.94, 0.98);
+    center_text(prompt_sprite, prompt_img, sh / 2 + lh / 2 - 16, 5);
+    prompt_sprite.SetOpacity(1.0);
+
+    entry_text = entry;
+    if (!entry_text || entry_text == "") {
+        entry_text = "_";
+    }
+    entry_img = Image.Text(entry_text, 1.0, 0.78, 0.22);
+    center_text(bullets_sprite, entry_img, sh / 2 + lh / 2 + 18, 5);
+    bullets_sprite.SetOpacity(1.0);
+}
 Plymouth.SetDisplayQuestionFunction(display_question_callback);
 
 layout();

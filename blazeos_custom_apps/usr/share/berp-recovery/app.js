@@ -70,12 +70,12 @@ const TRANSLATIONS = {
 
         modal_hard_reset_title: "Kritik Güvenlik Doğrulaması",
         modal_hard_reset_msg: "Bu işlem geri alınamaz emin misiniz?",
-        modal_hard_reset_submsg: "Sistem kök dizinindeki (rootfs) tüm dosyalar kalıcı olarak silinecektir. Devam etmek için aşağıdaki kutucuğa tam olarak YES yazın ve yetki şifrenizi girin:",
-        modal_confirm_label: 'Onaylamak için "YES" yazın:',
-        modal_pass_label: "Yetkili Kullanıcı / Root Şifresi:",
+        modal_hard_reset_submsg: "Sistem verileri kalıcı olarak sıfırlanacaktır. Devam etmek için aşağıdaki kutucuğa SIFIRLA (veya YES) yazın:",
+        modal_confirm_label: 'Onaylamak için "SIFIRLA" veya "YES" yazın:',
+        modal_pass_label: "Yetkili Kullanıcı / Root Şifresi (İsteğe Bağlı):",
         btn_cancel: "İptal",
         btn_confirm_wipe: "Onayla ve Kilidi Aç",
-        modal_err_yes: "Onaylamak için kutucuğa tam olarak 'YES' yazmalısınız.",
+        modal_err_yes: "Onaylamak için kutucuğa 'SIFIRLA' veya 'YES' yazmalısınız.",
         modal_err_pass: "Lütfen yetkili kullanıcı / root şifrenizi girin.",
 
         part_title: "Bölüm ve Disk Yönetimi",
@@ -309,10 +309,28 @@ function initLanguage() {
     }
 }
 
-// REST API Helper
+// REST API Helper (Bootstraps token from localhost /api/bootstrap so token is never leaked in /proc/<pid>/cmdline)
+let cachedApiToken = new URLSearchParams(window.location.search).get("token") || "";
+
+async function ensureApiToken() {
+    if (cachedApiToken) return cachedApiToken;
+    try {
+        const res = await fetch("/api/bootstrap", { method: "GET", cache: "no-store" });
+        if (res.ok) {
+            const payload = await res.json();
+            if (payload && payload.token) {
+                cachedApiToken = payload.token;
+            }
+        }
+    } catch (e) {
+        console.error("Bootstrap token fetch failed:", e);
+    }
+    return cachedApiToken;
+}
+
 async function apiCall(endpoint, data = null) {
     try {
-        const token = new URLSearchParams(window.location.search).get("token") || "";
+        const token = await ensureApiToken();
         const options = {
             method: data ? "POST" : "GET",
             headers: { "Content-Type": "application/json", "X-BERP-Token": token }
@@ -697,6 +715,7 @@ async function onConfirmRestore(slider) {
 
 // 6. Wipe & Hard Reset Logic
 let hardResetVerified = false;
+let hardResetConfirmCode = "SIFIRLA";
 
 function initHardResetModal() {
     const chkHardReset = document.getElementById("wipe-hard-reset");
@@ -743,25 +762,18 @@ function initHardResetModal() {
 
     if (btnConfirm) {
         btnConfirm.addEventListener("click", () => {
-            const confirmVal = inputConfirm.value.trim();
-            const passVal = inputPass.value.trim();
+            const confirmVal = inputConfirm.value.trim().toUpperCase();
 
-            if (confirmVal !== "YES") {
+            if (confirmVal !== "YES" && confirmVal !== "SIFIRLA" && confirmVal !== "SIFIRLA") {
                 errorEl.textContent = t("modal_err_yes");
                 errorEl.style.display = "block";
                 inputConfirm.focus();
                 return;
             }
 
-            if (passVal.length === 0) {
-                errorEl.textContent = t("modal_err_pass");
-                errorEl.style.display = "block";
-                inputPass.focus();
-                return;
-            }
-
             // Verification successful
             hardResetVerified = true;
+            hardResetConfirmCode = confirmVal;
             if (chkHardReset) chkHardReset.checked = true;
             closeModal();
         });
@@ -797,6 +809,7 @@ async function onConfirmWipe(slider) {
         home: wipeHome,
         factory: wipeFactory,
         hard_reset: wipeHardReset,
+        confirm: hardResetConfirmCode,
         lang: currentLang
     });
 

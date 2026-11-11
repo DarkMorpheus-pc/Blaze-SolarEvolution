@@ -1,2 +1,18 @@
 #!/bin/sh
+case "${XDG_CURRENT_DESKTOP:-}:${DESKTOP_SESSION:-}" in
+    *SolarUI*|*solarui*|*niri*|*Niri*)
+        if [ -x /usr/bin/solar-shell ]; then
+            exec /usr/bin/solar-shell settings "$@"
+        fi
+        if [ -x /usr/bin/solar-settings ]; then
+            exec /usr/bin/solar-settings "$@"
+        fi
+        ;;
+esac
+if [ -x /usr/bin/gnome-control-center ]; then
+    exec /usr/bin/gnome-control-center "$@"
+fi
+if [ -x /usr/bin/solar-shell ]; then
+    exec /usr/bin/solar-shell settings "$@"
+fi
 exec /usr/bin/solar-settings "$@"

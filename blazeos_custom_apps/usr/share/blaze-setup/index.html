@@ -95,6 +95,14 @@
                         </div>
                     </div>
 
+                    <div class="wifi-list-box" id="wifi-networks-box" style="display:none;"></div>
+
+                    <div class="wifi-connect-bar" id="wifi-connect-bar" style="display:none;">
+                        <span class="wifi-connect-ssid" id="wifi-connect-ssid"></span>
+                        <input type="password" class="macos-input" id="wifi-password-input" data-i18n-ph="wifi_pass_ph" placeholder="Wi-Fi parolası" autocomplete="off" />
+                        <button type="button" class="macos-btn btn-primary btn-sm" id="btn-wifi-connect" data-i18n="wifi_connect">Bağlan</button>
+                    </div>
+
                     <div class="offline-choice-card selected" id="offline-option">
                         <div class="radio-details">
                             <span class="option-title" data-i18n="net_offline_title">İnternet bağlantısı olmadan sürdür</span>
@@ -147,7 +155,7 @@
                                     <input type="password" class="macos-input" id="input-password" data-i18n-ph="ph_password" placeholder="yeni parola" autocomplete="new-password" />
                                     <input type="password" class="macos-input" id="input-password-confirm" data-i18n-ph="ph_password_confirm" placeholder="doğrula" autocomplete="new-password" />
                                 </div>
-                                <span class="field-hint" id="password-match-hint" data-i18n="hint_pass_match">Parolalar eşleşiyor.</span>
+                                <span class="field-hint" id="password-match-hint" data-i18n="hint_pass_set">Parola belirleyin.</span>
                             </div>
                         </div>
                         <div class="form-row">
@@ -157,7 +165,7 @@
                                     <input type="password" class="macos-input" id="input-root-password" data-i18n-ph="ph_root_password" placeholder="isteğe bağlı" autocomplete="new-password" />
                                     <input type="password" class="macos-input" id="input-root-password-confirm" data-i18n-ph="ph_root_password_confirm" placeholder="doğrula" autocomplete="new-password" />
                                 </div>
-                                <span class="field-hint" data-i18n="hint_root_password">Boş bırakırsanız otomatik olarak blazeroot atanır.</span>
+                                <span class="field-hint" data-i18n="hint_root_password">Boş bırakırsanız root hesabı güvenlik için kilitli kalır (sudo yetkiniz çalışır).</span>
                             </div>
                         </div>
                         <div class="form-row">

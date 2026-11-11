@@ -84,6 +84,9 @@ impl CaelestiaProvider {
         if let Ok(s) = std::env::var("XDG_RUNTIME_DIR") {
             cmd.env("XDG_RUNTIME_DIR", s);
         }
+        if let Ok(sock) = solar_niri::find_niri_socket() {
+            cmd.env("NIRI_SOCKET", sock);
+        }
 
         cmd
     }

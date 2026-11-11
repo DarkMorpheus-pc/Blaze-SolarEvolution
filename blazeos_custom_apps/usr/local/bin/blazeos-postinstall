@@ -42,12 +42,6 @@ if [ ! -f /etc/blazeos-setup-completed ]; then
     systemctl set-default graphical.target 2>/dev/null || true
     systemctl enable sddm.service 2>/dev/null || true
 
-    # If the system is currently in or headed to multi-user.target, switch to graphical.target immediately
-    if ! systemctl is-active --quiet graphical.target; then
-        echo "Activating graphical.target for OOBE..."
-        systemctl isolate --no-block graphical.target 2>/dev/null || systemctl start --no-block sddm.service 2>/dev/null || true
-    fi
-
     echo "=== OOBE Firstboot Preparation Complete ==="
     exit 0
 fi
@@ -142,9 +136,10 @@ ASCEOF
         chmod 0600 "/var/lib/AccountsService/users/$user"
         chown root:root "/var/lib/AccountsService/users/$user"
 
-        for g in wheel video audio render input; do
+        for g in video audio render; do
             usermod -aG "$g" "$user" 2>/dev/null || true
         done
+        gpasswd -d "$user" input 2>/dev/null || true
 
         if [ -d "$home" ]; then
             mkdir -p "$home/.config/solarui" "$home/.config/noctalia"
@@ -166,6 +161,22 @@ ASCEOF
         fi
     fi
 done < /etc/passwd
+
+# Ensure at least one human administrator exists if none is currently in wheel
+if [ -n "$FIRST_HUMAN_USER" ]; then
+    WHEEL_MEMBERS=$(getent group wheel 2>/dev/null | cut -d: -f4 | tr ',' ' ')
+    HAS_HUMAN_ADMIN=0
+    for m in $WHEEL_MEMBERS; do
+        m_uid=$(id -u "$m" 2>/dev/null || echo 0)
+        if [ "$m_uid" -ge 1000 ] && [ "$m_uid" -lt 65534 ]; then
+            HAS_HUMAN_ADMIN=1
+            break
+        fi
+    done
+    if [ "$HAS_HUMAN_ADMIN" -eq 0 ]; then
+        usermod -aG wheel "$FIRST_HUMAN_USER" 2>/dev/null || true
+    fi
+fi
 
 # 4. Synchronize the session selected by the non-blocking desktop provisioner.
 # Package downloads are owned by blazeos-desktop-provision.service and must

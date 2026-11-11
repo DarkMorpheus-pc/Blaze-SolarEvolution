@@ -17,6 +17,9 @@ pub mod welcome_gui;
 pub mod delight;
 pub mod omnibar;
 pub mod gamezone_gui;
+pub mod gamezone_live;
+pub mod installer_gui;
+pub mod living_flow;
 
 use anyhow::Result;
 use apps::scan_desktop_applications;
@@ -96,6 +99,13 @@ async fn main() -> Result<()> {
         }
     }
 
+    // Ensure NIRI_SOCKET is resolved from XDG_RUNTIME_DIR if missing
+    if std::env::var("NIRI_SOCKET").is_err() {
+        if let Ok(sock) = solar_niri::find_niri_socket() {
+            std::env::set_var("NIRI_SOCKET", sock);
+        }
+    }
+
     let args: Vec<String> = std::env::args().collect();
     let bin_name = args.first().map(|s| s.as_str()).unwrap_or("");
     let default_cmd = if bin_name.ends_with("solar-settings") {
@@ -104,6 +114,8 @@ async fn main() -> Result<()> {
         "gamezone"
     } else if bin_name.ends_with("solar-omnibar") || bin_name.ends_with("omnibar") {
         "omnibar"
+    } else if bin_name.ends_with("solar-installer-gui") || bin_name.ends_with("blaze-installer") {
+        "installer"
     } else {
         "run"
     };
@@ -262,7 +274,69 @@ async fn main() -> Result<()> {
             });
             Ok(())
         }
+        "installer" | "install-os" => {
+            info!("Launching BlazeOS Solar Native Disk Installer Wizard...");
+            tokio::task::block_in_place(|| {
+                installer_gui::launch_installer_window();
+            });
+            Ok(())
+        }
         "omnibar" | "spotlight" | "launcher" => {
+            supervisor::SolarShellSupervisor::reconcile_niri_config_symlink();
+            let sub = args.get(2).map(|s| s.as_str()).unwrap_or("");
+            match sub {
+                "disable" | "off" | "false" => {
+                    let _ = SolarConfig::update(|c| {
+                        c.omnibar.enabled = false;
+                        c.omnibar.override_shell_launcher = false;
+                    });
+                    // Close any running omnibar instance
+                    let _ = omnibar::close_running_omnibar();
+                    println!("SolarUI Omnibar devre dışı bırakıldı. Super+Boşluk artık aktif kabuğun kendi başlatıcısını açacak.");
+                    return Ok(());
+                }
+                "enable" | "on" | "true" => {
+                    let _ = SolarConfig::update(|c| {
+                        c.omnibar.enabled = true;
+                    });
+                    println!("SolarUI Omnibar etkinleştirildi.");
+                    return Ok(());
+                }
+                "status" | "get" => {
+                    let cfg = SolarConfig::load();
+                    println!(
+                        "enabled={} override_shell_launcher={}",
+                        cfg.omnibar.enabled, cfg.omnibar.override_shell_launcher
+                    );
+                    return Ok(());
+                }
+                _ => {}
+            }
+
+            let force = sub == "--force" || sub == "-f";
+
+            // Toggle behavior: if Omnibar is already open, close it and return
+            if omnibar::close_running_omnibar() {
+                info!("SolarUI Omnibar was already open; toggled closed.");
+                return Ok(());
+            }
+
+            let cfg = SolarConfig::load();
+            let should_route_to_shell_launcher = !force
+                && (!cfg.omnibar.enabled
+                    || (cfg.shell.engine != engine::ShellEngine::Noctalia
+                        && !cfg.omnibar.override_shell_launcher));
+
+            if should_route_to_shell_launcher {
+                info!(
+                    "Routing launcher shortcut to active shell ({:?}) instead of Omnibar (omnibar.enabled={}, override_shell_launcher={})",
+                    cfg.shell.engine, cfg.omnibar.enabled, cfg.omnibar.override_shell_launcher
+                );
+                let router = router::SolarSurfaceRouter::new();
+                router.route(actions::ShellAction::Launcher, &cfg.shell).await?;
+                return Ok(());
+            }
+
             info!("Launching SolarUI Omnibar Command Hub...");
             tokio::task::block_in_place(|| {
                 omnibar::launch_omnibar_window();
@@ -488,8 +562,7 @@ async fn run_gamezone_shell_session() -> Result<()> {
     let lock_file = runtime_dir.join("gamezone-active.lock");
 
     let _ = std::fs::write(&prev_shell_file, prev_engine.as_str());
-    let _ = std::fs::write(&lock_file, "1");
-    let _ = std::fs::write("/tmp/solar-gamezone-active.lock", "1");
+    let _ = std::fs::write(&lock_file, std::process::id().to_string());
 
     info!(
         "GameZone kabuk oturumu başlatıldı. Önceki masaüstü motoru kaydedildi: {:?}. Arka plan kabukları askıya alınıyor...",

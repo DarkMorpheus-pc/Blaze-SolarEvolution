@@ -11,10 +11,23 @@ use crossterm::{
     style::{Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor},
     terminal::{self, Clear, ClearType},
 };
+use std::collections::HashSet;
 use std::fs;
 use std::io::{stdout, Write};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+pub const BERP_VERSION: &str = "5.05";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecoveryReason {
+    Normal,
+    BootFailure,
+    SentinelAlert,
+    ManualTrigger,
+    KernelCmdline,
+}
 
 #[derive(Debug, Clone)]
 pub struct SnapshotEntry {
@@ -28,6 +41,8 @@ pub struct SnapshotEntry {
 #[derive(Debug, Clone)]
 pub struct PreservedFolder {
     pub name: String,
+    pub username: String,
+    pub folder_name: String,
     pub path: PathBuf,
     pub size_human: String,
     pub selected: bool,
@@ -36,8 +51,10 @@ pub struct PreservedFolder {
 pub struct BerpApp {
     pub root_btrfs: bool,
     pub root_uuid: String,
+    pub active_subvol: String,
     pub boot_counter: u32,
     pub recovery_requested: bool,
+    pub recovery_reason: RecoveryReason,
     pub snapshots: Vec<SnapshotEntry>,
     pub preserved_folders: Vec<PreservedFolder>,
 }
@@ -56,16 +73,222 @@ pub fn remount_filesystems_rw() {
     }
 }
 
+/// Strips Btrfs subvolume suffix `[...]` from `findmnt -n -o SOURCE /` output,
+/// e.g. `/dev/sda3[/root]` -> `/dev/sda3`.
+pub fn strip_btrfs_subvol_suffix(dev: &str) -> String {
+    dev.split('[').next().unwrap_or("").trim().to_string()
+}
+
+/// Normalizes a subvolume path from `btrfs subvolume list /` relative to the active FSROOT.
+pub fn normalize_subvol_snapshot_path(raw_subvol_path: &str, active_fsroot: &str) -> Option<PathBuf> {
+    let trimmed = raw_subvol_path.trim().trim_start_matches('/');
+    if trimmed.is_empty() {
+        return None;
+    }
+    let fsroot_clean = active_fsroot.trim().trim_start_matches('/').trim_end_matches('/');
+    let rel = if !fsroot_clean.is_empty() {
+        let prefix = format!("{}/", fsroot_clean);
+        trimmed.strip_prefix(&prefix).unwrap_or(trimmed)
+    } else {
+        trimmed
+    };
+
+    // Never include container roots or /home snapshots in root rollback targets
+    if rel == ".snapshots"
+        || rel == ".blaze-snapshots"
+        || rel == "home"
+        || rel == "home/.snapshots"
+        || rel.starts_with("home/.snapshots/")
+        || rel.ends_with("_home")
+    {
+        return None;
+    }
+
+    if rel.starts_with(".snapshots/")
+        || rel.starts_with(".blaze-snapshots/")
+        || rel.starts_with("@snapshots/")
+        || rel.contains("snapshot")
+    {
+        Some(PathBuf::from(format!("/{}", rel)))
+    } else {
+        None
+    }
+}
+
+pub fn detect_active_root_subvol() -> String {
+    if let Ok(out) = Command::new("findmnt").args(["-n", "-o", "FSROOT", "/"]).output() {
+        if out.status.success() {
+            let fsroot = String::from_utf8_lossy(&out.stdout)
+                .trim()
+                .trim_start_matches('/')
+                .to_string();
+            if !fsroot.is_empty() {
+                return fsroot;
+            }
+        }
+    }
+    if let Ok(out) = Command::new("findmnt").args(["-n", "-o", "OPTIONS", "/"]).output() {
+        if out.status.success() {
+            let opts = String::from_utf8_lossy(&out.stdout);
+            for opt in opts.trim().split(',') {
+                if let Some(sub) = opt.strip_prefix("subvol=") {
+                    let clean = sub.trim_start_matches('/').to_string();
+                    if !clean.is_empty() {
+                        return clean;
+                    }
+                }
+            }
+        }
+    }
+    "root".to_string()
+}
+
+pub fn discover_snapshots(root_btrfs: bool, active_subvol: &str) -> Vec<SnapshotEntry> {
+    let mut list = Vec::new();
+    let mut seen_paths: HashSet<PathBuf> = HashSet::new();
+
+    // 1. Scan btrfs subvolumes if available
+    if root_btrfs {
+        if let Ok(output) = Command::new("btrfs")
+            .args(["subvolume", "list", "/"])
+            .output()
+        {
+            if output.status.success() {
+                let out_str = String::from_utf8_lossy(&output.stdout);
+                for line in out_str.lines() {
+                    if line.contains("snapshot") || line.contains(".snapshots") || line.contains(".blaze-snapshots") {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 9 {
+                            let id = parts[1].parse::<u64>().unwrap_or(0);
+                            let path_str = if let Some(idx) = line.find(" path ") {
+                                &line[idx + 6..]
+                            } else {
+                                parts[parts.len() - 1]
+                            };
+                            if let Some(norm_path) = normalize_subvol_snapshot_path(path_str, active_subvol) {
+                                let canonical = fs::canonicalize(&norm_path).unwrap_or_else(|_| norm_path.clone());
+                                if seen_paths.insert(canonical) {
+                                    let name = norm_path
+                                        .file_name()
+                                        .map(|s| s.to_string_lossy().to_string())
+                                        .unwrap_or_else(|| norm_path.to_string_lossy().to_string());
+                                    let date_str = fs::metadata(&norm_path)
+                                        .ok()
+                                        .and_then(|m| m.modified().ok())
+                                        .map(|t| {
+                                            let dt: chrono::DateTime<chrono::Local> = t.into();
+                                            dt.format("%Y-%m-%d %H:%M").to_string()
+                                        })
+                                        .unwrap_or_else(|| "Sistem Kaydı".to_string());
+                                    list.push(SnapshotEntry {
+                                        id,
+                                        path: norm_path,
+                                        name: name.clone(),
+                                        date: date_str,
+                                        description: if name.contains("pre-update") || name.contains("dnf") {
+                                            "Güncelleme Öncesi Otomatik Yedek".to_string()
+                                        } else if name.contains("sentinel") {
+                                            "Güvenlik Uyarısı Öncesi Durum".to_string()
+                                        } else if name.contains("golden") || name.contains("factory") {
+                                            "BlazeOS Orijinal Fabrika İmajı".to_string()
+                                        } else {
+                                            "Kullanıcı / Periyodik Snapshot".to_string()
+                                        },
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Scan standard snapshot directories (including /.blaze-snapshots)
+    let search_dirs = [
+        "/.blaze-snapshots",
+        "/.snapshots",
+        "/@snapshots",
+        "/var/snapshots",
+        "/boot/snapshots",
+    ];
+    for sdir in search_dirs {
+        let p = Path::new(sdir);
+        if p.is_dir() {
+            if let Ok(entries) = fs::read_dir(p) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        let fname = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                        if fname.ends_with("_home") {
+                            continue;
+                        }
+                        let canonical = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+                        if seen_paths.insert(canonical) {
+                            let metadata = entry.metadata().ok();
+                            let date_str = metadata
+                                .and_then(|m| m.modified().ok())
+                                .map(|t| {
+                                    let dt: chrono::DateTime<chrono::Local> = t.into();
+                                    dt.format("%Y-%m-%d %H:%M").to_string()
+                                })
+                                .unwrap_or_else(|| "Bilinmiyor".to_string());
+
+                            list.push(SnapshotEntry {
+                                id: list.len() as u64 + 1,
+                                path: path.clone(),
+                                name: fname.clone(),
+                                date: date_str,
+                                description: if fname.contains("golden") || fname.contains("factory") {
+                                    "BlazeOS Orijinal Fabrika İmajı".to_string()
+                                } else {
+                                    "Btrfs Kurtarma Noktası".to_string()
+                                },
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Only include /@golden_rootfs if it actually exists on disk
+    if list.is_empty() && Path::new("/@golden_rootfs").exists() {
+        list.push(SnapshotEntry {
+            id: 1,
+            path: PathBuf::from("/@golden_rootfs"),
+            name: "@golden_rootfs (Fabrika Varsayılanı)".to_string(),
+            date: "Sistem Kurulumu".to_string(),
+            description: "İlk Kurulum Temiz Sistem İmajı".to_string(),
+        });
+    }
+
+    list
+}
+
 impl BerpApp {
     pub fn new() -> Self {
-        remount_filesystems_rw();
+        Self::new_with_remount(true)
+    }
+
+    pub fn new_readonly() -> Self {
+        Self::new_with_remount(false)
+    }
+
+    fn new_with_remount(do_remount: bool) -> Self {
+        if do_remount {
+            remount_filesystems_rw();
+        }
         let (root_btrfs, root_uuid) = detect_root_fs();
-        let (boot_counter, recovery_requested) = check_recovery_triggers();
+        let active_subvol = detect_active_root_subvol();
+        let (boot_counter, recovery_requested, recovery_reason) = detect_recovery_reason();
         let mut app = Self {
             root_btrfs,
             root_uuid,
+            active_subvol,
             boot_counter,
             recovery_requested,
+            recovery_reason,
             snapshots: Vec::new(),
             preserved_folders: Vec::new(),
         };
@@ -75,97 +298,7 @@ impl BerpApp {
     }
 
     pub fn refresh_snapshots(&mut self) {
-        self.snapshots.clear();
-        let mut list = Vec::new();
-
-        // 1. Scan btrfs subvolumes if available
-        if self.root_btrfs {
-            if let Ok(output) = Command::new("btrfs")
-                .args(["subvolume", "list", "/"])
-                .output()
-            {
-                if output.status.success() {
-                    let out_str = String::from_utf8_lossy(&output.stdout);
-                    for line in out_str.lines() {
-                        if line.contains("snapshot") || line.contains(".snapshots") {
-                            let parts: Vec<&str> = line.split_whitespace().collect();
-                            if parts.len() >= 9 {
-                                let id = parts[1].parse::<u64>().unwrap_or(0);
-                                let path_str = parts[parts.len() - 1];
-                                let name = Path::new(path_str)
-                                    .file_name()
-                                    .map(|s| s.to_string_lossy().to_string())
-                                    .unwrap_or_else(|| path_str.to_string());
-                                list.push(SnapshotEntry {
-                                    id,
-                                    path: PathBuf::from(path_str),
-                                    name: name.clone(),
-                                    date: "Sistem Kaydı".to_string(),
-                                    description: if name.contains("pre-update") {
-                                        "Güncelleme Öncesi Otomatik Yedek".to_string()
-                                    } else if name.contains("sentinel") {
-                                        "Güvenlik Uyarısı Öncesi Durum".to_string()
-                                    } else {
-                                        "Kullanıcı / Periyodik Snapshot".to_string()
-                                    },
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 2. Scan standard snapshot directories
-        let search_dirs = ["/.snapshots", "/@snapshots", "/var/snapshots", "/boot/snapshots"];
-        for sdir in search_dirs {
-            let p = Path::new(sdir);
-            if p.is_dir() {
-                if let Ok(entries) = fs::read_dir(p) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.is_dir() {
-                            let fname = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-                            if !list.iter().any(|s| s.path == path) {
-                                let metadata = entry.metadata().ok();
-                                let date_str = metadata
-                                    .and_then(|m| m.modified().ok())
-                                    .map(|t| {
-                                        let dt: chrono::DateTime<chrono::Local> = t.into();
-                                        dt.format("%Y-%m-%d %H:%M").to_string()
-                                    })
-                                    .unwrap_or_else(|| "Bilinmiyor".to_string());
-
-                                list.push(SnapshotEntry {
-                                    id: list.len() as u64 + 1,
-                                    path: path.clone(),
-                                    name: fname.clone(),
-                                    date: date_str,
-                                    description: if fname.contains("golden") {
-                                        "BlazeOS Orijinal Fabrika İmajı".to_string()
-                                    } else {
-                                        "Btrfs Kurtarma Noktası".to_string()
-                                    },
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Always provide at least factory recovery reference if no user snapshots exist
-        if list.is_empty() {
-            list.push(SnapshotEntry {
-                id: 1,
-                path: PathBuf::from("/@golden_rootfs"),
-                name: "@golden_rootfs (Fabrika Varsayılanı)".to_string(),
-                date: "Sistem Kurulumu".to_string(),
-                description: "İlk Kurulum Temiz Sistem İmajı".to_string(),
-            });
-        }
-
-        self.snapshots = list;
+        self.snapshots = discover_snapshots(self.root_btrfs, &self.active_subvol);
     }
 
     pub fn refresh_preserved_folders(&mut self) {
@@ -178,7 +311,12 @@ impl BerpApp {
                 for u in users.flatten() {
                     let upath = u.path();
                     let uname = upath.file_name().unwrap_or_default().to_string_lossy().to_string();
-                    if upath.is_dir() && uname != "lost+found" && uname != "liveuser" {
+                    if upath.is_dir()
+                        && uname != "lost+found"
+                        && uname != "liveuser"
+                        && uname != "blaze-setup"
+                        && uname != "preserved_data"
+                    {
                         let targets = [
                             ("İndirilenler (Downloads)", "Downloads", true),
                             ("İndirilenler (Türkçe)", "İndirilenler", true),
@@ -202,6 +340,8 @@ impl BerpApp {
                                 let size_str = get_folder_size_str(&p);
                                 candidates.push(PreservedFolder {
                                     name: format!("{}: {}", uname, title),
+                                    username: uname.clone(),
+                                    folder_name: sub.to_string(),
                                     path: p,
                                     size_human: size_str,
                                     selected: def_sel,
@@ -216,6 +356,8 @@ impl BerpApp {
         if candidates.is_empty() {
             candidates.push(PreservedFolder {
                 name: "Tüm /home Kullanıcı Alanı".to_string(),
+                username: "shared".to_string(),
+                folder_name: "home".to_string(),
                 path: PathBuf::from("/home"),
                 size_human: get_folder_size_str(Path::new("/home")),
                 selected: true,
@@ -254,30 +396,84 @@ fn detect_root_fs() -> (bool, String) {
     (is_btrfs, uuid)
 }
 
-fn check_recovery_triggers() -> (u32, bool) {
-    let mut counter = 0;
+pub fn detect_recovery_reason() -> (u32, bool, RecoveryReason) {
+    let mut counter: u32 = 0;
     let mut requested = false;
+    let mut reason = RecoveryReason::Normal;
 
-    // Check grubenv if accessible
-    if let Ok(output) = Command::new("grub2-editenv").args(["/boot/grub2/grubenv", "list"]).output() {
-        if output.status.success() {
-            let s = String::from_utf8_lossy(&output.stdout);
-            for line in s.lines() {
-                if line.starts_with("boot_counter=") {
-                    counter = line.split('=').nth(1).unwrap_or("0").parse().unwrap_or(0);
-                }
-                if line.starts_with("blaze_recovery=1") || line.starts_with("blaze_recovery=alert") {
-                    requested = true;
+    // 1. Check grubenv if accessible
+    if Path::new("/boot/grub2/grubenv").exists() {
+        if let Ok(output) = Command::new("grub2-editenv")
+            .args(["/boot/grub2/grubenv", "list"])
+            .output()
+        {
+            if output.status.success() {
+                let s = String::from_utf8_lossy(&output.stdout);
+                for line in s.lines() {
+                    if let Some(val) = line.strip_prefix("boot_counter=") {
+                        counter = val.trim().parse().unwrap_or(0);
+                    }
+                    if line.starts_with("blaze_recovery=alert") {
+                        requested = true;
+                        reason = RecoveryReason::SentinelAlert;
+                    } else if line.starts_with("blaze_recovery=1") {
+                        requested = true;
+                        if reason == RecoveryReason::Normal {
+                            reason = RecoveryReason::ManualTrigger;
+                        }
+                    }
                 }
             }
         }
     }
 
-    if Path::new("/var/run/blaze_recovery_trigger").exists() || Path::new("/run/blaze_recovery_trigger").exists() {
+    // 2. Check /var/lib/blaze/berp-counter
+    if let Ok(cnt_str) = fs::read_to_string("/var/lib/blaze/berp-counter") {
+        if let Ok(berp_cnt) = cnt_str.trim().parse::<u32>() {
+            if berp_cnt > counter {
+                counter = berp_cnt;
+            }
+        }
+    }
+    if counter >= 3 {
         requested = true;
+        reason = RecoveryReason::BootFailure;
     }
 
-    (counter, requested)
+    // 3. Check sentinel & recovery trigger files
+    if Path::new("/etc/blaze_recovery_alert").exists()
+        || Path::new("/run/blaze_recovery_alert").exists()
+    {
+        requested = true;
+        reason = RecoveryReason::SentinelAlert;
+    }
+
+    if Path::new("/var/run/blaze_recovery_trigger").exists()
+        || Path::new("/run/blaze_recovery_trigger").exists()
+        || Path::new("/var/lib/blaze/berp-trigger").exists()
+        || Path::new("/boot/bere/recovery_triggered").exists()
+    {
+        requested = true;
+        if reason == RecoveryReason::Normal {
+            reason = RecoveryReason::ManualTrigger;
+        }
+    }
+
+    // 4. Check /proc/cmdline for berp.mode=recovery
+    if let Ok(cmdline) = fs::read_to_string("/proc/cmdline") {
+        if cmdline.split_whitespace().any(|tok| {
+            tok == "berp.mode=recovery"
+                || tok == "systemd.unit=blaze-recovery.target"
+                || tok == "systemd.unit=blaze-recovery-gui.target"
+        }) {
+            requested = true;
+            if reason == RecoveryReason::Normal {
+                reason = RecoveryReason::KernelCmdline;
+            }
+        }
+    }
+
+    (counter, requested, reason)
 }
 
 fn get_folder_size_str(path: &Path) -> String {
@@ -347,16 +543,25 @@ pub fn run_plain_text_menu(app: &mut BerpApp) -> Result<()> {
                 println!("UYARI: Tüm veriler silinecektir! Onaylamak için SIFIRLA yazın:");
                 let mut c = String::new();
                 std::io::stdin().read_line(&mut c)?;
-                if c.trim().to_uppercase() == "SIFIRLA" {
-                    clear_boot_triggers();
+                let trimmed = c.trim().to_lowercase();
+                if trimmed == "sifirla" || trimmed == "sıfırla" || trimmed == "reset" {
+                    println!("Fabrika ayarlarına sıfırlama başlatılıyor...");
+                    execute_factory_reset_core()?;
                     println!("Sistem sıfırlandı. Yeniden başlatılıyor...");
                     do_reboot()?;
                     break;
+                } else {
+                    println!("Hatalı onay kelimesi. İşlem iptal edildi.");
                 }
             }
             "4" => {
-                println!("Donanım taranıyor...");
-                let _ = Command::new("lsblk").status();
+                println!("Donanım ve dosya sistemi taranıyor...");
+                let _ = Command::new("lsblk").args(["-d", "-o", "NAME,SIZE,MODEL,TYPE"]).status();
+                if app.root_btrfs {
+                    let _ = Command::new("btrfs").args(["device", "stats", "/"]).status();
+                    let _ = Command::new("btrfs").args(["scrub", "status", "/"]).status();
+                }
+                let _ = Command::new("blaze-sentinel").arg("status").status();
             }
             "5" => {
                 handle_emergency_shell()?;
@@ -500,14 +705,15 @@ fn render_main_screen(
         SetForegroundColor(Color::White),
         Print("  [ Sistem Durumu ]\r\n"),
         SetForegroundColor(Color::DarkCyan),
-        Print(format!("    * Kök Bölümü:        UUID={}\r\n", app.root_uuid)),
+        Print(format!("    * Kök Bölümü:        UUID={} (subvol={})\r\n", app.root_uuid, app.active_subvol)),
         Print(format!(
             "    * Dosya Sistemi:     {} (CoW & Snapshot Desteği)\r\n",
             if app.root_btrfs { "Btrfs Aktif" } else { "Standart Linux Dosya Sistemi" }
         )),
         Print(format!(
-            "    * Önyükleme Durumu:  {} | Başarısız Sayaç: {}\r\n",
+            "    * Önyükleme Durumu:  {} ({:?}) | Başarısız Sayaç: {}\r\n",
             if app.recovery_requested { "ACİL KURTARMA TETİKLENDİ" } else { "Normal" },
+            app.recovery_reason,
             app.boot_counter
         )),
         Print(format!("    * Bulunan Snapshot:  {} adet kayıtlı durum\r\n\r\n", app.snapshots.len())),
@@ -624,7 +830,9 @@ fn handle_time_machine(app: &mut BerpApp) -> Result<()> {
                     sel = sel.saturating_sub(1);
                 }
                 KeyCode::Down => {
-                    if sel + 1 < app.snapshots.len() { sel += 1; }
+                    if sel + 1 < app.snapshots.len() {
+                        sel += 1;
+                    }
                 }
                 KeyCode::Esc => return Ok(()),
                 KeyCode::Enter => {
@@ -632,6 +840,61 @@ fn handle_time_machine(app: &mut BerpApp) -> Result<()> {
                     return execute_snapshot_rollback(target);
                 }
                 _ => {}
+            }
+        }
+    }
+}
+
+/// Resolves the snapshot source path inside `top_mount` after `active_subvol` was renamed to `old_subvol_name`.
+pub fn resolve_btrfs_snapshot_source(
+    top_mount: &Path,
+    active_subvol: &str,
+    old_subvol_path: &Path,
+    snap_path: &Path,
+) -> PathBuf {
+    let snap_rel = snap_path.to_string_lossy().trim_start_matches('/').to_string();
+    let stripped_rel = snap_rel
+        .strip_prefix(&format!("{}/", active_subvol))
+        .unwrap_or(&snap_rel);
+
+    let candidates = [
+        old_subvol_path.join(stripped_rel),
+        old_subvol_path.join(&snap_rel),
+        top_mount.join(&snap_rel),
+        top_mount.join(stripped_rel),
+        snap_path.to_path_buf(),
+    ];
+
+    for c in &candidates {
+        if c.exists() {
+            return c.clone();
+        }
+    }
+    candidates[0].clone()
+}
+
+/// Moves nested `.snapshots` and `.blaze-snapshots` subvolumes or directories from `old_subvol_path`
+/// into the newly restored `target_subvol` so snapshots are preserved after rollback.
+pub fn preserve_nested_snapshot_containers(old_subvol_path: &Path, target_subvol: &Path) {
+    for nested_name in [".blaze-snapshots", ".snapshots"] {
+        let old_nested = old_subvol_path.join(nested_name);
+        let new_nested = target_subvol.join(nested_name);
+        if !old_nested.exists() {
+            continue;
+        }
+        // When a Btrfs snapshot is created, nested subvolumes appear as empty stub directories
+        // in the new snapshot. Remove the empty stub directory and move the real nested subvolume/dir.
+        if new_nested.exists() {
+            let _ = fs::remove_dir(&new_nested);
+        }
+        if !new_nested.exists() {
+            let _ = fs::rename(&old_nested, &new_nested);
+        } else if let Ok(entries) = fs::read_dir(&old_nested) {
+            for entry in entries.flatten() {
+                let dest = new_nested.join(entry.file_name());
+                if !dest.exists() {
+                    let _ = fs::rename(entry.path(), dest);
+                }
             }
         }
     }
@@ -645,7 +908,10 @@ fn execute_snapshot_rollback(snap: &SnapshotEntry) -> Result<()> {
         SetForegroundColor(Color::Red),
         Print("  [ ONAY GEREKLİ ]\r\n"),
         SetForegroundColor(Color::White),
-        Print(format!("  Sistem aşağıdaki snapshot durumuna geri döndürülecektir:\r\n    Hedef: {}\r\n    Açıklama: {}\r\n\r\n", snap.name, snap.description)),
+        Print(format!(
+            "  Sistem aşağıdaki snapshot durumuna geri döndürülecektir:\r\n    Hedef: {}\r\n    Açıklama: {}\r\n\r\n",
+            snap.name, snap.description
+        )),
         SetForegroundColor(Color::Yellow),
         Print("  Bu işlem geçerli kök sistemini hedef snapshot ile değiştirecektir.\r\n"),
         Print("  Devam etmek için [E]vet, iptal etmek için [H]ayır basınız: "),
@@ -663,61 +929,119 @@ fn execute_snapshot_rollback(snap: &SnapshotEntry) -> Result<()> {
                     )?;
                     out.flush()?;
 
+                    let snap_str = snap.path.to_string_lossy();
+                    if snap_str.contains("/home/.snapshots") || snap_str.ends_with("_home") {
+                        execute!(
+                            out,
+                            SetForegroundColor(Color::Red),
+                            Print("  [HATA] Kullanıcı (/home) yedeği kök dizine (/) geri yüklenemez!\r\n"),
+                            ResetColor,
+                            Print("\r\n  [Enter] veya [Esc] ile ana menüye dönebilirsiniz...\r\n")
+                        )?;
+                        out.flush()?;
+                        wait_for_escape_or_enter()?;
+                        return Ok(());
+                    }
+
                     remount_filesystems_rw();
 
-                    // 1. Root aygıtını ve dosya sistemi tipini tespit et
                     let (is_btrfs, _) = detect_root_fs();
                     let mut rollback_success = false;
 
                     if is_btrfs {
                         if let Ok(findmnt_out) = Command::new("findmnt").args(["-n", "-o", "SOURCE", "/"]).output() {
-                            let root_dev = String::from_utf8_lossy(&findmnt_out.stdout).trim().to_string();
+                            let raw_dev = String::from_utf8_lossy(&findmnt_out.stdout);
+                            let root_dev = strip_btrfs_subvol_suffix(&raw_dev);
                             if !root_dev.is_empty() {
                                 let top_mount = Path::new("/mnt/bere_btrfs_top");
                                 let _ = fs::create_dir_all(top_mount);
-                                if Command::new("mount").args(["-o", "subvolid=5", &root_dev, "/mnt/bere_btrfs_top"]).status().map(|s| s.success()).unwrap_or(false) {
-                                    let mut target_subvol = top_mount.join("root");
-                                    if !target_subvol.exists() {
-                                        target_subvol = top_mount.join("@");
-                                    }
-                                    if target_subvol.exists() {
-                                        let backup_name = format!("{}.broken.{}", target_subvol.file_name().unwrap_or_default().to_string_lossy(), chrono::Local::now().timestamp());
-                                        let _ = fs::rename(&target_subvol, top_mount.join(backup_name));
-                                    }
+                                if Command::new("mount")
+                                    .args(["-o", "subvolid=5", &root_dev, "/mnt/bere_btrfs_top"])
+                                    .status()
+                                    .map(|s| s.success())
+                                    .unwrap_or(false)
+                                {
+                                    let detected = detect_active_root_subvol();
+                                    let active_subvol = if !detected.contains('/') && top_mount.join(&detected).exists() {
+                                        detected
+                                    } else if top_mount.join("root").exists() {
+                                        "root".to_string()
+                                    } else if top_mount.join("@").exists() {
+                                        "@".to_string()
+                                    } else if top_mount.join("@_active").exists() {
+                                        "@_active".to_string()
+                                    } else {
+                                        "root".to_string()
+                                    };
 
-                                    let snap_rel = snap.path.to_string_lossy().trim_start_matches('/').to_string();
-                                    let mut source_path = top_mount.join(&snap_rel);
-                                    if !source_path.exists() {
-                                        source_path = snap.path.clone();
-                                    }
+                                    let target_subvol = top_mount.join(&active_subvol);
+                                    let ts = chrono::Local::now().timestamp();
+                                    let old_subvol_name = format!("{}_old_{}", active_subvol, ts);
+                                    let old_subvol_path = top_mount.join(&old_subvol_name);
+
+                                    let renamed = if target_subvol.exists() {
+                                        fs::rename(&target_subvol, &old_subvol_path).is_ok()
+                                    } else {
+                                        false
+                                    };
+
+                                    let source_path = resolve_btrfs_snapshot_source(
+                                        top_mount,
+                                        &active_subvol,
+                                        if renamed { &old_subvol_path } else { &target_subvol },
+                                        &snap.path,
+                                    );
 
                                     let snap_status = Command::new("btrfs")
-                                        .args(["subvolume", "snapshot", source_path.to_str().unwrap_or(""), target_subvol.to_str().unwrap_or("")])
+                                        .args([
+                                            "subvolume",
+                                            "snapshot",
+                                            source_path.to_str().unwrap_or(""),
+                                            target_subvol.to_str().unwrap_or(""),
+                                        ])
                                         .status();
 
                                     if snap_status.map(|s| s.success()).unwrap_or(false) {
+                                        // Ensure the restored root subvolume is read-write (ro=false)
+                                        let _ = Command::new("btrfs")
+                                            .args([
+                                                "property",
+                                                "set",
+                                                "-ts",
+                                                target_subvol.to_str().unwrap_or(""),
+                                                "ro",
+                                                "false",
+                                            ])
+                                            .status();
+
+                                        // Preserve nested .snapshots and .blaze-snapshots into the new root subvol
+                                        if renamed {
+                                            preserve_nested_snapshot_containers(&old_subvol_path, &target_subvol);
+                                        }
                                         rollback_success = true;
+                                    } else if renamed && !target_subvol.exists() {
+                                        // Restore original root subvolume on failure
+                                        let _ = fs::rename(&old_subvol_path, &target_subvol);
                                     }
+
                                     let _ = Command::new("umount").arg("/mnt/bere_btrfs_top").status();
                                 }
                             }
-                        }
-
-                        if !rollback_success {
-                            // Fallback subvolume snapshot
-                            let fb_status = Command::new("btrfs")
-                                .args(["subvolume", "snapshot", snap.path.to_str().unwrap_or("/"), "/@_restored_root"])
-                                .status();
-                            rollback_success = fb_status.map(|s| s.success()).unwrap_or(false);
                         }
                     } else {
                         // Ext4 / XFS veya dizin yedeği: rsync ile güvenli eşitleme
                         let rsync_status = Command::new("rsync")
                             .args([
-                                "-aHAX", "--delete",
-                                "--exclude=/boot", "--exclude=/dev", "--exclude=/proc",
-                                "--exclude=/sys", "--exclude=/run", "--exclude=/mnt",
-                                "--exclude=/tmp", "--exclude=/var/tmp",
+                                "-aHAX",
+                                "--delete",
+                                "--exclude=/boot",
+                                "--exclude=/dev",
+                                "--exclude=/proc",
+                                "--exclude=/sys",
+                                "--exclude=/run",
+                                "--exclude=/mnt",
+                                "--exclude=/tmp",
+                                "--exclude=/var/tmp",
                                 &format!("{}/", snap.path.display()),
                                 "/",
                             ])
@@ -729,7 +1053,10 @@ fn execute_snapshot_rollback(snap: &SnapshotEntry) -> Result<()> {
                         execute!(
                             out,
                             SetForegroundColor(Color::Green),
-                            Print(format!("  [BAŞARILI] Sistem '{}' durumuna başarıyla döndürüldü!\r\n", snap.name)),
+                            Print(format!(
+                                "  [BAŞARILI] Sistem '{}' durumuna başarıyla döndürüldü!\r\n",
+                                snap.name
+                            )),
                             Print("  Önyükleme bayrakları temizlendi.\r\n"),
                             ResetColor,
                             Print("\r\n  [Enter] basarak sistemi hemen yeniden başlatabilirsiniz...\r\n")
@@ -752,7 +1079,11 @@ fn execute_snapshot_rollback(snap: &SnapshotEntry) -> Result<()> {
                         return Ok(());
                     }
                 }
-                KeyCode::Char('h') | KeyCode::Char('H') | KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                KeyCode::Char('h')
+                | KeyCode::Char('H')
+                | KeyCode::Char('n')
+                | KeyCode::Char('N')
+                | KeyCode::Esc => {
                     return Ok(());
                 }
                 _ => {}
@@ -790,7 +1121,13 @@ fn handle_preserve_and_reset(app: &mut BerpApp) -> Result<()> {
                     out,
                     SetForegroundColor(Color::Black),
                     SetBackgroundColor(Color::White),
-                    Print(format!("   > {} {:<32} ({}) [{}]\r\n", check, folder.name, folder.size_human, folder.path.display())),
+                    Print(format!(
+                        "   > {} {:<32} ({}) [{}]\r\n",
+                        check,
+                        folder.name,
+                        folder.size_human,
+                        folder.path.display()
+                    )),
                     ResetColor
                 )?;
             } else {
@@ -823,7 +1160,9 @@ fn handle_preserve_and_reset(app: &mut BerpApp) -> Result<()> {
                     sel = sel.saturating_sub(1);
                 }
                 KeyCode::Down => {
-                    if sel + 1 < app.preserved_folders.len() { sel += 1; }
+                    if sel + 1 < app.preserved_folders.len() {
+                        sel += 1;
+                    }
                 }
                 KeyCode::Char(' ') => {
                     app.preserved_folders[sel].selected = !app.preserved_folders[sel].selected;
@@ -844,6 +1183,49 @@ fn handle_preserve_and_reset(app: &mut BerpApp) -> Result<()> {
     }
 }
 
+/// Enforces strict permissions on `/home/preserved_data` (`0755`) and any `.ssh` (`0700`, files `0600`)
+/// or `.gnupg` (`0700`) directories inside it. Never sets `0777`.
+pub fn secure_preserved_data_permissions(dest_preserved: &Path) {
+    if !dest_preserved.exists() {
+        return;
+    }
+    let _ = fs::set_permissions(dest_preserved, fs::Permissions::from_mode(0o755));
+    if let Ok(users) = fs::read_dir(dest_preserved) {
+        for u in users.flatten() {
+            let user_dir = u.path();
+            if user_dir.is_dir() {
+                let _ = fs::set_permissions(&user_dir, fs::Permissions::from_mode(0o755));
+                let ssh_dir = user_dir.join(".ssh");
+                if ssh_dir.is_dir() {
+                    let _ = fs::set_permissions(&ssh_dir, fs::Permissions::from_mode(0o700));
+                    if let Ok(files) = fs::read_dir(&ssh_dir) {
+                        for f in files.flatten() {
+                            let fp = f.path();
+                            if fp.is_file() {
+                                let fname = fp.file_name().unwrap_or_default().to_string_lossy();
+                                let mode = if fname.ends_with(".pub") { 0o644 } else { 0o600 };
+                                let _ = fs::set_permissions(&fp, fs::Permissions::from_mode(mode));
+                            }
+                        }
+                    }
+                }
+                let gnupg_dir = user_dir.join(".gnupg");
+                if gnupg_dir.is_dir() {
+                    let _ = fs::set_permissions(&gnupg_dir, fs::Permissions::from_mode(0o700));
+                    if let Ok(files) = fs::read_dir(&gnupg_dir) {
+                        for f in files.flatten() {
+                            let fp = f.path();
+                            if fp.is_file() {
+                                let _ = fs::set_permissions(&fp, fs::Permissions::from_mode(0o600));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn execute_preserved_reset(folders: &[PreservedFolder]) -> Result<()> {
     let mut out = stdout();
     let selected_count = folders.iter().filter(|f| f.selected).count();
@@ -858,9 +1240,9 @@ fn execute_preserved_reset(folders: &[PreservedFolder]) -> Result<()> {
         SetForegroundColor(Color::White),
         Print(format!("  * Seçilen korunacak klasör sayısı: {}\r\n", selected_count)),
         Print("  * Sistem adımları:\r\n"),
-        Print("     1. Seçilen kullanıcı klasörleri korumalı yedekleme alanına (@preserved_data) alınacak.\r\n"),
+        Print("     1. Seçilen kullanıcı klasörleri korumalı yedekleme alanına (/var/tmp/preserved_stage/<kullanıcı>) alınacak.\r\n"),
         Print("     2. İşletim sistemi kök dizini temiz fabrika durumuna sıfırlanacak.\r\n"),
-        Print("     3. Korunan verileriniz yeni sisteme eksiksiz geri yüklenecek.\r\n"),
+        Print("     3. Korunan verileriniz /home/preserved_data/<kullanıcı>/<klasör> altına güvenli izinlerle geri yüklenecek.\r\n"),
         Print("     4. Kullanıcı yetkileri ve SELinux etiketleri otomatik onarılacak.\r\n\r\n"),
         SetForegroundColor(Color::Yellow),
         Print("  Sıfırlama işlemini başlatmak için [E]vet, vazgeçmek için [H]ayır basınız: "),
@@ -880,14 +1262,22 @@ fn execute_preserved_reset(folders: &[PreservedFolder]) -> Result<()> {
                     out.flush()?;
 
                     let stage_dir = Path::new("/var/tmp/preserved_stage");
+                    let _ = fs::remove_dir_all(stage_dir);
                     let _ = fs::create_dir_all(stage_dir);
+                    let _ = fs::set_permissions(stage_dir, fs::Permissions::from_mode(0o700));
 
                     for folder in folders.iter().filter(|f| f.selected) {
                         execute!(out, Print(format!("         -> Kopyalanıyor: {}\r\n", folder.name)))?;
                         out.flush()?;
-                        let target = stage_dir.join(folder.path.file_name().unwrap_or_default());
+                        let user_stage = stage_dir.join(&folder.username);
+                        let _ = fs::create_dir_all(&user_stage);
+                        let target = user_stage.join(&folder.folder_name);
                         let _ = Command::new("cp")
-                            .args(["-a", folder.path.to_str().unwrap_or(""), target.to_str().unwrap_or("")])
+                            .args([
+                                "-a",
+                                folder.path.to_str().unwrap_or(""),
+                                target.to_str().unwrap_or(""),
+                            ])
                             .status();
                     }
 
@@ -896,13 +1286,7 @@ fn execute_preserved_reset(folders: &[PreservedFolder]) -> Result<()> {
                         Print("  [2/4] İşletim sistemi fabrika durumuna sıfırlanıyor...\r\n")
                     )?;
                     out.flush()?;
-                    let _ = wipe_human_users();
-                    clean_dir_contents(Path::new("/home"));
-                    clean_dir_contents(Path::new("/tmp"));
-                    clean_dir_contents(Path::new("/var/log"));
-                    clean_dir_contents(Path::new("/var/cache/dnf"));
-                    clean_dir_contents(Path::new("/var/cache/flatpak"));
-                    let _ = prepare_oobe_reset();
+                    execute_factory_reset_core()?;
 
                     execute!(
                         out,
@@ -911,11 +1295,12 @@ fn execute_preserved_reset(folders: &[PreservedFolder]) -> Result<()> {
                     out.flush()?;
                     let dest_preserved = Path::new("/home/preserved_data");
                     let _ = fs::create_dir_all(dest_preserved);
+                    let _ = fs::set_permissions(dest_preserved, fs::Permissions::from_mode(0o755));
                     let _ = Command::new("cp")
                         .args(["-a", "/var/tmp/preserved_stage/.", "/home/preserved_data/"])
                         .status();
                     let _ = fs::remove_dir_all("/var/tmp/preserved_stage");
-                    let _ = Command::new("chmod").args(["-R", "777", "/home/preserved_data"]).status();
+                    secure_preserved_data_permissions(dest_preserved);
 
                     execute!(
                         out,
@@ -937,7 +1322,11 @@ fn execute_preserved_reset(folders: &[PreservedFolder]) -> Result<()> {
                     do_reboot()?;
                     return Ok(());
                 }
-                KeyCode::Char('h') | KeyCode::Char('H') | KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                KeyCode::Char('h')
+                | KeyCode::Char('H')
+                | KeyCode::Char('n')
+                | KeyCode::Char('N')
+                | KeyCode::Esc => {
                     return Ok(());
                 }
                 _ => {}
@@ -947,7 +1336,7 @@ fn execute_preserved_reset(folders: &[PreservedFolder]) -> Result<()> {
 }
 
 // -----------------------------------------------------------------------------
-// Submenu: Factory Reset
+// Submenu: Factory Reset & OOBE Restoration
 // -----------------------------------------------------------------------------
 
 fn clean_dir_contents(path: &Path) {
@@ -963,23 +1352,73 @@ fn clean_dir_contents(path: &Path) {
     }
 }
 
-fn wipe_human_users() -> Result<()> {
-    if let Ok(content) = fs::read_to_string("/etc/passwd") {
+fn filter_user_from_colon_file(file_path: &str, users_to_remove: &HashSet<String>) {
+    if let Ok(content) = fs::read_to_string(file_path) {
         let mut filtered = Vec::new();
+        for line in content.lines() {
+            let uname = line.split(':').next().unwrap_or("");
+            if !users_to_remove.contains(uname) {
+                filtered.push(line);
+            }
+        }
+        let _ = fs::write(file_path, filtered.join("\n") + "\n");
+    }
+}
+
+pub fn wipe_human_users() -> Result<()> {
+    let mut human_users = HashSet::new();
+    if let Ok(content) = fs::read_to_string("/etc/passwd") {
         for line in content.lines() {
             let parts: Vec<&str> = line.split(':').collect();
             if parts.len() >= 3 {
                 if let Ok(uid) = parts[2].parse::<u32>() {
                     let user = parts[0];
-                    if (1000..65534).contains(&uid) && user != "liveuser" && user != "blaze-setup" {
-                        continue;
+                    if (1000..60000).contains(&uid)
+                        && user != "nobody"
+                        && user != "nfsnobody"
+                        && user != "liveuser"
+                        && user != "blaze-setup"
+                    {
+                        human_users.insert(user.to_string());
                     }
                 }
             }
-            filtered.push(line);
         }
-        let _ = fs::write("/etc/passwd", filtered.join("\n") + "\n");
     }
+
+    for user in &human_users {
+        let _ = Command::new("userdel").args(["-rf", user]).status();
+        let _ = fs::remove_file(format!("/etc/sudoers.d/{}", user));
+        let _ = fs::remove_file(format!("/var/lib/AccountsService/users/{}", user));
+    }
+
+    if !human_users.is_empty() {
+        for db in [
+            "/etc/passwd",
+            "/etc/shadow",
+            "/etc/group",
+            "/etc/gshadow",
+            "/etc/subuid",
+            "/etc/subgid",
+        ] {
+            filter_user_from_colon_file(db, &human_users);
+        }
+    }
+    Ok(())
+}
+
+pub fn execute_factory_reset_core() -> Result<()> {
+    remount_filesystems_rw();
+    let _ = wipe_human_users();
+    clean_dir_contents(Path::new("/home"));
+    clean_dir_contents(Path::new("/tmp"));
+    clean_dir_contents(Path::new("/var/log"));
+    clean_dir_contents(Path::new("/var/cache/dnf"));
+    clean_dir_contents(Path::new("/var/cache/flatpak"));
+    prepare_oobe_reset()?;
+    let _ = Command::new("restorecon").args(["-Rv", "/home"]).status();
+    let _ = Command::new("sync").status();
+    clear_boot_triggers();
     Ok(())
 }
 
@@ -1015,23 +1454,17 @@ fn handle_factory_reset(_app: &mut BerpApp) -> Result<()> {
                     }
                 }
                 KeyCode::Enter => {
-                    if input.to_lowercase() == "sifirla" || input.to_lowercase() == "sıfırla" || input.to_lowercase() == "reset" {
+                    if input.to_lowercase() == "sifirla"
+                        || input.to_lowercase() == "sıfırla"
+                        || input.to_lowercase() == "reset"
+                    {
                         execute!(
                             out,
                             SetForegroundColor(Color::Red),
                             Print("\r\n\r\n  -> Fabrika ayarlarına sıfırlama işlemi başlatılıyor...\r\n")
                         )?;
                         out.flush()?;
-                        let _ = wipe_human_users();
-                        clean_dir_contents(Path::new("/home"));
-                        clean_dir_contents(Path::new("/tmp"));
-                        clean_dir_contents(Path::new("/var/log"));
-                        clean_dir_contents(Path::new("/var/cache/dnf"));
-                        clean_dir_contents(Path::new("/var/cache/flatpak"));
-                        prepare_oobe_reset()?;
-                        let _ = Command::new("restorecon").args(["-Rv", "/home"]).status();
-                        let _ = Command::new("sync").status();
-                        clear_boot_triggers();
+                        execute_factory_reset_core()?;
                         execute!(
                             out,
                             SetForegroundColor(Color::Green),
@@ -1044,7 +1477,12 @@ fn handle_factory_reset(_app: &mut BerpApp) -> Result<()> {
                         do_reboot()?;
                         return Ok(());
                     } else {
-                        execute!(out, SetForegroundColor(Color::Red), Print("\r\n  Hatalı onay kelimesi. İptal edildi.\r\n"), ResetColor)?;
+                        execute!(
+                            out,
+                            SetForegroundColor(Color::Red),
+                            Print("\r\n  Hatalı onay kelimesi. İptal edildi.\r\n"),
+                            ResetColor
+                        )?;
                         out.flush()?;
                         std::thread::sleep(std::time::Duration::from_millis(1500));
                         return Ok(());
@@ -1061,32 +1499,66 @@ fn handle_factory_reset(_app: &mut BerpApp) -> Result<()> {
     }
 }
 
-/// Return the installed system to the first-boot OOBE instead of merely
-/// printing a success message and rebooting into the existing user session.
-/// Recovery binaries and the BERE/BERP boot entries remain untouched.
-fn prepare_oobe_reset() -> Result<()> {
-    let _ = fs::remove_file("/etc/blazeos-setup-completed");
-    let _ = fs::remove_file("/etc/sddm.conf.d/autologin.conf");
+/// Return the installed system to the first-boot OOBE.
+/// Recreates `/etc/sudoers.d/99-blaze-setup` (`0440`), configures `/etc/sddm.conf.d/autologin.conf`
+/// and `00-blaze-oobe.conf`, and removes firstboot completion markers.
+pub fn prepare_oobe_reset() -> Result<()> {
+    for marker in [
+        "/etc/blazeos-setup-completed",
+        "/etc/blaze-firstboot-done",
+        "/var/lib/solar-firstboot/done",
+    ] {
+        let _ = fs::remove_file(marker);
+    }
+
+    // Ensure sudoers.d rule for blaze-setup with mode 0440
+    let sudoers_dir = Path::new("/etc/sudoers.d");
+    fs::create_dir_all(sudoers_dir)?;
+    let sudoers_file = sudoers_dir.join("99-blaze-setup");
+    fs::write(&sudoers_file, "blaze-setup ALL=(ALL) NOPASSWD: ALL\n")?;
+    let _ = fs::set_permissions(&sudoers_file, fs::Permissions::from_mode(0o440));
+
+    // Configure SDDM autologin to blaze-setup / blaze-oobe.desktop
     let sddm_dir = Path::new("/etc/sddm.conf.d");
     fs::create_dir_all(sddm_dir)?;
-    fs::write(
-        sddm_dir.join("00-blaze-oobe.conf"),
-        "[Autologin]\nUser=blaze-setup\nSession=blaze-oobe\nRelogin=false\n",
-    )?;
+    let autologin_content =
+        "[Autologin]\nUser=blaze-setup\nSession=blaze-oobe.desktop\nRelogin=false\n";
+    fs::write(sddm_dir.join("autologin.conf"), autologin_content)?;
+    fs::write(sddm_dir.join("00-blaze-oobe.conf"), autologin_content)?;
+
     let oobe_template = Path::new("/usr/share/blaze-setup/blaze-oobe.desktop");
     let oobe_session = Path::new("/usr/share/wayland-sessions/blaze-oobe.desktop");
     if oobe_template.is_file() {
+        if let Some(parent) = oobe_session.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
         let _ = fs::copy(oobe_template, oobe_session);
     }
-    if Command::new("id").args(["-u", "blaze-setup"]).status().map(|s| !s.success()).unwrap_or(true) {
-        let _ = Command::new("useradd").args(["--system", "--home-dir", "/var/lib/blaze-setup", "--shell", "/usr/sbin/nologin", "blaze-setup"]).status();
+
+    if Command::new("id")
+        .args(["-u", "blaze-setup"])
+        .status()
+        .map(|s| !s.success())
+        .unwrap_or(true)
+    {
+        let _ = Command::new("useradd")
+            .args([
+                "--system",
+                "--create-home",
+                "--home-dir",
+                "/var/lib/blaze-setup",
+                "--shell",
+                "/bin/bash",
+                "blaze-setup",
+            ])
+            .status();
     }
     let _ = Command::new("systemctl").args(["enable", "sddm.service"]).status();
     Ok(())
 }
 
 // -----------------------------------------------------------------------------
-// Submenu: Diagnostics
+// Submenu: Diagnostics (Real Read-Only Hardware & FS Checks)
 // -----------------------------------------------------------------------------
 
 fn handle_diagnostics(app: &BerpApp) -> Result<()> {
@@ -1098,7 +1570,7 @@ fn handle_diagnostics(app: &BerpApp) -> Result<()> {
         SetBackgroundColor(Color::Blue),
         Print("  === SİSTEM VE DONANIM SAĞLIK TEŞHİSİ ===  \r\n"),
         ResetColor,
-        Print("\r\n  Donanım ve dosya sistemi taranıyor, lütfen bekleyin...\r\n\r\n")
+        Print("\r\n  Donanım, dosya sistemi ve güvenlik durumu gerçek zamanlı taranıyor...\r\n\r\n")
     )?;
     out.flush()?;
 
@@ -1126,40 +1598,103 @@ fn handle_diagnostics(app: &BerpApp) -> Result<()> {
     )?;
     out.flush()?;
 
-    // 2. Storage SMART check
+    // 2. Storage & SMART check
     execute!(
         out,
         SetForegroundColor(Color::Green),
         Print("  [2] Depolama Aygıtları & SMART Durumu:\r\n"),
         SetForegroundColor(Color::White)
     )?;
-    if let Ok(disks) = Command::new("lsblk").args(["-d", "-o", "NAME,SIZE,MODEL,TYPE"]).output() {
+    if let Ok(disks) = Command::new("lsblk")
+        .args(["-d", "-n", "-o", "NAME,SIZE,MODEL,TYPE"])
+        .output()
+    {
         let s = String::from_utf8_lossy(&disks.stdout);
         for line in s.lines() {
-            execute!(out, Print(format!("      {}\r\n", line)))?;
+            execute!(out, Print(format!("      * {}\r\n", line)))?;
+            let dev_name = line.split_whitespace().next().unwrap_or("");
+            if !dev_name.is_empty() && !dev_name.starts_with("loop") && !dev_name.starts_with("zram") {
+                let dev_path = format!("/dev/{}", dev_name);
+                if let Ok(smart) = Command::new("smartctl").args(["-H", &dev_path]).output() {
+                    let smart_out = String::from_utf8_lossy(&smart.stdout);
+                    for sline in smart_out.lines() {
+                        if sline.contains("SMART overall-health") || sline.contains("SMART Health Status") {
+                            execute!(out, Print(format!("        -> {}\r\n", sline.trim())))?;
+                        }
+                    }
+                }
+            }
         }
     }
     execute!(out, Print("\r\n"), ResetColor)?;
     out.flush()?;
 
-    // 3. Btrfs Scrub
+    // 3. Filesystem Check (Btrfs device stats + scrub status, or dumpe2fs on ext4)
     execute!(
         out,
         SetForegroundColor(Color::Green),
-        Print("  [3] Dosya Sistemi Bütünlük Denetimi (Scrub / Check):\r\n"),
+        Print("  [3] Dosya Sistemi Bütünlük Denetimi:\r\n"),
         SetForegroundColor(Color::White)
     )?;
     if app.root_btrfs {
-        execute!(out, Print("      * Btrfs dosya sistemi algılandı: Hata taraması çalıştırıldı: 0 bozuk blok.\r\n"))?;
+        if let Ok(stats) = Command::new("btrfs").args(["device", "stats", "/"]).output() {
+            let stats_str = String::from_utf8_lossy(&stats.stdout);
+            for line in stats_str.lines().take(6) {
+                execute!(out, Print(format!("      * {}\r\n", line)))?;
+            }
+        }
+        if let Ok(scrub) = Command::new("btrfs").args(["scrub", "status", "/"]).output() {
+            let scrub_str = String::from_utf8_lossy(&scrub.stdout);
+            for line in scrub_str.lines().take(4) {
+                execute!(out, Print(format!("      * {}\r\n", line)))?;
+            }
+        }
+    } else if let Ok(findmnt_out) = Command::new("findmnt")
+        .args(["-n", "-o", "FSTYPE,SOURCE", "/"])
+        .output()
+    {
+        let out_str = String::from_utf8_lossy(&findmnt_out.stdout);
+        let parts: Vec<&str> = out_str.split_whitespace().collect();
+        let fstype = parts.first().copied().unwrap_or("unknown");
+        let root_dev = strip_btrfs_subvol_suffix(parts.get(1).copied().unwrap_or(""));
+        execute!(
+            out,
+            Print(format!("      * Kök dosya sistemi: {} ({})\r\n", fstype, root_dev))
+        )?;
+        if fstype == "ext4" && !root_dev.is_empty() {
+            if let Ok(d2fs) = Command::new("dumpe2fs").args(["-h", &root_dev]).output() {
+                let d_str = String::from_utf8_lossy(&d2fs.stdout);
+                for line in d_str.lines() {
+                    if line.starts_with("Filesystem state:") || line.starts_with("Errors behavior:") {
+                        execute!(out, Print(format!("      * {}\r\n", line)))?;
+                    }
+                }
+            }
+        }
+    }
+    execute!(out, Print("\r\n"), ResetColor)?;
+
+    // 4. Blaze Sentinel Security Posture
+    execute!(
+        out,
+        SetForegroundColor(Color::Green),
+        Print("  [4] Blaze Sentinel Güvenlik Durumu:\r\n"),
+        SetForegroundColor(Color::White)
+    )?;
+    if let Ok(sent) = Command::new("blaze-sentinel").arg("status").output() {
+        let s_str = String::from_utf8_lossy(&sent.stdout);
+        for line in s_str.lines() {
+            execute!(out, Print(format!("      {}\r\n", line)))?;
+        }
     } else {
-        execute!(out, Print("      * Standart ext4/xfs dosya sistemi: Bütünlük bayrağı temiz.\r\n"))?;
+        execute!(out, Print("      * blaze-sentinel ikilisi çalıştırılamadı.\r\n"))?;
     }
     execute!(out, Print("\r\n"), ResetColor)?;
 
     execute!(
         out,
         SetForegroundColor(Color::Cyan),
-        Print("  [Teşhis Tamamlandı] Donanım ve dosya sistemi kararlı durumda.\r\n\r\n"),
+        Print("  [Teşhis Tamamlandı]\r\n\r\n"),
         SetForegroundColor(Color::DarkGrey),
         Print("  [Esc / Enter] Ana Menüye Dön\r\n"),
         ResetColor
@@ -1190,21 +1725,42 @@ fn handle_emergency_shell() -> Result<()> {
     Ok(())
 }
 
-fn clear_boot_triggers() {
-    let _ = Command::new("grub2-editenv")
-        .args(["/boot/grub2/grubenv", "set", "boot_counter=0"])
-        .status();
-    let _ = Command::new("grub2-editenv")
-        .args(["/boot/grub2/grubenv", "unset", "blaze_recovery"])
-        .status();
-    let _ = fs::remove_file("/var/run/blaze_recovery_trigger");
-    let _ = fs::remove_file("/run/blaze_recovery_trigger");
+pub fn clear_boot_triggers() {
+    if Path::new("/boot/grub2/grubenv").exists() {
+        let _ = Command::new("grub2-editenv")
+            .args(["/boot/grub2/grubenv", "set", "boot_counter=0"])
+            .status();
+        let _ = Command::new("grub2-editenv")
+            .args(["/boot/grub2/grubenv", "set", "blaze_recovery=-"])
+            .status();
+        let _ = Command::new("grub2-editenv")
+            .args(["/boot/grub2/grubenv", "unset", "blaze_recovery"])
+            .status();
+    }
+
+    for trigger in [
+        "/var/run/blaze_recovery_trigger",
+        "/run/blaze_recovery_trigger",
+        "/var/lib/blaze/berp-trigger",
+        "/boot/bere/recovery_triggered",
+        "/etc/blaze_recovery_alert",
+        "/run/blaze_recovery_alert",
+    ] {
+        let _ = fs::remove_file(trigger);
+    }
+
+    if Path::new("/var/lib/blaze").exists() || Path::new("/var/lib/blaze/berp-counter").exists() {
+        let _ = fs::create_dir_all("/var/lib/blaze");
+        let _ = fs::set_permissions("/var/lib/blaze", fs::Permissions::from_mode(0o700));
+        let _ = fs::write("/var/lib/blaze/berp-counter", "0\n");
+    }
 }
 
 fn do_reboot() -> Result<()> {
+    clear_boot_triggers();
     let mut out = stdout();
-    execute!(out, cursor::Show, terminal::LeaveAlternateScreen)?;
-    terminal::disable_raw_mode()?;
+    let _ = execute!(out, cursor::Show, terminal::LeaveAlternateScreen);
+    let _ = terminal::disable_raw_mode();
     println!("Sistem yeniden başlatılıyor...");
     let _ = Command::new("systemctl").arg("reboot").status();
     let _ = Command::new("reboot").status();
@@ -1212,9 +1768,10 @@ fn do_reboot() -> Result<()> {
 }
 
 fn do_poweroff() -> Result<()> {
+    clear_boot_triggers();
     let mut out = stdout();
-    execute!(out, cursor::Show, terminal::LeaveAlternateScreen)?;
-    terminal::disable_raw_mode()?;
+    let _ = execute!(out, cursor::Show, terminal::LeaveAlternateScreen);
+    let _ = terminal::disable_raw_mode();
     println!("Sistem kapatılıyor...");
     let _ = Command::new("systemctl").arg("poweroff").status();
     let _ = Command::new("poweroff").status();
@@ -1240,28 +1797,77 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() > 1 {
         match args[1].as_str() {
-            "--status" => {
-                let app = BerpApp::new();
-                println!("BERP Status: Btrfs={}, UUID={}, BootCounter={}, RecoveryRequested={}",
-                    app.root_btrfs, app.root_uuid, app.boot_counter, app.recovery_requested);
+            "--version" | "-V" | "version" => {
+                println!("blaze-recovery {}", BERP_VERSION);
                 return Ok(());
             }
-            "--trigger" => {
-                let _ = Command::new("grub2-editenv")
-                    .args(["/boot/grub2/grubenv", "set", "blaze_recovery=alert"])
-                    .status();
-                let _ = fs::write("/var/run/blaze_recovery_trigger", "1");
+            "--status" | "status" => {
+                let app = BerpApp::new_readonly();
+                println!(
+                    "BERP Status: Btrfs={}, Subvol={}, UUID={}, BootCounter={}, RecoveryRequested={}, Reason={:?}, Snapshots={}",
+                    app.root_btrfs,
+                    app.active_subvol,
+                    app.root_uuid,
+                    app.boot_counter,
+                    app.recovery_requested,
+                    app.recovery_reason,
+                    app.snapshots.len()
+                );
+                return Ok(());
+            }
+            "--list-snapshots" | "list-snapshots" => {
+                let app = BerpApp::new_readonly();
+                if app.snapshots.is_empty() {
+                    println!("No snapshots found.");
+                } else {
+                    for s in &app.snapshots {
+                        println!(
+                            "[{}] {} | {} | {} | {}",
+                            s.id,
+                            s.name,
+                            s.path.display(),
+                            s.date,
+                            s.description
+                        );
+                    }
+                }
+                return Ok(());
+            }
+            "--verify" | "verify" => {
+                let app = BerpApp::new_readonly();
+                println!(
+                    "BERP Verify: version={}, root_btrfs={}, active_subvol={}, root_uuid={}, snapshots={}, recovery_reason={:?}",
+                    BERP_VERSION,
+                    app.root_btrfs,
+                    app.active_subvol,
+                    app.root_uuid,
+                    app.snapshots.len(),
+                    app.recovery_reason
+                );
+                return Ok(());
+            }
+            "--trigger" | "trigger" => {
+                if Path::new("/boot/grub2/grubenv").exists() {
+                    let _ = Command::new("grub2-editenv")
+                        .args(["/boot/grub2/grubenv", "set", "blaze_recovery=alert"])
+                        .status();
+                }
+                let _ = fs::write("/var/run/blaze_recovery_trigger", "1\n");
+                if fs::create_dir_all("/var/lib/blaze").is_ok() {
+                    let _ = fs::set_permissions("/var/lib/blaze", fs::Permissions::from_mode(0o700));
+                    let _ = fs::write("/var/lib/blaze/berp-trigger", "1\n");
+                }
                 println!("BERP: Acil kurtarma bir sonraki açılış için tetiklendi.");
                 return Ok(());
             }
-            "--clear-trigger" => {
+            "--clear-trigger" | "clear-trigger" => {
                 clear_boot_triggers();
                 println!("BERP: Kurtarma bayrakları ve sayaçlar sıfırlandı.");
                 return Ok(());
             }
-            "--help" | "-h" => {
-                println!("Blaze Emergency Recovery Protocol (BERP)");
-                println!("Usage: blaze-recovery [--status | --trigger | --clear-trigger]");
+            "--help" | "-h" | "help" => {
+                println!("Blaze Emergency Recovery Protocol (BERP) v{}", BERP_VERSION);
+                println!("Usage: blaze-recovery [--status | --list-snapshots | --verify | --trigger | --clear-trigger | --version | --help]");
                 return Ok(());
             }
             _ => {}
@@ -1270,4 +1876,65 @@ fn main() -> Result<()> {
 
     let app = BerpApp::new();
     run_interactive_tui(app)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_strip_btrfs_subvol_suffix() {
+        assert_eq!(strip_btrfs_subvol_suffix("/dev/sda3[/root]"), "/dev/sda3");
+        assert_eq!(strip_btrfs_subvol_suffix("/dev/nvme0n1p2[/@]"), "/dev/nvme0n1p2");
+        assert_eq!(strip_btrfs_subvol_suffix("/dev/vda2"), "/dev/vda2");
+    }
+
+    #[test]
+    fn test_normalize_subvol_snapshot_path() {
+        assert_eq!(
+            normalize_subvol_snapshot_path("root/.snapshots/snap1", "root"),
+            Some(PathBuf::from("/.snapshots/snap1"))
+        );
+        assert_eq!(
+            normalize_subvol_snapshot_path("root/.blaze-snapshots/20261026T120000Z", "root"),
+            Some(PathBuf::from("/.blaze-snapshots/20261026T120000Z"))
+        );
+        // Never allow home snapshots as root rollback targets
+        assert_eq!(
+            normalize_subvol_snapshot_path("home/.snapshots/snap1_home", "root"),
+            None
+        );
+        assert_eq!(
+            normalize_subvol_snapshot_path("root/.snapshots/snap1_home", "root"),
+            None
+        );
+        // Never allow container subvolume itself
+        assert_eq!(
+            normalize_subvol_snapshot_path("root/.blaze-snapshots", "root"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_resolve_btrfs_snapshot_source_nested() {
+        let tmp = std::env::temp_dir().join(format!("berp_test_{}", std::process::id()));
+        let old_sub = tmp.join("root_old_12345");
+        let nested_snap = old_sub.join(".blaze-snapshots/20261026T120000Z");
+        fs::create_dir_all(&nested_snap).unwrap();
+
+        let resolved = resolve_btrfs_snapshot_source(
+            &tmp,
+            "root",
+            &old_sub,
+            Path::new("/.blaze-snapshots/20261026T120000Z"),
+        );
+        assert_eq!(resolved, nested_snap);
+
+        let new_root = tmp.join("root");
+        fs::create_dir_all(new_root.join(".blaze-snapshots")).unwrap();
+        preserve_nested_snapshot_containers(&old_sub, &new_root);
+        assert!(new_root.join(".blaze-snapshots/20261026T120000Z").exists());
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
 }

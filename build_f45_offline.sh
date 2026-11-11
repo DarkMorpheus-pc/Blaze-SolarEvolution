@@ -17,8 +17,11 @@ OVERLAY="${BLAZEOS_ROOT:-$(pwd)}/blazeos_custom_apps"
 SOLARUI_SRC="${BLAZEOS_ROOT:-$(pwd)}/solarui"
 
 echo "=== [0/5] Building the current SolarUI controller ==="
-cargo build --manifest-path "$SOLARUI_SRC/Cargo.toml" --release -p solar-shell
+cargo build --manifest-path "$SOLARUI_SRC/Cargo.toml" --release -p solar-shell -p solar-session -p solar-core -p blaze-recovery
 install -m 0755 "$SOLARUI_SRC/target/release/solar-shell" "$OVERLAY/usr/bin/solar-shell"
+install -m 0755 "$SOLARUI_SRC/target/release/solar-session" "$OVERLAY/usr/bin/solar-session"
+install -m 0755 "$SOLARUI_SRC/target/release/solar-core" "$OVERLAY/usr/bin/solar-core"
+install -m 0755 "$SOLARUI_SRC/target/release/blaze-recovery" "$OVERLAY/usr/bin/blaze-recovery"
 SOLAR_SHELL_PROBE="$($OVERLAY/usr/bin/solar-shell switch __blazeos_build_probe__ 2>&1 || true)"
 if ! grep -q 'end4-pc' <<<"$SOLAR_SHELL_PROBE"; then
     echo "Refusing to build: solar-shell does not contain the End4 switch implementation" >&2
@@ -40,12 +43,18 @@ ROOTFS="$MNT/rootfs"
 
 echo "  -> Copying rootfs into tmpfs..."
 cp -a "'"$ROOTFS_SRC"'" "$ROOTFS"
+rm -rf "$ROOTFS/home/"*
 
 echo "  -> Ensuring root:root ownership..."
 chown -R 0:0 "$ROOTFS"
 
 echo "  -> Applying tracked BlazeOS overlay..."
+rm -f "$ROOTFS/usr/bin/solar-settings"
 cp -a --no-preserve=ownership "'"${BLAZEOS_ROOT:-$(pwd)}"'/blazeos_custom_apps/." "$ROOTFS/"
+install -m 0755 "'"${BLAZEOS_ROOT:-$(pwd)}"'/blazeos_custom_apps/usr/bin/solar-shell" "$ROOTFS/usr/bin/solar-shell"
+ln -sf solar-shell "$ROOTFS/usr/bin/solar-settings"
+head -c 4 "$ROOTFS/usr/bin/solar-shell" | grep -q "ELF"
+rm -f "$ROOTFS/etc/grub.d/11_berp"
 
 echo "  -> Installing pinned end4-pC shell source..."
 rm -rf "$ROOTFS/usr/share/quickshell/end4-pC"
@@ -137,7 +146,28 @@ chmod 4755 "$ROOTFS/usr/bin/passwd" 2>/dev/null || true
 chmod 4755 "$ROOTFS/usr/bin/gpasswd" 2>/dev/null || true
 chmod 4755 "$ROOTFS/usr/bin/mount" 2>/dev/null || true
 chmod 4755 "$ROOTFS/usr/bin/umount" 2>/dev/null || true
+chmod 4755 "$ROOTFS/usr/bin/chsh" 2>/dev/null || true
+chmod 4755 "$ROOTFS/usr/bin/chfn" 2>/dev/null || true
+chmod 4755 "$ROOTFS/usr/bin/newgrp" 2>/dev/null || true
+chmod 4755 "$ROOTFS/usr/bin/userhelper" 2>/dev/null || true
+chmod 4755 "$ROOTFS/usr/lib/polkit-1/polkit-agent-helper-1" 2>/dev/null || true
+chmod 4755 "$ROOTFS/usr/bin/unix_chkpwd" 2>/dev/null || true
+chmod 4755 "$ROOTFS/usr/sbin/unix_chkpwd" 2>/dev/null || true
+DBUS_GID=$(grep "^dbus:" "$ROOTFS/etc/group" 2>/dev/null | cut -d: -f3 | head -n1 || true)
+chown "0:${DBUS_GID:-81}" "$ROOTFS/usr/libexec/dbus-1/dbus-daemon-launch-helper" 2>/dev/null || true
+chmod 4750 "$ROOTFS/usr/libexec/dbus-1/dbus-daemon-launch-helper" 2>/dev/null || true
+POLKIT_UID=$(grep "^polkitd:" "$ROOTFS/etc/passwd" 2>/dev/null | cut -d: -f3 | head -n1 || true)
+POLKIT_GID=$(grep "^polkitd:" "$ROOTFS/etc/passwd" 2>/dev/null | cut -d: -f4 | head -n1 || true)
+if [ -n "$POLKIT_UID" ] && [ -d "$ROOTFS/etc/polkit-1/rules.d" ]; then
+    chown "${POLKIT_UID}:${POLKIT_GID:-$POLKIT_UID}" "$ROOTFS/etc/polkit-1/rules.d" 2>/dev/null || true
+    chmod 0750 "$ROOTFS/etc/polkit-1/rules.d" 2>/dev/null || true
+fi
+setcap cap_setuid+ep "$ROOTFS/usr/bin/newuidmap" 2>/dev/null || chmod 4755 "$ROOTFS/usr/bin/newuidmap" 2>/dev/null || true
+setcap cap_setgid+ep "$ROOTFS/usr/bin/newgidmap" 2>/dev/null || chmod 4755 "$ROOTFS/usr/bin/newgidmap" 2>/dev/null || true
 chmod 4755 "$ROOTFS/opt/FireHub/chrome-sandbox" 2>/dev/null || true
+chown -R 961:961 "$ROOTFS/var/lib/blaze-setup" 2>/dev/null || true
+chmod 755 "$ROOTFS/var/lib/blaze-setup" 2>/dev/null || true
+chmod 0440 "$ROOTFS/etc/sudoers.d/99-blaze-setup" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/firehub" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/blaze-house" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/local/bin/blazeos-control" 2>/dev/null || true

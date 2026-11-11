@@ -59,8 +59,13 @@ document.addEventListener("DOMContentLoaded", () => {
             field_root_password: "Root parolası:",
             ph_root_password: "isteğe bağlı",
             ph_root_password_confirm: "doğrula",
-            hint_root_password: "Boş bırakırsanız otomatik olarak blazeroot atanır.",
+            hint_root_password: "Boş bırakırsanız root hesabı güvenlik için kilitli kalır (sudo yetkiniz çalışır).",
             alert_root_pass_mismatch: "Root parolaları eşleşmiyor.",
+            wifi_connect: "Bağlan",
+            wifi_connecting: "Bağlanıyor...",
+            wifi_pass_ph: "Wi-Fi parolası",
+            wifi_open: "Açık Ağ",
+            wifi_secured: "Şifreli",
             field_hint: "İpucu:",
             ph_hint: "isteğe bağlı",
             avatar_label: "Profil Resmi",
@@ -142,8 +147,13 @@ document.addEventListener("DOMContentLoaded", () => {
             field_root_password: "Root password:",
             ph_root_password: "optional",
             ph_root_password_confirm: "verify",
-            hint_root_password: "If left blank, the default blazeroot password is assigned.",
+            hint_root_password: "If left blank, the root account remains locked for security (sudo stays active).",
             alert_root_pass_mismatch: "Root passwords do not match.",
+            wifi_connect: "Connect",
+            wifi_connecting: "Connecting...",
+            wifi_pass_ph: "Wi-Fi password",
+            wifi_open: "Open",
+            wifi_secured: "Secured",
             field_hint: "Hint:",
             ph_hint: "optional",
             avatar_label: "Profile Picture",
@@ -222,6 +232,16 @@ document.addEventListener("DOMContentLoaded", () => {
             hint_pass_match: "Passwörter stimmen überein.",
             hint_pass_mismatch: "Passwörter stimmen nicht überein!",
             hint_pass_set: "Passwort festlegen.",
+            field_root_password: "Root-Passwort:",
+            ph_root_password: "optional",
+            ph_root_password_confirm: "bestätigen",
+            hint_root_password: "Wenn leer, bleibt das Root-Konto gesperrt (sudo bleibt aktiv).",
+            alert_root_pass_mismatch: "Root-Passwörter stimmen nicht überein.",
+            wifi_connect: "Verbinden",
+            wifi_connecting: "Verbinde...",
+            wifi_pass_ph: "WLAN-Passwort",
+            wifi_open: "Offen",
+            wifi_secured: "Gesichert",
             field_hint: "Hinweis:",
             ph_hint: "optional",
             avatar_label: "Profilbild",
@@ -300,6 +320,16 @@ document.addEventListener("DOMContentLoaded", () => {
             hint_pass_match: "Les mots de passe correspondent.",
             hint_pass_mismatch: "Les mots de passe ne correspondent pas !",
             hint_pass_set: "Définissez un mot de passe.",
+            field_root_password: "Mot de passe root :",
+            ph_root_password: "facultatif",
+            ph_root_password_confirm: "confirmer",
+            hint_root_password: "Si laissé vide, le compte root reste verrouillé par sécurité (sudo reste actif).",
+            alert_root_pass_mismatch: "Les mots de passe root ne correspondent pas.",
+            wifi_connect: "Connecter",
+            wifi_connecting: "Connexion...",
+            wifi_pass_ph: "Mot de passe Wi-Fi",
+            wifi_open: "Ouvert",
+            wifi_secured: "Sécurisé",
             field_hint: "Indice :",
             ph_hint: "facultatif",
             avatar_label: "Photo de profil",
@@ -460,6 +490,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // Listen for any key or click on hello screen
     window.addEventListener("keydown", (e) => {
         if (!isWizardActive) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
             openWizard();
         }
     });
@@ -490,8 +522,8 @@ document.addEventListener("DOMContentLoaded", () => {
         const targetLang = langMap[setupData.keymap] || "en";
         applyLanguage(targetLang);
 
-        // Live switch active keyboard layout in Niri compositor
-        await callBackend("set_keymap", { keymap: setupData.keymap });
+        // Live switch active keyboard layout & locale
+        await callBackend("set_keymap", { keymap: setupData.keymap, locale: setupData.locale });
 
         if (testInput) {
             testInput.value = "";
@@ -538,8 +570,46 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // ── 5. Slide 1: Ağ ve İnternet Bağlantısı ──────────────────────────────
     const netStatusBox = document.getElementById("network-status-box");
+    const wifiNetworksBox = document.getElementById("wifi-networks-box");
+    const wifiConnectBar = document.getElementById("wifi-connect-bar");
+    const wifiConnectSsid = document.getElementById("wifi-connect-ssid");
+    const wifiPassInput = document.getElementById("wifi-password-input");
+    const btnWifiConnect = document.getElementById("btn-wifi-connect");
     const offlineCard = document.getElementById("offline-option");
     const btnRefreshNet = document.getElementById("btn-refresh-network");
+    let pendingWifiSsid = "";
+
+    function escapeHtml(str) {
+        return String(str || "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+
+    async function doWifiConnect(ssid, password) {
+        if (!ssid) return;
+        const dict = OOBE_I18N[currentLang] || OOBE_I18N["en"];
+        if (btnWifiConnect) {
+            btnWifiConnect.disabled = true;
+            btnWifiConnect.textContent = dict.wifi_connecting || "Connecting...";
+        }
+        const res = await callBackend("connect_wifi", { ssid, password });
+        if (btnWifiConnect) {
+            btnWifiConnect.disabled = false;
+            btnWifiConnect.textContent = dict.wifi_connect || "Connect";
+        }
+        if (res && res.status === "ok") {
+            if (wifiConnectBar) wifiConnectBar.style.display = "none";
+            if (wifiPassInput) wifiPassInput.value = "";
+            if (offlineCard) offlineCard.classList.remove("selected");
+            setupData.networkMode = "auto";
+            await loadNetworkStatus();
+        } else if (res && res.message) {
+            alert(res.message);
+        }
+    }
 
     async function loadNetworkStatus() {
         if (!netStatusBox) return;
@@ -550,9 +620,16 @@ document.addEventListener("DOMContentLoaded", () => {
                 <span>${dict.net_scanning || "Scanning..."}</span>
             </div>
         `;
-        const res = await callBackend("get_network_status");
+        const [res, wifiRes] = await Promise.all([
+            callBackend("get_network_status"),
+            callBackend("scan_wifi")
+        ]);
         if (res && res.status === "ok") {
             const ifaces = res.interfaces || [];
+            if (res.has_internet && offlineCard) {
+                offlineCard.classList.remove("selected");
+                setupData.networkMode = "auto";
+            }
             if (ifaces.length === 0) {
                 netStatusBox.innerHTML = `
                     <div class="net-row">
@@ -570,14 +647,14 @@ document.addEventListener("DOMContentLoaded", () => {
                     const typeLabel = iface.type === "wifi" ? (dict.net_wifi_label || "Wi-Fi") : (dict.net_eth_label || "Ethernet");
                     const badgeClass = isConn ? "connected" : "disconnected";
                     const badgeText = isConn ? (dict.net_connected_badge || "Connected") : (dict.net_disconnected_badge || "No Connection");
-                    const ipText = iface.ip ? `IP: ${iface.ip} (${iface.name})` : `Interface: ${iface.name}`;
+                    const ipText = iface.ip ? `IP: ${escapeHtml(iface.ip)} (${escapeHtml(iface.name)})` : `Interface: ${escapeHtml(iface.name)}`;
                     html += `
                         <div class="net-row">
                             <div class="net-info">
-                                <span class="net-name">${typeLabel}</span>
+                                <span class="net-name">${escapeHtml(typeLabel)}</span>
                                 <span class="net-ip">${ipText}</span>
                             </div>
-                            <span class="net-status-badge ${badgeClass}">${badgeText}</span>
+                            <span class="net-status-badge ${badgeClass}">${escapeHtml(badgeText)}</span>
                         </div>
                     `;
                 });
@@ -594,6 +671,64 @@ document.addEventListener("DOMContentLoaded", () => {
                 </div>
             `;
         }
+
+        if (wifiNetworksBox) {
+            const nets = (wifiRes && wifiRes.status === "ok" && Array.isArray(wifiRes.networks)) ? wifiRes.networks : [];
+            if (nets.length === 0) {
+                wifiNetworksBox.style.display = "none";
+                wifiNetworksBox.innerHTML = "";
+            } else {
+                wifiNetworksBox.style.display = "block";
+                wifiNetworksBox.innerHTML = nets.map((n, idx) => {
+                    const secLabel = n.open ? (dict.wifi_open || "Open") : (dict.wifi_secured || "Secured");
+                    const badgeCls = n.connected ? "connected" : "disconnected";
+                    const badgeTxt = n.connected ? (dict.net_connected_badge || "Connected") : `${n.signal}% · ${secLabel}`;
+                    return `
+                        <div class="wifi-row" data-wifi-idx="${idx}">
+                            <span class="net-name">${escapeHtml(n.ssid)}</span>
+                            <span class="net-status-badge ${badgeCls}">${escapeHtml(badgeTxt)}</span>
+                        </div>
+                    `;
+                }).join("");
+
+                Array.from(wifiNetworksBox.querySelectorAll(".wifi-row")).forEach((row) => {
+                    row.addEventListener("click", () => {
+                        const net = nets[Number(row.dataset.wifiIdx)];
+                        if (!net || net.connected) return;
+                        Array.from(wifiNetworksBox.querySelectorAll(".wifi-row")).forEach((r) => r.classList.remove("selected"));
+                        row.classList.add("selected");
+                        pendingWifiSsid = net.ssid;
+                        if (net.open) {
+                            if (wifiConnectBar) wifiConnectBar.style.display = "none";
+                            doWifiConnect(net.ssid, "");
+                        } else if (wifiConnectBar) {
+                            wifiConnectBar.style.display = "flex";
+                            if (wifiConnectSsid) wifiConnectSsid.textContent = net.ssid;
+                            if (wifiPassInput) {
+                                wifiPassInput.value = "";
+                                wifiPassInput.focus();
+                            }
+                        }
+                    });
+                });
+            }
+        }
+    }
+
+    if (btnWifiConnect) {
+        btnWifiConnect.addEventListener("click", () => {
+            doWifiConnect(pendingWifiSsid, wifiPassInput ? wifiPassInput.value : "");
+        });
+    }
+
+    if (wifiPassInput) {
+        wifiPassInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                doWifiConnect(pendingWifiSsid, wifiPassInput.value);
+            }
+        });
     }
 
     if (btnRefreshNet) {
@@ -604,8 +739,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (offlineCard) {
         offlineCard.addEventListener("click", () => {
-            offlineCard.classList.toggle("selected");
-            setupData.networkMode = offlineCard.classList.contains("selected") ? "offline" : "auto";
+            offlineCard.classList.add("selected");
+            setupData.networkMode = "offline";
         });
     }
 
@@ -621,6 +756,24 @@ document.addEventListener("DOMContentLoaded", () => {
     const chkAdmin = document.getElementById("chk-admin");
     const chkAutologin = document.getElementById("chk-autologin");
 
+    function slugifyUsername(raw) {
+        const charMap = {
+            "ç": "c", "Ç": "c", "ğ": "g", "Ğ": "g",
+            "ı": "i", "I": "i", "İ": "i", "ö": "o", "Ö": "o",
+            "ş": "s", "Ş": "s", "ü": "u", "Ü": "u", "ß": "ss"
+        };
+        const mapped = String(raw || "").replace(/[çÇğĞıIİöÖşŞüÜß]/g, (ch) => charMap[ch] || ch);
+        return mapped
+            .normalize("NFKD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, "")
+            .replace(/[^a-z0-9_-]/g, "")
+            .replace(/^[^a-z_]+/, "")
+            .slice(0, 32);
+    }
+
     let usernameManuallyChanged = false;
     if (inUsername) {
         inUsername.addEventListener("input", () => {
@@ -630,7 +783,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (inFullname) {
         inFullname.addEventListener("input", () => {
             if (!usernameManuallyChanged && inUsername) {
-                const clean = inFullname.value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+                const clean = slugifyUsername(inFullname.value);
                 if (clean) inUsername.value = clean;
             }
         });
@@ -835,93 +988,118 @@ document.addEventListener("DOMContentLoaded", () => {
         if (text) title.textContent = text;
     }
 
+    let desktopStarting = false;
+
     async function executeFinalSetup() {
         btnBack.disabled = true;
         btnNext.disabled = true;
         const dict = OOBE_I18N[currentLang] || OOBE_I18N["en"];
 
-        // 1. Task: Keymap & Locale
-        setTaskStatus("task-keymap", "active", dict.task_keymap ? `${dict.task_keymap}...` : "Dil ve klavye düzeni işleniyor...");
-        const keymapRes = await callBackend("set_keymap", { keymap: setupData.keymap });
-        if (keymapRes.status !== "ok") throw new Error(keymapRes.message || "Klavye ayarlanamadı");
-        setTaskStatus("task-keymap", "done", dict.task_keymap ? `${dict.task_keymap} [OK]` : "Dil ve klavye düzeni uygulandı.");
-        await new Promise((r) => setTimeout(r, 400));
-
-        // 2. Task: Network
-        setTaskStatus("task-network", "active", dict.task_network ? `${dict.task_network}...` : "Ağ bağlantısı yapılandırılıyor...");
-        await callBackend("get_network_status", {});
-        setTaskStatus("task-network", "done", dict.task_network ? `${dict.task_network} [OK]` : "Ağ doğrulandı.");
-        await new Promise((r) => setTimeout(r, 400));
-
-        // 3. Task: User Creation & Password
-        setTaskStatus("task-user", "active", dict.task_user ? `${dict.task_user}...` : "Kullanıcı hesabı oluşturuluyor...");
-        const userRes = await callBackend("create_user", {
-            username: setupData.username,
-            fullname: setupData.fullname,
-            hostname: setupData.hostname,
-            password: setupData.password,
-            rootPassword: setupData.rootPassword,
-            rootPasswordConfirm: setupData.rootPasswordConfirm,
-            isAdmin: setupData.isAdmin
+        // Reset all task badges to pending at the start of executeFinalSetup
+        ["task-keymap", "task-network", "task-user", "task-system", "task-appearance", "task-finalize"].forEach((id) => {
+            setTaskStatus(id, "pending");
         });
 
-        if (userRes.status === "error") {
-            setTaskStatus("task-user", "error", `Hata: ${userRes.message}`);
-            alert(`Hata:\n${userRes.message}`);
+        try {
+            // 1. Task: Keymap & Locale
+            setTaskStatus("task-keymap", "active", dict.task_keymap ? `${dict.task_keymap}...` : "Dil ve klavye düzeni işleniyor...");
+            const keymapRes = await callBackend("set_keymap", { keymap: setupData.keymap, locale: setupData.locale });
+            if (keymapRes.status !== "ok") {
+                setTaskStatus("task-keymap", "error", keymapRes.message || "Klavye ayarlanamadı");
+                throw new Error(keymapRes.message || "Klavye ayarlanamadı");
+            }
+            setTaskStatus("task-keymap", "done", dict.task_keymap ? `${dict.task_keymap} [OK]` : "Dil ve klavye düzeni uygulandı.");
+            await new Promise((r) => setTimeout(r, 400));
+
+            // 2. Task: Network
+            setTaskStatus("task-network", "active", dict.task_network ? `${dict.task_network}...` : "Ağ bağlantısı yapılandırılıyor...");
+            await callBackend("get_network_status", {});
+            setTaskStatus("task-network", "done", dict.task_network ? `${dict.task_network} [OK]` : "Ağ doğrulandı.");
+            await new Promise((r) => setTimeout(r, 400));
+
+            // 3. Task: User Creation & Password
+            setTaskStatus("task-user", "active", dict.task_user ? `${dict.task_user}...` : "Kullanıcı hesabı oluşturuluyor...");
+            const userRes = await callBackend("create_user", {
+                username: setupData.username,
+                fullname: setupData.fullname,
+                hostname: setupData.hostname,
+                password: setupData.password,
+                rootPassword: setupData.rootPassword,
+                rootPasswordConfirm: setupData.rootPasswordConfirm,
+                isAdmin: setupData.isAdmin
+            });
+
+            if (userRes.status === "error" || userRes.status !== "ok") {
+                setTaskStatus("task-user", "error", `Hata: ${userRes.message}`);
+                throw new Error(userRes.message || "Kullanıcı oluşturulamadı");
+            }
+            setTaskStatus("task-user", "done", `${setupData.username} [OK]`);
+            await new Promise((r) => setTimeout(r, 400));
+
+            // 4. Task: Appearance & Desktop Config (Engine: Noctalia or Caelestia)
+            const engineLabel = setupData.layout === "caelestia"
+                ? "Caelestia"
+                : (setupData.layout === "end4-pc" ? "end4-pC" : "Noctalia");
+            setTaskStatus("task-appearance", "active", dict.task_appearance ? `${dict.task_appearance}...` : "Masaüstü kabuğu yapılandırılıyor...");
+            setTaskStatus("task-system", "active", dict.task_appearance ? `${dict.task_appearance}...` : "Masaüstü kabuğu yapılandırılıyor...");
+            const appearanceRes = await callBackend("save_desktop_config", {
+                username: setupData.username,
+                layout: setupData.layout,
+                theme: setupData.theme,
+                appearance: setupData.appearance,
+                keymap: setupData.keymap,
+                acoustic: setupData.acousticFeedback
+            });
+            if (appearanceRes.status !== "ok") {
+                setTaskStatus("task-appearance", "error", appearanceRes.message || "Masaüstü ayarlanamadı");
+                setTaskStatus("task-system", "error", appearanceRes.message || "Masaüstü ayarlanamadı");
+                throw new Error(appearanceRes.message || "Masaüstü ayarlanamadı");
+            }
+            setTaskStatus("task-appearance", "done", `${engineLabel} (${setupData.appearance.toUpperCase()}) [OK]`);
+            setTaskStatus("task-system", "done", `${engineLabel} (${setupData.appearance.toUpperCase()}) [OK]`);
+            await new Promise((r) => setTimeout(r, 400));
+
+            // 5. Task: Finalize OOBE
+            setTaskStatus("task-finalize", "active", dict.task_finalize ? `${dict.task_finalize}...` : "OOBE tamamlanıyor...");
+            const finishRes = await callBackend("finish_setup", {
+                username: setupData.username,
+                fullname: setupData.fullname,
+                hostname: setupData.hostname,
+                autologin: setupData.autologin,
+                layout: setupData.layout
+            });
+            if (finishRes.status !== "ok") {
+                setTaskStatus("task-finalize", "error", finishRes.message || "Kurulum tamamlanamadı");
+                throw new Error(finishRes.message || "Kurulum tamamlanamadı");
+            }
+            setTaskStatus("task-finalize", "done", "BlazeOS [READY]");
+            await new Promise((r) => setTimeout(r, 600));
+
+            const triggerStartDesktop = () => {
+                if (desktopStarting) return;
+                desktopStarting = true;
+                btnNext.disabled = true;
+                callBackend("start_desktop", {});
+            };
+
+            // Launch Desktop
+            btnNext.textContent = dict.btn_launch_desktop || "Masaüstünü Başlat";
+            btnNext.disabled = false;
+            btnNext.onclick = triggerStartDesktop;
+
+            // Auto-launch after 1.5 seconds if autologin is selected or smoothly proceed
+            setTimeout(triggerStartDesktop, 1500);
+        } catch (err) {
+            console.error("[OOBE] executeFinalSetup error:", err);
+            alert(`Hata:\n${err.message || err}`);
             btnBack.disabled = false;
-            return;
+            btnNext.disabled = false;
+            btnNext.textContent = dict.btn_finish || "Tekrar Dene";
+            btnNext.onclick = () => {
+                if (currentSlide === totalSlides - 1) {
+                    executeFinalSetup();
+                }
+            };
         }
-        setTaskStatus("task-user", "done", `${setupData.username} [OK]`);
-        await new Promise((r) => setTimeout(r, 400));
-
-        // 4. Task: Appearance & Desktop Config (Engine: Noctalia or Caelestia)
-        const engineLabel = setupData.layout === "caelestia"
-            ? "Caelestia"
-            : (setupData.layout === "end4-pc" ? "end4-pC" : "Noctalia");
-        setTaskStatus("task-appearance", "active", dict.task_appearance ? `${dict.task_appearance}...` : "Masaüstü kabuğu yapılandırılıyor...");
-        const appearanceRes = await callBackend("save_desktop_config", {
-            username: setupData.username,
-            layout: setupData.layout,
-            theme: setupData.theme,
-            appearance: setupData.appearance,
-            keymap: setupData.keymap,
-            acoustic: setupData.acousticFeedback
-        });
-        if (appearanceRes.status !== "ok") {
-            setTaskStatus("task-appearance", "error", appearanceRes.message || "Masaüstü ayarlanamadı");
-            btnBack.disabled = false;
-            return;
-        }
-        setTaskStatus("task-appearance", "done", `${engineLabel} (${setupData.appearance.toUpperCase()}) [OK]`);
-        await new Promise((r) => setTimeout(r, 400));
-
-        // 5. Task: Finalize OOBE
-        setTaskStatus("task-finalize", "active", dict.task_finalize ? `${dict.task_finalize}...` : "OOBE tamamlanıyor...");
-        const finishRes = await callBackend("finish_setup", {
-            username: setupData.username,
-            fullname: setupData.fullname,
-            hostname: setupData.hostname,
-            autologin: setupData.autologin,
-            layout: setupData.layout
-        });
-        if (finishRes.status !== "ok") {
-            setTaskStatus("task-finalize", "error", finishRes.message || "Kurulum tamamlanamadı");
-            btnBack.disabled = false;
-            return;
-        }
-        setTaskStatus("task-finalize", "done", "BlazeOS [READY]");
-        await new Promise((r) => setTimeout(r, 600));
-
-        // Launch Desktop
-        btnNext.textContent = dict.btn_launch_desktop || "Masaüstünü Başlat";
-        btnNext.disabled = false;
-        btnNext.onclick = () => {
-            callBackend("start_desktop", {});
-        };
-
-        // Auto-launch after 1.5 seconds if autologin is selected or smoothly proceed
-        setTimeout(() => {
-            callBackend("start_desktop", {});
-        }, 1500);
     }
 });

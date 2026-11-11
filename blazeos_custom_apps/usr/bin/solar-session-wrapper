@@ -7,7 +7,6 @@ export DESKTOP_SESSION="SolarUI"
 export MOZ_ENABLE_WAYLAND="1"
 export QT_QPA_PLATFORM="wayland;xcb"
 export GDK_BACKEND="wayland,x11"
-export SDL_VIDEODRIVER="wayland"
 export CLUTTER_BACKEND="wayland"
 # Let wlroots use the real cursor/GPU on physical systems.  The old global
 # WLR_NO_HARDWARE_CURSORS=1 forced a CPU cursor composition path and made the
@@ -15,8 +14,6 @@ export CLUTTER_BACKEND="wayland"
 # is selected only by the failure fallback below (or by the VM-specific path).
 export ELECTRON_OZONE_PLATFORM_HINT="wayland"
 export NVD_BACKEND="direct"
-export __GL_GSYNC_ALLOWED="0"
-export __GL_VRR_ALLOWED="0"
 
 # Check if running in a virtual machine (QEMU, KVM, VirtualBox, VMware) or software rasterizer
 if systemd-detect-virt -q 2>/dev/null || grep -qE -i 'hypervisor|qemu|kvm|virtualbox|vmware' /proc/cpuinfo /sys/class/dmi/id/product_name /sys/class/dmi/id/sys_vendor 2>/dev/null; then
@@ -50,7 +47,7 @@ if command -v systemctl >/dev/null 2>&1; then
     systemctl --user import-environment \
         XDG_SESSION_TYPE XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP \
         XDG_RUNTIME_DIR XDG_DATA_DIRS MOZ_ENABLE_WAYLAND QT_QPA_PLATFORM \
-        GDK_BACKEND SDL_VIDEODRIVER ELECTRON_OZONE_PLATFORM_HINT \
+        GDK_BACKEND ELECTRON_OZONE_PLATFORM_HINT \
         2>>"$LOG_FILE" || :
 fi
 if command -v dbus-update-activation-environment >/dev/null 2>&1; then

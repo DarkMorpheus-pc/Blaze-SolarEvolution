@@ -1,31 +1,70 @@
-use gdk_pixbuf::PixbufLoader;
 use gtk4::gdk;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Box as GtkBox, Button, CheckButton, CssProvider, Grid, Image, Label,
-    Orientation, Window,
+    Box as GtkBox, Button, CheckButton, Grid, Label, Orientation, ScrolledWindow, Window,
 };
 use solar_common::SolarConfig;
 
-const LOGO_PNG: &[u8] = include_bytes!("../../../data/icons/solar-logo-256.png");
+use crate::living_flow::{
+    apply_living_flow_theme, build_living_flow_topbar, load_png_emblem,
+};
 
-fn create_logo_image(size: i32) -> Image {
-    let loader = match PixbufLoader::with_type("png") {
-        Ok(l) => l,
-        Err(_) => return Image::new(),
-    };
-    loader.set_size(size, size);
-    if loader.write(LOGO_PNG).is_ok() && loader.close().is_ok() {
-        if let Some(pixbuf) = loader.pixbuf() {
-            let texture = gdk4::Texture::for_pixbuf(&pixbuf);
-            let img = Image::from_paintable(Some(&texture));
-            img.set_pixel_size(size);
-            return img;
-        }
+const WELCOME_EMBLEM_PNG: &[u8] =
+    include_bytes!("../../../data/icons/living-flow/solar-welcome-64.png");
+
+const WELCOME_EXTRA_CSS: &str = r#"
+    .welcome-body {
+        padding: 18px 22px 20px 22px;
     }
-    Image::new()
-}
+
+    .welcome-hero {
+        background: linear-gradient(135deg, rgba(38, 40, 48, 0.92) 0%, rgba(26, 27, 33, 0.96) 100%);
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        border-radius: 18px;
+        padding: 14px 20px;
+        margin-bottom: 12px;
+    }
+
+    .welcome-title {
+        color: #f5f5f7;
+        font-size: 19px;
+        font-weight: 700;
+        letter-spacing: -0.2px;
+    }
+
+    .welcome-subtitle {
+        color: #a1a1aa;
+        font-size: 12.2px;
+        font-weight: 500;
+    }
+
+    .shortcut-grid-card {
+        background: linear-gradient(180deg, rgba(30, 32, 38, 0.90) 0%, rgba(23, 25, 30, 0.94) 100%);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 18px;
+        padding: 14px 18px;
+        margin-bottom: 14px;
+    }
+
+    .lf-keycap {
+        background-color: rgba(255, 255, 255, 0.08);
+        color: #f4f4f6;
+        border: 1px solid rgba(255, 255, 255, 0.13);
+        border-radius: 999px;
+        padding: 4px 12px;
+        font-size: 11.5px;
+        font-weight: 700;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
+    }
+
+    .shortcut-desc {
+        color: #d4d4d8;
+        font-size: 12.6px;
+        font-weight: 500;
+        margin-left: 8px;
+    }
+"#;
 
 pub fn launch_welcome_window() {
     glib::set_prgname(Some("solar-welcome"));
@@ -42,110 +81,13 @@ pub fn launch_welcome_window() {
 }
 
 fn build_welcome_ui(main_loop: glib::MainLoop) {
-    let provider = CssProvider::new();
-    let css = r#"
-        window {
-            background-color: transparent;
-        }
-
-        .welcome-card {
-            background-color: alpha(#16191c, 0.94);
-            border: 1px solid alpha(#0095c7, 0.55);
-            border-radius: 18px;
-            padding: 24px;
-            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7);
-        }
-
-        .welcome-title {
-            color: #ffffff;
-            font-size: 24px;
-            font-weight: 700;
-            margin-top: 6px;
-        }
-
-        .welcome-subtitle {
-            color: #38c8ff;
-            font-size: 13px;
-            font-weight: 500;
-            margin-bottom: 16px;
-        }
-
-        .shortcut-grid {
-            background-color: alpha(#23272a, 0.65);
-            border: 1px solid alpha(#525c62, 0.35);
-            border-radius: 12px;
-            padding: 14px 18px;
-            margin-bottom: 18px;
-        }
-
-        .keycap {
-            background: linear-gradient(180deg, #32383e, #23272b);
-            color: #c4e7ff;
-            border: 1px solid alpha(#616c72, 0.6);
-            border-radius: 6px;
-            padding: 3px 8px;
-            font-size: 12px;
-            font-weight: 600;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
-        }
-
-        .shortcut-desc {
-            color: #e1e3e5;
-            font-size: 13px;
-            margin-left: 12px;
-        }
-
-        .start-btn {
-            background: linear-gradient(135deg, #007ba4, #00b4e6);
-            color: #ffffff;
-            font-size: 14px;
-            font-weight: 600;
-            border-radius: 8px;
-            padding: 8px 24px;
-            border: none;
-            box-shadow: 0 4px 12px rgba(0, 149, 199, 0.4);
-            transition: all 120ms ease;
-        }
-
-        .start-btn:hover {
-            background: linear-gradient(135deg, #008ebf, #1cc6f9);
-        }
-
-        .install-btn {
-            background: linear-gradient(135deg, #2e7d32, #4caf50);
-            color: #ffffff;
-            font-size: 14px;
-            font-weight: 600;
-            border-radius: 8px;
-            padding: 8px 20px;
-            border: none;
-            box-shadow: 0 4px 12px rgba(46, 125, 50, 0.4);
-            transition: all 120ms ease;
-        }
-
-        .install-btn:hover {
-            background: linear-gradient(135deg, #388e3c, #66bb6a);
-        }
-
-        .startup-checkbox {
-            color: #8a9297;
-            font-size: 12px;
-        }
-    "#;
-    provider.load_from_string(css);
-
-    if let Some(display) = gdk::Display::default() {
-        gtk4::style_context_add_provider_for_display(
-            &display,
-            &provider,
-            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
-    }
+    apply_living_flow_theme(WELCOME_EXTRA_CSS);
 
     let window = Window::builder()
-        .title("SolarUI Desktop - Karşılama ve Kısayollar")
-        .default_width(640)
-        .default_height(480)
+        .title("SolarUI Desktop — Karşılama ve Kısayollar")
+        .decorated(false)
+        .default_width(750)
+        .default_height(590)
         .resizable(false)
         .build();
 
@@ -169,67 +111,96 @@ fn build_welcome_ui(main_loop: glib::MainLoop) {
     });
     window.add_controller(key_controller);
 
-    let root_box = GtkBox::new(Orientation::Vertical, 0);
-    root_box.add_css_class("welcome-card");
+    let shell_box = GtkBox::new(Orientation::Vertical, 0);
+    shell_box.add_css_class("lf-window-shell");
 
-    // Logo & Header
-    let logo = create_logo_image(64);
-    logo.set_halign(gtk4::Align::Center);
-    root_box.append(&logo);
+    let top_emblem = load_png_emblem(WELCOME_EMBLEM_PNG, 34);
+    let loop_top = main_loop.clone();
+    let topbar = build_living_flow_topbar(
+        &window,
+        Some(top_emblem),
+        "SolarUI Masaüstü Rehberi",
+        "Blaze Universe",
+        None,
+        Some(Box::new(move || loop_top.quit())),
+    );
+    shell_box.append(&topbar);
 
-    let title = Label::new(Some("SolarUI Masaüstüne Hoş Geldiniz"));
+    let body = GtkBox::new(Orientation::Vertical, 0);
+    body.add_css_class("welcome-body");
+    body.set_vexpand(true);
+
+    // Luminous Hero Banner (clean typography without wide logo)
+    let hero = GtkBox::new(Orientation::Vertical, 4);
+    hero.add_css_class("welcome-hero");
+
+    let hero_txt = GtkBox::new(Orientation::Vertical, 2);
+    hero_txt.set_valign(gtk4::Align::Center);
+    let title = Label::new(Some("Blaze Universe & SolarUI Masaüstüne Hoş Geldiniz"));
     title.add_css_class("welcome-title");
-    title.set_halign(gtk4::Align::Center);
-    root_box.append(&title);
+    title.set_halign(gtk4::Align::Start);
+    hero_txt.append(&title);
 
-    let subtitle = Label::new(Some("SolarUI • Masaüstünüz, sizin düzeniniz"));
+    let subtitle = Label::new(Some(
+        "Luminous Akış • Elastik Pencere Fiziği • Portadora & Flathub Hibrit Ekosistem",
+    ));
     subtitle.add_css_class("welcome-subtitle");
-    subtitle.set_halign(gtk4::Align::Center);
-    root_box.append(&subtitle);
+    subtitle.set_halign(gtk4::Align::Start);
+    hero_txt.append(&subtitle);
+    hero.append(&hero_txt);
+    body.append(&hero);
 
-    // Grid of Essential Shortcuts
+    // Scrollable Shortcut Grid inside Liquid-Acrylic Card
+    let scroll = ScrolledWindow::builder()
+        .hscrollbar_policy(gtk4::PolicyType::Never)
+        .vscrollbar_policy(gtk4::PolicyType::Automatic)
+        .vexpand(true)
+        .build();
+    scroll.add_css_class("shortcut-grid-card");
+
     let grid = Grid::new();
-    grid.add_css_class("shortcut-grid");
-    grid.set_column_spacing(24);
-    grid.set_row_spacing(10);
+    grid.set_column_spacing(20);
+    grid.set_row_spacing(7);
 
     let shortcuts = [
-        ("Mod + Space", "Solar Omnibar (Raycast / Spotlight Arama & Komut)"),
-        ("Mod + G", "Blaze GameZone (Steam Deck & Xbox UI Oyun Kabuğu)"),
-        ("Mod + Alt + K", "Konami Kodu Retro Modu (↑↑↓↓←→←→ B A)"),
-        ("Mod + T / F", "KDE Serbest Kayan Pencere (Floating Window)"),
-        ("Mod + Sol Tık Sürükle", "Pencereyi Ekranda İstediğin Yere Taşı"),
-        ("Mod + Sağ Tık Sürükle", "Pencereyi İstenilen Boyuta Getir"),
-        ("Mod + Y / Ctrl+Aşağı", "Pencereyi Arka Plana At (Minimize)"),
-        ("Alt + F4 / Mod + Q", "Pencereyi Kapat"),
-        ("Mod + S", "Kontrol Merkezi & Ses / Ağ Paneli"),
-        ("Mod + Shift + S", "SolarUI Masaüstü ve Görev Çubuğu Ayarları"),
-        ("Mod + Enter", "Uçbirim (Terminal: Alacritty)"),
+        ("Mod + Space", "Solar Omnibar — Uygulama, Matematik, Kur & Sistem Arama"),
+        ("Mod + Shift + Space", "Solar Omnibar (Doğrudan Zorla Aç)"),
+        ("Mod + G", "Blaze GameZone — Tam Ekran Konsol & Proton-GE Kabuğu"),
+        ("Mod + I / Mod+Shift+S", "SolarUI Masaüstü, Kabuk Motoru ve Görev Çubuğu Ayarları"),
+        ("Mod + S", "Kontrol Merkezi, Ses Mikseri ve Ağ Paneli"),
+        ("Mod + Enter", "Alacritty GPU Hızlandırmalı Uçbirim"),
+        ("Mod + T / F", "Serbest Yüzen Pencere (Floating) Moduna Geçiş"),
+        ("Mod + Sol / Sağ Tık", "Pencereyi Taşı / Boyutlandır (Elastik Yay Fiziği)"),
+        ("Mod + Y / Ctrl+Aşağı", "Pencereyi Görev Çubuğuna Küçült (Minimize)"),
+        ("Alt + F4 / Mod + Q", "Aktif Pencereyi Kapat"),
+        ("Mod + Alt + K", "SolarEvolution Retro Modu (Konami Kodu Sürprizi)"),
         ("Mod + Shift + Q", "Oturumu Kapat / Güç Menüsü"),
     ];
 
     for (i, (key, desc)) in shortcuts.iter().enumerate() {
         let row = i as i32;
         let key_label = Label::new(Some(key));
-        key_label.add_css_class("keycap");
+        key_label.add_css_class("lf-keycap");
         key_label.set_halign(gtk4::Align::Start);
 
         let desc_label = Label::new(Some(desc));
         desc_label.add_css_class("shortcut-desc");
         desc_label.set_halign(gtk4::Align::Start);
+        desc_label.set_hexpand(true);
+        desc_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
 
         grid.attach(&key_label, 0, row, 1, 1);
         grid.attach(&desc_label, 1, row, 1, 1);
     }
-    root_box.append(&grid);
+    scroll.set_child(Some(&grid));
+    body.append(&scroll);
 
-    // Bottom Action Bar
-    let bottom_box = GtkBox::new(Orientation::Horizontal, 12);
-    bottom_box.set_halign(gtk4::Align::Fill);
+    // Bottom Capsule Action Row
+    let bottom_box = GtkBox::new(Orientation::Horizontal, 10);
+    bottom_box.set_valign(gtk4::Align::Center);
 
     let cfg = SolarConfig::load();
-    let check = CheckButton::with_label("Açılışta bu kısayol ekranını göster");
-    check.add_css_class("startup-checkbox");
+    let check = CheckButton::with_label("Açılışta göster");
     check.set_active(cfg.shortcuts_hud.show_at_startup);
     check.set_hexpand(true);
     check.connect_toggled(move |c| {
@@ -239,30 +210,32 @@ fn build_welcome_ui(main_loop: glib::MainLoop) {
     });
     bottom_box.append(&check);
 
-    let is_live_installer = (std::path::Path::new("/run/initramfs/live").exists()
-        || std::path::Path::new("/dev/mapper/live-base").exists()
-        || std::fs::read_to_string("/proc/cmdline")
-            .map(|c| c.contains("rd.live.image"))
-            .unwrap_or(false))
-        && std::path::Path::new("/usr/bin/liveinst").exists();
-
-    if is_live_installer {
-        let install_btn = Button::with_label("Sabit Diske Kur (Anaconda)");
-        install_btn.add_css_class("install-btn");
-        let win_weak_inst = window.downgrade();
-        let loop_inst = main_loop.clone();
-        install_btn.connect_clicked(move |_| {
-            if let Some(win) = win_weak_inst.upgrade() {
-                win.close();
+    let has_solar_installer = std::path::Path::new("/usr/bin/solar-installer").exists();
+    let has_liveinst = std::path::Path::new("/usr/bin/liveinst").exists();
+    if has_solar_installer || has_liveinst {
+        let inst_btn = Button::with_label("Sistemi Kur");
+        inst_btn.add_css_class("lf-btn-glass");
+        inst_btn.connect_clicked(move |_| {
+            if has_solar_installer {
+                let _ = std::process::Command::new("solar-shell")
+                    .arg("installer")
+                    .spawn();
+            } else {
+                let _ = std::process::Command::new("/usr/bin/liveinst").spawn();
             }
-            let _ = std::process::Command::new("/usr/bin/liveinst").spawn();
-            loop_inst.quit();
         });
-        bottom_box.append(&install_btn);
+        bottom_box.append(&inst_btn);
     }
 
-    let start_btn = Button::with_label("Masaüstüne Başla");
-    start_btn.add_css_class("start-btn");
+    let store_btn = Button::with_label("FireHub Mağaza");
+    store_btn.add_css_class("lf-btn-emerald");
+    store_btn.connect_clicked(move |_| {
+        let _ = std::process::Command::new("firehub").spawn();
+    });
+    bottom_box.append(&store_btn);
+
+    let start_btn = Button::with_label("Masaüstüne Başla →");
+    start_btn.add_css_class("lf-btn-primary");
     let win_weak = window.downgrade();
     let loop_clone = main_loop.clone();
     start_btn.connect_clicked(move |_| {
@@ -273,9 +246,10 @@ fn build_welcome_ui(main_loop: glib::MainLoop) {
     });
     bottom_box.append(&start_btn);
 
-    root_box.append(&bottom_box);
+    body.append(&bottom_box);
+    shell_box.append(&body);
 
-    window.set_child(Some(&root_box));
+    window.set_child(Some(&shell_box));
     start_btn.set_can_focus(true);
     window.present();
     start_btn.grab_focus();

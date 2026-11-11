@@ -82,12 +82,14 @@ def main():
                 break
             elif c in ['s', 'S']:
                 clear_screen()
-                sys.stdout.write("\033[37m[BERE] Acil durum root kabuguna geciliyor...\033[0m\n")
+                sys.stdout.write("\033[37m[BERE] Kimlik dogrulamali acil durum konsolu baslatiliyor...\033[0m\n")
                 sys.stdout.flush()
-                if os.path.exists("/usr/bin/bash"):
-                    subprocess.run(["/usr/bin/bash"])
+                if os.path.exists("/usr/lib/systemd/systemd-sulogin-shell"):
+                    subprocess.run(["/usr/lib/systemd/systemd-sulogin-shell"])
+                elif os.path.exists("/usr/sbin/sulogin"):
+                    subprocess.run(["/usr/sbin/sulogin"])
                 else:
-                    subprocess.run(["/bin/sh"])
+                    subprocess.run(["/sbin/sulogin"])
                 render_screen()
     except Exception as e:
         sys.stderr.write(f"Death screen error: {e}\n")

@@ -69,37 +69,44 @@ if [ -f /usr/share/applications/liveinst.desktop ]; then
 fi
 
 # Pre-configure SolarUI pinned apps with Anaconda installer for live session
-cat > ~liveuser/.config/solarui/config.json << 'FOE'
-{
-  "shell": {
-    "engine": "noctalia",
-    "launcher_provider": "noctalia",
-    "dashboard_provider": "noctalia"
-  },
-  "taskbar": {
-    "enabled": false,
-    "theme_mode": "dark",
-    "opacity": 0.92,
-    "height": 44,
-    "icon_size": 20,
-    "start_menu_icon": "solar-logo",
-    "show_pinned": true,
-    "show_tasks": true,
-    "show_tray": true,
-    "show_clock": true,
-    "pinned_apps": [
-      "liveinst",
-      "blaze-house",
-      "alacritty",
-      "nautilus",
-      "firefox"
-    ]
-  },
-  "display": {
-    "scale": 1.0,
-    "text_scale": 1.0
-  }
-}
+rm -f ~liveuser/.config/solarui/config.json 2>/dev/null || :
+cat > ~liveuser/.config/solarui/config.toml << 'FOE'
+[shell]
+engine = "noctalia"
+launcher_provider = "noctalia"
+dashboard_provider = "noctalia"
+
+[taskbar]
+enabled = false
+theme_mode = "dark"
+opacity = 0.92
+height = 44
+icon_size = 20
+start_menu_icon = "solar-logo"
+show_pinned = true
+show_tasks = true
+show_tray = true
+show_clock = true
+pinned_apps = [
+    "liveinst",
+    "blaze-house",
+    "alacritty",
+    "nautilus",
+    "firefox",
+]
+
+[display]
+scale = 1.0
+text_scale = 1.0
+
+[branding]
+distro_name = "BlazeOS"
+edition = "SolarEvolution"
+accent = "solar_amber"
+
+[acoustic]
+enabled = true
+volume = 0.6
 FOE
 chown -R liveuser:liveuser ~liveuser/.config ~liveuser/Desktop ~liveuser/.local 2>/dev/null || :
 
@@ -141,6 +148,7 @@ FOE
 echo "solarui" > /tmp/anaconda_desktop_choice 2>/dev/null || :
 chmod 666 /tmp/anaconda_desktop_choice 2>/dev/null || :
 echo "grub2" > /tmp/anaconda_bootloader_choice 2>/dev/null || :
+chmod 666 /tmp/anaconda_bootloader_choice 2>/dev/null || :
 echo "minimal" > /tmp/anaconda_desktop_profile 2>/dev/null || :
 chmod 666 /tmp/anaconda_desktop_profile 2>/dev/null || :
 echo "standard" > /tmp/anaconda_usage_profile 2>/dev/null || :

@@ -56,6 +56,14 @@ impl SolarShellSwitcher {
     }
 
     async fn switch(&self, requested: Option<ShellEngine>) -> Result<()> {
+        if requested.is_some() {
+            // Detach from parent process group so stopping the active shell (e.g. Caelestia/Quickshell)
+            // never kills this transition process via SIGHUP before the target shell starts.
+            unsafe {
+                libc::setsid();
+                libc::signal(libc::SIGHUP, libc::SIG_IGN);
+            }
+        }
         let lock_path = solar_common::get_solar_runtime_dir().join("shell-transition.lock");
         let _lock = if requested.is_some() {
             let mut acquired = None;
@@ -78,18 +86,42 @@ impl SolarShellSwitcher {
         };
         // Read desired state AFTER obtaining the cross-process lock. The watchdog
         // must never apply an old choice after a concurrent user switch completes.
-        let mut desired = self.supervisor.load_desired_state()?;
+        let mut desired = match self.supervisor.load_desired_state() {
+            Ok(d) => d,
+            Err(e) if requested.is_some() => {
+                tracing::warn!(
+                    "Config file had errors ({e}); healing config.toml so explicit shell switch can proceed."
+                );
+                let cfg_path = solar_common::SolarConfig::config_path();
+                let _ = std::fs::copy(&cfg_path, cfg_path.with_extension("toml.bak"));
+                let mut fresh = solar_common::SolarConfig::default();
+                fresh.shell.engine = requested.unwrap();
+                let content = toml::to_string_pretty(&fresh).unwrap_or_default();
+                let _ = solar_common::persistence::atomic_write(&cfg_path, content.as_bytes());
+                crate::supervisor::DesiredState {
+                    desired_engine: requested.unwrap(),
+                    desired_profile: fresh.performance.profile.as_str().to_string(),
+                }
+            }
+            Err(e) => return Err(e),
+        };
+        let original_desired = desired.clone();
         let target = requested.unwrap_or(desired.desired_engine);
         let previous = self.actual().await;
+
+        self.preflight_check(target).await?;
+
+        desired.desired_engine = target;
+        self.supervisor
+            .save_desired_state(&desired)
+            .context("Cannot persist shell choice")?;
+
         if !SolarShellSupervisor::is_reconciled(target, &previous) {
-            self.preflight_check(target).await?;
-            self.transition_with_rollback(target, &previous).await?;
-        }
-        if desired.desired_engine != target {
-            desired.desired_engine = target;
-            if let Err(error) = self.supervisor.save_desired_state(&desired) {
-                let rollback = self.rollback(&previous).await;
-                bail!("Cannot persist shell choice: {error:#}; rollback: {rollback:?}");
+            if let Err(err) = self.transition_with_rollback(target, &previous).await {
+                if original_desired.desired_engine != target {
+                    let _ = self.supervisor.save_desired_state(&original_desired);
+                }
+                return Err(err);
             }
         }
         Ok(())

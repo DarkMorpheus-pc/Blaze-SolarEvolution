@@ -15,8 +15,13 @@ fi
 for path in \
     /usr/bin/solar-shell /usr/bin/solar-session /usr/bin/solar-session-wrapper \
     /usr/bin/solar-settings /usr/bin/solar-omnibar /usr/bin/solar-core \
+    /usr/bin/solar-lock /usr/bin/blaze-gamezone \
+    /usr/share/applications/blaze-gamezone.desktop \
+    /usr/lib/systemd/user/solar-core.service \
+    /usr/lib/systemd/user/solar-shell.service \
+    /usr/lib/systemd/user/solarui-session.target \
     /usr/share/wayland-sessions/solarui.desktop; do
-    [ ! -e "$path" ] || rm -f -- "$path"
+    [ ! -e "$path" ] && [ ! -L "$path" ] || rm -f -- "$path"
 done
 for tree in \
     /usr/share/quickshell/end4-pC /usr/share/caelestia \

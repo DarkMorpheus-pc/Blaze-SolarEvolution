@@ -283,7 +283,7 @@ LIMEOF
         fi
         if [[ -n "$limine_bin" ]]; then
             local target_dev
-            target_dev=$(findmnt -n -o SOURCE "${SYSROOT}/boot" 2>/dev/null || findmnt -n -o SOURCE "${SYSROOT:-/}" 2>/dev/null || true)
+            target_dev=$( (findmnt -n -o SOURCE "${SYSROOT}/boot" 2>/dev/null || findmnt -n -o SOURCE "${SYSROOT:-/}" 2>/dev/null || true) | sed 's/\[.*//' )
             if [[ -n "$target_dev" ]]; then
                 local disk_name
                 disk_name=$(lsblk -no PKNAME "$target_dev" 2>/dev/null | head -1 || true)
@@ -310,7 +310,7 @@ LIMEOF
     # 5. Register with efibootmgr if running on live UEFI system
     if [[ -d /sys/firmware/efi ]] && command -v efibootmgr &>/dev/null; then
         local esp_mount
-        esp_mount=$(findmnt -n -o SOURCE "$esp" 2>/dev/null || true)
+        esp_mount=$(findmnt -n -o SOURCE "$esp" 2>/dev/null | sed 's/\[.*//' || true)
         if [[ -n "$esp_mount" ]]; then
             local esp_disk
             local esp_part

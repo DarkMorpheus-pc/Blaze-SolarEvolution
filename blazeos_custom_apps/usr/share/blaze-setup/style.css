@@ -1037,3 +1037,67 @@ body.theme-light .btn-secondary:hover:not(:disabled) {
 .btn-primary:active:not(:disabled) {
     background: var(--apple-blue-active);
 }
+
+/* Wi-Fi Scan & Inline Connect UI (Slide 1) */
+.wifi-list-box {
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(0, 0, 0, 0.22);
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+body.theme-light .wifi-list-box {
+    border: 1px solid #d2d2d7;
+    background: #ffffff;
+}
+
+.wifi-row {
+    padding: 10px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 13px;
+    transition: background 0.12s ease;
+}
+
+.wifi-row:last-child {
+    border-bottom: none;
+}
+
+.wifi-row:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+body.theme-light .wifi-row:hover {
+    background: rgba(0, 0, 0, 0.04);
+}
+
+.wifi-row.selected {
+    background: rgba(0, 113, 227, 0.18);
+}
+
+.wifi-connect-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(0, 113, 227, 0.45);
+    background: rgba(0, 113, 227, 0.10);
+}
+
+.wifi-connect-ssid {
+    font-size: 12.5px;
+    font-weight: 600;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wifi-connect-bar .macos-input {
+    flex: 1;
+}

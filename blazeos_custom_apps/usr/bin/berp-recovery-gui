@@ -6,26 +6,324 @@ OrangeFox-inspired GUI Recovery Environment powered by BERP.
 Zero emojis, maximum reliability, offline capable.
 """
 
-import os
-import sys
-import json
-import time
-import glob
-import shutil
-import subprocess
-import threading
+import atexit
 import ctypes
+import glob
+import json
+import os
 import re
 import secrets
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+import time
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 
 PORT = 49223
-API_TOKEN = secrets.token_urlsafe(32)
+API_TOKEN = os.environ.get("BERP_API_TOKEN") or secrets.token_urlsafe(32)
+os.environ["BERP_API_TOKEN"] = API_TOKEN
+
+RUNTIME_TMPDIR = None
 STATIC_DIR = "/usr/share/berp-recovery"
 if not os.path.isdir(STATIC_DIR):
     local_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../share/berp-recovery")
     if os.path.isdir(local_dir):
         STATIC_DIR = local_dir
+
+
+def get_runtime_tmpdir():
+    """Create and return a mode-0700 temporary directory for this session."""
+    global RUNTIME_TMPDIR
+    if RUNTIME_TMPDIR is None or not os.path.isdir(RUNTIME_TMPDIR):
+        RUNTIME_TMPDIR = tempfile.mkdtemp(prefix="berp-recovery-")
+        os.chmod(RUNTIME_TMPDIR, 0o700)
+        token_file = os.path.join(RUNTIME_TMPDIR, "api.token")
+        with open(token_file, "w", encoding="utf-8") as f:
+            f.write(API_TOKEN)
+        os.chmod(token_file, 0o600)
+        atexit.register(lambda: shutil.rmtree(RUNTIME_TMPDIR, ignore_errors=True))
+    return RUNTIME_TMPDIR
+
+
+def strip_btrfs_source(dev):
+    """Strip Btrfs subvolume suffix '[...]' from findmnt SOURCE output."""
+    return (dev or "").split("[")[0].strip()
+
+
+def detect_root_info():
+    """Return (is_btrfs, root_dev, active_fsroot, fstype) for '/'."""
+    is_btrfs = False
+    root_dev = ""
+    active_fsroot = "root"
+    fstype = "unknown"
+    try:
+        out = subprocess.check_output(
+            ["findmnt", "-n", "-o", "FSTYPE,SOURCE,FSROOT", "/"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        parts = out.split()
+        if len(parts) >= 1:
+            fstype = parts[0].strip()
+            is_btrfs = fstype == "btrfs"
+        if len(parts) >= 2:
+            root_dev = strip_btrfs_source(parts[1])
+        if len(parts) >= 3:
+            fsr = parts[2].strip().lstrip("/")
+            if fsr:
+                active_fsroot = fsr
+    except Exception:
+        pass
+    return is_btrfs, root_dev, active_fsroot, fstype
+
+
+def has_factory_image():
+    """Return True if a standalone BERE squashfs or factory Btrfs snapshot exists."""
+    return (
+        os.path.exists("/boot/bere/recovery.squashfs")
+        or os.path.exists("/.blaze-snapshots/factory-initial")
+        or os.path.exists("/.snapshots/factory-initial")
+        or os.path.exists("/@factory_reset")
+        or os.path.exists("/@golden_rootfs")
+    )
+
+
+def clear_boot_triggers():
+    """Clear all GRUB and filesystem recovery triggers and boot counters."""
+    if os.path.exists("/boot/grub2/grubenv") and shutil.which("grub2-editenv"):
+        for args in [
+            ["grub2-editenv", "/boot/grub2/grubenv", "set", "boot_counter=0"],
+            ["grub2-editenv", "/boot/grub2/grubenv", "set", "blaze_recovery=-"],
+            ["grub2-editenv", "/boot/grub2/grubenv", "unset", "blaze_recovery"],
+        ]:
+            try:
+                subprocess.run(args, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+            except Exception:
+                pass
+
+    for trigger in [
+        "/var/run/blaze_recovery_trigger",
+        "/run/blaze_recovery_trigger",
+        "/var/lib/blaze/berp-trigger",
+        "/boot/bere/recovery_triggered",
+        "/etc/blaze_recovery_alert",
+        "/run/blaze_recovery_alert",
+    ]:
+        if os.path.exists(trigger):
+            try:
+                os.remove(trigger)
+            except Exception:
+                pass
+
+    if os.path.isdir("/var/lib/blaze") or os.path.exists("/var/lib/blaze/berp-counter"):
+        try:
+            os.makedirs("/var/lib/blaze", mode=0o700, exist_ok=True)
+            with open("/var/lib/blaze/berp-counter", "w", encoding="utf-8") as f:
+                f.write("0\n")
+        except Exception:
+            pass
+
+
+def wipe_human_users():
+    """Remove all human user accounts (1000 <= uid < 60000) cleanly via userdel -rf and fallback db cleanup."""
+    human_users = set()
+    try:
+        if os.path.exists("/etc/passwd"):
+            with open("/etc/passwd", "r", encoding="utf-8") as f:
+                for line in f:
+                    parts = line.strip().split(":")
+                    if len(parts) >= 3:
+                        try:
+                            u, uid = parts[0], int(parts[2])
+                            if 1000 <= uid < 60000 and u not in ("nobody", "nfsnobody", "liveuser", "blaze-setup"):
+                                human_users.add(u)
+                        except ValueError:
+                            pass
+    except Exception:
+        pass
+
+    for u in human_users:
+        try:
+            subprocess.run(["userdel", "-rf", u], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+        for extra in [f"/etc/sudoers.d/{u}", f"/var/lib/AccountsService/users/{u}"]:
+            if os.path.exists(extra):
+                try:
+                    os.remove(extra)
+                except Exception:
+                    pass
+
+    if human_users:
+        for db_file in ["/etc/passwd", "/etc/shadow", "/etc/group", "/etc/gshadow", "/etc/subuid", "/etc/subgid"]:
+            if os.path.exists(db_file):
+                try:
+                    with open(db_file, "r", encoding="utf-8") as f:
+                        lines = f.readlines()
+                    filtered = [ln for ln in lines if ln.split(":", 1)[0].strip() not in human_users]
+                    with open(db_file, "w", encoding="utf-8") as f:
+                        f.writelines(filtered)
+                except Exception:
+                    pass
+
+
+def prepare_oobe_reset():
+    """Restore OOBE first-boot state, sudoers rule (0440), and SDDM autologin."""
+    for marker in [
+        "/etc/blazeos-setup-completed",
+        "/etc/blaze-firstboot-done",
+        "/var/lib/solar-firstboot/done",
+    ]:
+        if os.path.exists(marker):
+            try:
+                os.remove(marker)
+            except Exception:
+                pass
+
+    os.makedirs("/etc/sudoers.d", exist_ok=True)
+    sudoers_path = "/etc/sudoers.d/99-blaze-setup"
+    with open(sudoers_path, "w", encoding="utf-8") as f:
+        f.write("blaze-setup ALL=(ALL) NOPASSWD: ALL\n")
+    os.chmod(sudoers_path, 0o440)
+
+    os.makedirs("/etc/sddm.conf.d", exist_ok=True)
+    autologin_cfg = "[Autologin]\nUser=blaze-setup\nSession=blaze-oobe.desktop\nRelogin=false\n"
+    for conf_name in ["autologin.conf", "00-blaze-oobe.conf"]:
+        with open(os.path.join("/etc/sddm.conf.d", conf_name), "w", encoding="utf-8") as f:
+            f.write(autologin_cfg)
+
+    oobe_template = "/usr/share/blaze-setup/blaze-oobe.desktop"
+    oobe_session = "/usr/share/wayland-sessions/blaze-oobe.desktop"
+    if os.path.isfile(oobe_template):
+        os.makedirs(os.path.dirname(oobe_session), exist_ok=True)
+        shutil.copy2(oobe_template, oobe_session)
+
+    if subprocess.run(["id", "-u", "blaze-setup"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
+        subprocess.run(
+            ["useradd", "--system", "--create-home", "--home-dir", "/var/lib/blaze-setup", "--shell", "/bin/bash", "blaze-setup"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    subprocess.run(["systemctl", "enable", "sddm.service"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def preserve_nested_snapshot_containers(old_subvol_path, target_subvol):
+    """Move nested .snapshots and .blaze-snapshots from old root subvolume into newly restored root subvolume."""
+    for nested_name in (".blaze-snapshots", ".snapshots"):
+        old_nested = os.path.join(old_subvol_path, nested_name)
+        new_nested = os.path.join(target_subvol, nested_name)
+        if not os.path.exists(old_nested):
+            continue
+        if os.path.exists(new_nested):
+            try:
+                os.rmdir(new_nested)
+            except Exception:
+                pass
+        if not os.path.exists(new_nested):
+            try:
+                os.rename(old_nested, new_nested)
+                continue
+            except Exception:
+                pass
+        if os.path.isdir(old_nested) and os.path.isdir(new_nested):
+            for entry in os.listdir(old_nested):
+                src_e = os.path.join(old_nested, entry)
+                dst_e = os.path.join(new_nested, entry)
+                if not os.path.exists(dst_e):
+                    try:
+                        os.rename(src_e, dst_e)
+                    except Exception:
+                        pass
+
+
+def resolve_btrfs_snapshot_source(top_mount, active_subvol, old_subvol_path, snap_path):
+    """Resolve the snapshot path inside top_mount after active_subvol was renamed to old_subvol_path."""
+    snap_rel = snap_path.lstrip("/")
+    prefix = f"{active_subvol.strip('/')}/"
+    stripped_rel = snap_rel[len(prefix):] if snap_rel.startswith(prefix) else snap_rel
+
+    candidates = [
+        os.path.join(old_subvol_path, stripped_rel),
+        os.path.join(old_subvol_path, snap_rel),
+        os.path.join(top_mount, snap_rel),
+        os.path.join(top_mount, stripped_rel),
+        snap_path,
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    return candidates[0]
+
+
+def perform_btrfs_root_rollback(root_dev, active_fsroot, snap_path):
+    """Roll back active root subvolume on top-level Btrfs mount (subvolid=5) to snap_path."""
+    top_mount = "/mnt/bere_btrfs_top"
+    os.makedirs(top_mount, exist_ok=True)
+    mount_p = subprocess.run(
+        ["mount", "-o", "subvolid=5", root_dev, top_mount],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    if mount_p.returncode != 0:
+        return False, f"Btrfs top-level bağlanamadı: {mount_p.stdout}"
+
+    try:
+        active_subvol = active_fsroot.strip("/")
+        if not active_subvol or "/" in active_subvol or not os.path.exists(os.path.join(top_mount, active_subvol)):
+            for cand in ("root", "@", "@_active"):
+                if os.path.exists(os.path.join(top_mount, cand)):
+                    active_subvol = cand
+                    break
+            else:
+                active_subvol = "root"
+
+        target_subvol = os.path.join(top_mount, active_subvol)
+        old_subvol_name = f"{active_subvol}_old_{int(time.time())}"
+        old_subvol_path = os.path.join(top_mount, old_subvol_name)
+
+        renamed = False
+        if os.path.exists(target_subvol):
+            os.rename(target_subvol, old_subvol_path)
+            renamed = True
+
+        source_path = resolve_btrfs_snapshot_source(
+            top_mount,
+            active_subvol,
+            old_subvol_path if renamed else target_subvol,
+            snap_path,
+        )
+
+        res = subprocess.run(
+            ["btrfs", "subvolume", "snapshot", source_path, target_subvol],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        if res.returncode != 0:
+            if renamed and not os.path.exists(target_subvol):
+                try:
+                    os.rename(old_subvol_path, target_subvol)
+                except Exception:
+                    pass
+            return False, f"Btrfs subvolume geri yükleme başarısız: {res.stdout}"
+
+        # Ensure restored root subvolume is writable (ro=false)
+        subprocess.run(
+            ["btrfs", "property", "set", "-ts", target_subvol, "ro", "false"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        if renamed:
+            preserve_nested_snapshot_containers(old_subvol_path, target_subvol)
+
+        return True, "ok"
+    finally:
+        subprocess.run(["umount", top_mount], stderr=subprocess.DEVNULL)
+
 
 def sync_bere_to_boot():
     """Ensure BERE runtime and recovery tools exist on /boot partition for survival."""
@@ -50,6 +348,7 @@ def sync_bere_to_boot():
     except Exception as e:
         print(f"[BERE] Warning syncing to /boot: {e}")
 
+
 def remount_filesystems_rw():
     """Ensure root and standard partitions are read-write for recovery operations."""
     for mp in ["/", "/home", "/boot", "/boot/efi"]:
@@ -57,6 +356,7 @@ def remount_filesystems_rw():
             subprocess.run(["mount", "-o", "remount,rw", mp], stderr=subprocess.DEVNULL)
         except Exception:
             pass
+
 
 def clean_path_contents(path):
     """Safely wipe directory contents without deleting the root container, using pure Python without /bin/sh."""
@@ -75,6 +375,11 @@ def clean_path_contents(path):
     except Exception as e:
         print(f"[BERE] Warning scanning {path}: {e}")
 
+
+class ReusableHTTPServer(HTTPServer):
+    allow_reuse_address = True
+
+
 class RecoveryAPIHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=STATIC_DIR, **kwargs)
@@ -82,12 +387,25 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
+    def _is_authorized(self):
+        hdr_token = self.headers.get("X-BERP-Token", "")
+        if hdr_token and secrets.compare_digest(hdr_token, API_TOKEN):
+            return True
+        return False
+
+    def _send_json(self, payload, status_code=200):
+        self.send_response(status_code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(json.dumps(payload).encode("utf-8"))
+
     def do_POST(self):
         if self.path.startswith("/api/"):
-            if not secrets.compare_digest(self.headers.get("X-BERP-Token", ""), API_TOKEN):
+            if not self._is_authorized():
                 self.send_error(403, "Forbidden")
                 return
-            endpoint = self.path[len("/api/"):]
+            endpoint = self.path[len("/api/"):].split("?", 1)[0]
             length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length) if length > 0 else b"{}"
             try:
@@ -96,24 +414,28 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
                 data = {}
 
             res = self.handle_api(endpoint, data)
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(res).encode("utf-8"))
+            code = res.pop("_http_status", 200) if isinstance(res, dict) else 200
+            self._send_json(res, status_code=code)
         else:
             self.send_error(404, "Not Found")
 
     def do_GET(self):
+        if self.path.startswith("/api/bootstrap"):
+            # Localhost-only bootstrap token endpoint so API_TOKEN is never leaked on /proc/<pid>/cmdline
+            if self.client_address[0] in ("127.0.0.1", "::1"):
+                self._send_json({"status": "ok", "token": API_TOKEN})
+            else:
+                self.send_error(403, "Forbidden")
+            return
+
         if self.path.startswith("/api/"):
-            if not secrets.compare_digest(self.headers.get("X-BERP-Token", ""), API_TOKEN):
+            if not self._is_authorized():
                 self.send_error(403, "Forbidden")
                 return
-            endpoint = self.path[len("/api/"):]
+            endpoint = self.path[len("/api/"):].split("?", 1)[0]
             res = self.handle_api(endpoint, {})
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(res).encode("utf-8"))
+            code = res.pop("_http_status", 200) if isinstance(res, dict) else 200
+            self._send_json(res, status_code=code)
         else:
             super().do_GET()
 
@@ -144,6 +466,21 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
 
             return {"status": "ok", "cpu": cpu, "ram": ram}
 
+        elif endpoint == "info":
+            is_btrfs, root_dev, active_fsroot, fstype = detect_root_info()
+            return {
+                "status": "ok",
+                "root_btrfs": is_btrfs,
+                "root_fstype": fstype,
+                "root_device": root_dev,
+                "root_subvol": active_fsroot,
+                "uefi": os.path.exists("/sys/firmware/efi"),
+                "has_factory_image": (
+                    os.path.exists("/boot/bere/recovery.squashfs")
+                    or os.path.exists("/.blaze-snapshots/factory-initial")
+                ),
+            }
+
         elif endpoint == "isos":
             isos = []
             search_patterns = [
@@ -153,7 +490,7 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
                 "/run/media/*/*.iso",
                 "/mnt/*.iso",
                 "/mnt/*/*.iso",
-                "/*.iso"
+                "/*.iso",
             ]
             found_paths = set()
             for pat in search_patterns:
@@ -165,23 +502,36 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
                             isos.append({
                                 "name": os.path.basename(match),
                                 "path": match,
-                                "size_mb": sz_mb
+                                "size_mb": sz_mb,
                             })
                         except Exception:
                             pass
             return {"status": "ok", "isos": sorted(isos, key=lambda x: x["name"])}
 
-        elif endpoint == "iso_boot":
-            iso_path = data.get("path")
-            if not iso_path or not os.path.isfile(iso_path):
+        elif endpoint in ("iso_boot", "boot_iso"):
+            iso_path = data.get("path") or data.get("iso_path") or ""
+            if not iso_path or not isinstance(iso_path, str):
+                return {"status": "error", "message": "Gecerli bir ISO dosyasi bulunamadi."}
+
+            # Reject unsafe shell / GRUB metacharacters
+            if any(ch in iso_path for ch in ('"', "'", "$", "`", "\n", "\r", "}", "{", ";", "|", "&")):
+                return {"status": "error", "message": "ISO dosya yolunda güvenlik açısından geçersiz karakterler var."}
+
+            if not os.path.isfile(iso_path):
                 return {"status": "error", "message": "Gecerli bir ISO dosyasi bulunamadi."}
 
             try:
                 iso_path = os.path.realpath(iso_path)
+                if any(ch in iso_path for ch in ('"', "'", "$", "`", "\n", "\r", "}", "{", ";", "|", "&")):
+                    return {"status": "error", "message": "ISO gerçek yolunda güvenlik açısından geçersiz karakterler var."}
+
                 def iso_has(path):
                     check = subprocess.run(
                         ["xorriso", "-indev", iso_path, "-ls", path],
-                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=20
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.DEVNULL,
+                        text=True,
+                        timeout=20,
                     )
                     return check.returncode == 0 and path in check.stdout
 
@@ -194,18 +544,33 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
                 else:
                     return {"status": "error", "message": "Bu kalıp desteklenen bir Blaze/Fedora Live ISO değil."}
 
-                mount_info = subprocess.check_output(
-                    ["findmnt", "-n", "-o", "SOURCE,TARGET", "-T", iso_path], text=True
-                ).strip().split(None, 1)
-                if len(mount_info) != 2:
-                    return {"status": "error", "message": "ISO dosyasının bulunduğu dosya sistemi belirlenemedi."}
-                source_dev, mount_point = mount_info
-                uuid_out = subprocess.check_output(
-                    ["blkid", "-s", "UUID", "-o", "value", source_dev], text=True
+                fm_out = subprocess.check_output(
+                    ["findmnt", "-n", "-P", "-o", "UUID,MOUNTPOINT,FSTYPE,FSROOT,SOURCE", "--target", iso_path],
+                    text=True,
                 ).strip()
+                fm_pairs = dict(re.findall(r'([A-Z]+)="([^"]*)"', fm_out))
+                uuid_out = fm_pairs.get("UUID", "").strip()
+                mount_point = fm_pairs.get("MOUNTPOINT", "").strip()
+                fstype = fm_pairs.get("FSTYPE", "").strip()
+                fsroot = fm_pairs.get("FSROOT", "/").strip()
+                source_dev = strip_btrfs_source(fm_pairs.get("SOURCE", ""))
+
+                if not mount_point:
+                    return {"status": "error", "message": "ISO dosyasının bulunduğu dosya sistemi belirlenemedi."}
+                if not uuid_out and source_dev:
+                    uuid_out = subprocess.check_output(
+                        ["blkid", "-s", "UUID", "-o", "value", source_dev], text=True
+                    ).strip()
+
                 rel_path = "/" + os.path.relpath(iso_path, mount_point).lstrip("/")
                 if rel_path.startswith("/../") or not uuid_out:
                     return {"status": "error", "message": "ISO için güvenli GRUB yolu üretilemedi."}
+
+                # On Btrfs, GRUB accesses from top-level subvolid=5, so prepend FSROOT (e.g. /home or /root)
+                if fstype == "btrfs" and fsroot and fsroot != "/":
+                    clean_fsroot = "/" + fsroot.strip("/")
+                    if not rel_path.startswith(clean_fsroot + "/"):
+                        rel_path = clean_fsroot + rel_path
 
                 def grub_escape(value):
                     return value.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$")
@@ -215,7 +580,7 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
                 ).strip()
                 safe_path = grub_escape(rel_path)
                 safe_label = grub_escape(iso_label)
-                safe_name = os.path.basename(iso_path).replace('"', "'")
+                safe_name = re.sub(r'[^A-Za-z0-9._ -]', '_', os.path.basename(iso_path))
 
                 iso_entry = f"""# BlazeOS Loopback ISO Boot
 menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
@@ -255,42 +620,74 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                 else:
                     return {"status": "error", "message": "grub2-reboot bulunamadı."}
 
+                clear_boot_triggers()
                 return {"status": "ok", "message": "ISO baslatma yapilandirildi."}
             except Exception as e:
                 return {"status": "error", "message": str(e)}
 
         elif endpoint == "snapshots":
             snapshots = []
+            seen_realpaths = set()
+            _, _, active_fsroot, _ = detect_root_info()
+            fsroot_prefix = active_fsroot.strip("/") + "/" if active_fsroot.strip("/") else ""
+
+            def add_snapshot_candidate(raw_path):
+                norm = "/" + raw_path.lstrip("/")
+                # Never offer /home snapshots or container subvolumes as root rollback targets
+                if (
+                    norm in ("/.snapshots", "/.blaze-snapshots", "/home", "/home/.snapshots")
+                    or norm.startswith("/home/.snapshots/")
+                    or norm.endswith("_home")
+                ):
+                    return
+                canon = os.path.realpath(norm) if os.path.exists(norm) else norm
+                if canon in seen_realpaths:
+                    return
+                seen_realpaths.add(canon)
+                try:
+                    mtime = os.path.getmtime(norm) if os.path.exists(norm) else time.time()
+                    date_str = time.strftime("%Y-%m-%d %H:%M", time.localtime(mtime))
+                except Exception:
+                    date_str = time.strftime("%Y-%m-%d %H:%M")
+                snapshots.append({
+                    "name": os.path.basename(norm),
+                    "path": norm,
+                    "date": date_str,
+                })
+
             try:
-                out = subprocess.check_output(["btrfs", "subvolume", "list", "/"], stderr=subprocess.DEVNULL).decode("utf-8")
+                out = subprocess.check_output(
+                    ["btrfs", "subvolume", "list", "/"], stderr=subprocess.DEVNULL, text=True
+                )
                 for line in out.splitlines():
                     if "snapshots" in line or "backup" in line:
                         parts = line.split("path ")
                         if len(parts) > 1:
-                            sub_path = parts[1].strip()
-                            snapshots.append({
-                                "name": os.path.basename(sub_path),
-                                "path": "/" + sub_path,
-                                "date": time.strftime("%Y-%m-%d %H:%M")
-                            })
+                            sub_path = parts[1].strip().lstrip("/")
+                            if fsroot_prefix and sub_path.startswith(fsroot_prefix):
+                                sub_path = sub_path[len(fsroot_prefix):]
+                            if sub_path.startswith("home/"):
+                                continue
+                            add_snapshot_candidate("/" + sub_path)
             except Exception:
                 pass
 
-            for snap_dir in ["/.blaze-snapshots", "/.snapshots", "/home/.snapshots"]:
+            for snap_dir in ["/.blaze-snapshots", "/.snapshots"]:
                 if os.path.isdir(snap_dir):
-                    for item in os.listdir(snap_dir):
+                    for item in sorted(os.listdir(snap_dir)):
                         full = os.path.join(snap_dir, item)
                         if os.path.isdir(full):
-                            snapshots.append({
-                                "name": item,
-                                "path": full,
-                                "date": time.ctime(os.path.getmtime(full))
-                            })
+                            add_snapshot_candidate(full)
 
             return {"status": "ok", "snapshots": snapshots}
 
         elif endpoint == "create_snapshot":
-            name = data.get("name", "snap-" + str(int(time.time())))
+            name = (data.get("name") or "").strip() or f"snap-{int(time.time())}"
+            if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", name):
+                return {
+                    "status": "error",
+                    "message": "Geçersiz yedek adı. Yalnızca harf, rakam, nokta, tire ve alt çizgi (1-64 karakter) kullanılabilir.",
+                }
             snap_root = data.get("root", True)
             snap_home = data.get("home", True)
 
@@ -303,7 +700,7 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                     os.makedirs("/home/.snapshots", exist_ok=True)
                     target_h = f"/home/.snapshots/{name}_home"
                     subprocess.run(["btrfs", "subvolume", "snapshot", "-r", "/home", target_h], check=True)
-                return {"status": "ok", "message": "Anlik goruntu basariyla olusturuldu."}
+                return {"status": "ok", "message": "Anlik goruntu basariyla olusturuldu.", "name": name}
             except Exception as e:
                 return {"status": "error", "message": f"Snapshot alinamadi: {e}"}
 
@@ -312,93 +709,68 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
             if not snap_path or not os.path.exists(snap_path):
                 return {"status": "error", "message": "Yedek yolu bulunamadi."}
 
+            if "/home/.snapshots" in snap_path or snap_path.endswith("_home"):
+                return {
+                    "status": "error",
+                    "message": "Kullanıcı (/home) anlık görüntüsü kök dosya sistemine (/) geri yüklenemez!",
+                }
+
             remount_filesystems_rw()
             try:
-                # 1. Btrfs rollback
-                is_btrfs = False
-                root_dev = ""
-                try:
-                    out = subprocess.check_output(["findmnt", "-n", "-o", "FSTYPE,SOURCE", "/"], text=True).strip()
-                    parts = out.split()
-                    if parts and parts[0] == "btrfs":
-                        is_btrfs = True
-                        root_dev = parts[1] if len(parts) > 1 else ""
-                except Exception:
-                    pass
+                is_btrfs, root_dev, active_fsroot, _ = detect_root_info()
 
                 if is_btrfs and root_dev:
-                    top_mount = "/mnt/bere_btrfs_top"
-                    os.makedirs(top_mount, exist_ok=True)
-                    # Mount top-level Btrfs tree (subvolid=5)
-                    mount_p = subprocess.run(["mount", "-o", "subvolid=5", root_dev, top_mount], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-                    if mount_p.returncode == 0:
-                        try:
-                            # Subvolume rollback: aktif subvolume'u yedekle ve snapshot'tan yeni rw subvolume olustur
-                            target_subvol = os.path.join(top_mount, "root")
-                            if not os.path.exists(target_subvol):
-                                target_subvol = os.path.join(top_mount, "@")
-
-                            subvol_name = os.path.basename(target_subvol)
-                            if os.path.exists(target_subvol):
-                                backup_name = f"{subvol_name}.broken.{int(time.time())}"
-                                os.rename(target_subvol, os.path.join(top_mount, backup_name))
-
-                            # Snapshot'tan yeni yazilabilir subvolume yarat
-                            snap_in_top = snap_path.lstrip("/")
-                            source_path = os.path.join(top_mount, snap_in_top)
-                            if not os.path.exists(source_path):
-                                source_path = snap_path
-
-                            res = subprocess.run(["btrfs", "subvolume", "snapshot", source_path, target_subvol], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-                            if res.returncode != 0:
-                                return {"status": "error", "message": f"Btrfs subvolume geri yükleme başarısız: {res.stdout}"}
-                        finally:
-                            subprocess.run(["umount", top_mount], stderr=subprocess.DEVNULL)
-                    else:
-                        # Fallback: Yerel subvolume snapshot
-                        res = subprocess.run(["btrfs", "subvolume", "snapshot", snap_path, "/@_restored_root"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-                        if res.returncode != 0:
-                            return {"status": "error", "message": f"Btrfs rollback başarısız: {res.stdout}"}
+                    ok, err_msg = perform_btrfs_root_rollback(root_dev, active_fsroot, snap_path)
+                    if not ok:
+                        return {"status": "error", "message": err_msg}
                 else:
-                    # 2. Ext4 / XFS veya dizin bazlı snapshot rollback (rsync fallback)
+                    # Ext4 / XFS veya dizin bazlı snapshot rollback (rsync fallback)
                     rsync_cmd = [
-                        "rsync", "-aHAX", "--delete",
-                        "--exclude=/boot", "--exclude=/dev", "--exclude=/proc",
-                        "--exclude=/sys", "--exclude=/run", "--exclude=/mnt",
-                        "--exclude=/tmp", "--exclude=/var/tmp",
-                        f"{snap_path.rstrip('/')}/", "/"
+                        "rsync",
+                        "-aHAX",
+                        "--delete",
+                        "--exclude=/boot",
+                        "--exclude=/dev",
+                        "--exclude=/proc",
+                        "--exclude=/sys",
+                        "--exclude=/run",
+                        "--exclude=/mnt",
+                        "--exclude=/tmp",
+                        "--exclude=/var/tmp",
+                        f"{snap_path.rstrip('/')}/",
+                        "/",
                     ]
                     res = subprocess.run(rsync_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                     if res.returncode != 0:
                         return {"status": "error", "message": f"Rsync geri yükleme başarısız: {res.stdout}"}
 
-                # Kurtarma tetikleyicilerini temizle (sistemin normal açılması için)
-                for trigger in ["/boot/bere/recovery_triggered", "/run/blaze_recovery_alert", "/etc/blaze_recovery_alert"]:
-                    if os.path.exists(trigger):
-                        try:
-                            os.remove(trigger)
-                        except Exception:
-                            pass
-
-                return {"status": "ok", "message": f"{os.path.basename(snap_path)} başarıyla geri yüklendi. Sistem yeniden başlatılıyor..."}
+                clear_boot_triggers()
+                return {
+                    "status": "ok",
+                    "message": f"{os.path.basename(snap_path)} başarıyla geri yüklendi. Sistem yeniden başlatılıyor...",
+                }
             except Exception as e:
                 return {"status": "error", "message": f"Geri yükleme hatası: {e}"}
 
         elif endpoint == "partitions":
             parts = []
             try:
-                out = subprocess.check_output(["lsblk", "-J", "-o", "NAME,FSTYPE,SIZE,MOUNTPOINT,LABEL"], stderr=subprocess.DEVNULL).decode("utf-8")
+                out = subprocess.check_output(
+                    ["lsblk", "-J", "-o", "NAME,FSTYPE,SIZE,MOUNTPOINT,LABEL"], stderr=subprocess.DEVNULL
+                ).decode("utf-8")
                 raw = json.loads(out)
+
                 def parse_devs(dev_list):
                     for d in dev_list:
                         parts.append({
                             "name": "/dev/" + d.get("name", ""),
                             "fstype": d.get("fstype", ""),
                             "size": d.get("size", ""),
-                            "mountpoint": d.get("mountpoint", "")
+                            "mountpoint": d.get("mountpoint", ""),
                         })
                         if "children" in d:
                             parse_devs(d["children"])
+
                 parse_devs(raw.get("blockdevices", []))
             except Exception:
                 pass
@@ -406,7 +778,8 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
             smart_info = "SMART bilgisi okunamadı; sağlık durumu doğrulanmadı."
             try:
                 nvme_check = subprocess.check_output(["nvme", "list"], stderr=subprocess.DEVNULL).decode("utf-8")
-                smart_info = nvme_check
+                if nvme_check.strip():
+                    smart_info = nvme_check
             except Exception:
                 pass
 
@@ -431,129 +804,119 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
         elif endpoint == "wipe":
             cleared = []
             lang = data.get("lang", "tr")
+            remount_filesystems_rw()
             try:
                 if data.get("system_cache"):
                     clean_path_contents("/var/cache/dnf")
                     clean_path_contents("/var/cache/flatpak")
                     clean_path_contents("/var/tmp")
-                    cleared.append("Sistem ve paket önbellekleri temizlendi" if lang == "tr" else "System and package caches cleared")
+                    cleared.append(
+                        "Sistem ve paket önbellekleri temizlendi"
+                        if lang == "tr"
+                        else "System and package caches cleared"
+                    )
 
                 if data.get("user_cache"):
                     for cache_dir in glob.glob("/home/*/.cache"):
                         clean_path_contents(cache_dir)
-                    cleared.append("Kullanıcı önbellekleri temizlendi" if lang == "tr" else "User caches cleared")
+                    cleared.append(
+                        "Kullanıcı önbellekleri temizlendi" if lang == "tr" else "User caches cleared"
+                    )
 
                 if data.get("home"):
-                    # Delete all human users from passwd
-                    try:
-                        with open("/etc/passwd", "r") as f:
-                            lines = f.readlines()
-                        filtered = []
-                        for line in lines:
-                            parts = line.strip().split(":")
-                            if len(parts) >= 3:
-                                u, uid = parts[0], int(parts[2])
-                                if 1000 <= uid < 65534 and u not in ["liveuser", "blaze-setup"]:
-                                    continue
-                            filtered.append(line)
-                        with open("/etc/passwd", "w") as f:
-                            f.writelines(filtered)
-                    except Exception:
-                        pass
-
+                    wipe_human_users()
                     clean_path_contents("/home")
-
-                    if os.path.exists("/etc/blazeos-setup-completed"):
-                        try:
-                            os.remove("/etc/blazeos-setup-completed")
-                        except Exception:
-                            pass
-                    if os.path.exists("/etc/sddm.conf.d/autologin.conf"):
-                        try:
-                            os.remove("/etc/sddm.conf.d/autologin.conf")
-                        except Exception:
-                            pass
-
-                    # Restore OOBE autologin
-                    os.makedirs("/etc/sddm.conf.d", exist_ok=True)
-                    with open("/etc/sddm.conf.d/00-blaze-oobe.conf", "w", encoding="utf-8") as f:
-                        f.write("[Autologin]\nUser=blaze-setup\nSession=blaze-oobe\nRelogin=false\n")
-                    oobe_template = "/usr/share/blaze-setup/blaze-oobe.desktop"
-                    oobe_session = "/usr/share/wayland-sessions/blaze-oobe.desktop"
-                    if os.path.isfile(oobe_template):
-                        with open(oobe_template, "r", encoding="utf-8") as src:
-                            with open(oobe_session, "w", encoding="utf-8") as dst:
-                                dst.write(src.read())
-                    cleared.append("Kullanıcı hesapları silindi, ilk kurulum sihirbazı (OOBE) aktif edildi" if lang == "tr" else "User accounts deleted, first-boot wizard (OOBE) restored")
+                    prepare_oobe_reset()
+                    clear_boot_triggers()
+                    cleared.append(
+                        "Kullanıcı hesapları silindi, ilk kurulum sihirbazı (OOBE) aktif edildi"
+                        if lang == "tr"
+                        else "User accounts deleted, first-boot wizard (OOBE) restored"
+                    )
 
                 if data.get("factory"):
-                    try:
-                        with open("/etc/passwd", "r") as f:
-                            lines = f.readlines()
-                        filtered = []
-                        for line in lines:
-                            parts = line.strip().split(":")
-                            if len(parts) >= 3:
-                                u, uid = parts[0], int(parts[2])
-                                if 1000 <= uid < 65534 and u not in ["liveuser", "blaze-setup"]:
-                                    continue
-                            filtered.append(line)
-                        with open("/etc/passwd", "w") as f:
-                            f.writelines(filtered)
-                    except Exception:
-                        pass
-
+                    wipe_human_users()
                     clean_path_contents("/home")
-
-                    if os.path.exists("/etc/blazeos-setup-completed"):
-                        try:
-                            os.remove("/etc/blazeos-setup-completed")
-                        except Exception:
-                            pass
-                    if os.path.exists("/etc/sddm.conf.d/autologin.conf"):
-                        try:
-                            os.remove("/etc/sddm.conf.d/autologin.conf")
-                        except Exception:
-                            pass
-
-                    os.makedirs("/etc/sddm.conf.d", exist_ok=True)
-                    with open("/etc/sddm.conf.d/00-blaze-oobe.conf", "w", encoding="utf-8") as f:
-                        f.write("[Autologin]\nUser=blaze-setup\nSession=blaze-oobe\nRelogin=false\n")
-                    oobe_template = "/usr/share/blaze-setup/blaze-oobe.desktop"
-                    oobe_session = "/usr/share/wayland-sessions/blaze-oobe.desktop"
-                    if os.path.isfile(oobe_template):
-                        with open(oobe_template, "r", encoding="utf-8") as src:
-                            with open(oobe_session, "w", encoding="utf-8") as dst:
-                                dst.write(src.read())
-
                     clean_path_contents("/var/log")
                     clean_path_contents("/tmp")
-                    cleared.append("Sistem fabrika ayarlarına sıfırlandı" if lang == "tr" else "System reset to factory defaults")
+                    clean_path_contents("/var/cache/dnf")
+                    clean_path_contents("/var/cache/flatpak")
+                    prepare_oobe_reset()
+                    clear_boot_triggers()
+                    cleared.append(
+                        "Sistem fabrika ayarlarına sıfırlandı"
+                        if lang == "tr"
+                        else "System reset to factory defaults"
+                    )
 
                 if data.get("hard_reset"):
-                    recovery_root = "/boot/bere/recovery.squashfs"
-                    recovery_initrd = "/boot/bere/recovery-initramfs.img"
-                    if not (os.path.isfile(recovery_root) and os.path.isfile(recovery_initrd)):
+                    confirm_code = (data.get("confirm") or "SIFIRLA").strip().upper()
+                    if confirm_code not in ("YES", "SIFIRLA", "SIFIRLA", "RESET"):
                         return {
                             "status": "error",
-                            "message": "Bağımsız BERE kurtarma imajı kurulu ve doğrulanmış değil; sistemi önyüklenemez hale getirmemek için Hard Reset engellendi."
+                            "message": "Onaylamak için 'SIFIRLA' veya 'YES' yazılmalıdır.",
                         }
-                    sync_bere_to_boot()
-                    # Hard Reset: Wipe OS and user directories on /, protecting /boot and /dev and /proc and /sys
-                    dirs_to_clean = ["/bin", "/sbin", "/lib", "/lib64", "/usr", "/var", "/etc", "/home", "/root", "/opt", "/srv", "/tmp"]
-                    for d in dirs_to_clean:
-                        clean_path_contents(d)
 
-                    cleared.append("Tam Sistem Temizliği (Hard Reset) tamamlandı" if lang == "tr" else "Complete System Wipe (Hard Reset) finished")
+                    recovery_root = "/boot/bere/recovery.squashfs"
+                    recovery_initrd = "/boot/bere/recovery-initramfs.img"
+                    factory_btrfs_snap = None
+                    for cand in ("/.blaze-snapshots/factory-initial", "/.snapshots/factory-initial", "/@factory_reset", "/@golden_rootfs"):
+                        if os.path.exists(cand):
+                            factory_btrfs_snap = cand
+                            break
+
+                    if os.path.isfile(recovery_root) and os.path.isfile(recovery_initrd):
+                        sync_bere_to_boot()
+                        dirs_to_clean = ["/bin", "/sbin", "/lib", "/lib64", "/usr", "/var", "/etc", "/home", "/root", "/opt", "/srv", "/tmp"]
+                        for d in dirs_to_clean:
+                            clean_path_contents(d)
+                        cleared.append(
+                            "Tam Sistem Temizliği (Hard Reset) tamamlandı"
+                            if lang == "tr"
+                            else "Complete System Wipe (Hard Reset) finished"
+                        )
+                    elif factory_btrfs_snap:
+                        is_btrfs, root_dev, active_fsroot, _ = detect_root_info()
+                        if is_btrfs and root_dev:
+                            ok, err_msg = perform_btrfs_root_rollback(root_dev, active_fsroot, factory_btrfs_snap)
+                            if not ok:
+                                return {"status": "error", "message": err_msg}
+                        wipe_human_users()
+                        clean_path_contents("/home")
+                        prepare_oobe_reset()
+                        clear_boot_triggers()
+                        cleared.append(
+                            "Fabrika Btrfs anlık görüntüsü geri yüklendi ve OOBE hazırlandı"
+                            if lang == "tr"
+                            else "Factory Btrfs snapshot restored and OOBE prepared"
+                        )
+                    else:
+                        # Clean full factory reset + OOBE restoration without destroying /usr
+                        wipe_human_users()
+                        clean_path_contents("/home")
+                        clean_path_contents("/var/log")
+                        clean_path_contents("/tmp")
+                        clean_path_contents("/var/tmp")
+                        clean_path_contents("/var/cache/dnf")
+                        clean_path_contents("/var/cache/flatpak")
+                        prepare_oobe_reset()
+                        clear_boot_triggers()
+                        cleared.append(
+                            "Tam Fabrika Sıfırlaması ve OOBE Kurulum Sihirbazı hazırlandı"
+                            if lang == "tr"
+                            else "Full Factory Reset and OOBE Setup Wizard prepared"
+                        )
 
                     def trigger_recovery_reboot():
                         time.sleep(2)
-                        # Disk verilerin disk'e yazilmasini garanti et
                         try:
                             os.sync()
                         except Exception:
                             pass
-                        # 1. sysrq ile dogrudan kernel reboot (en guvenilir, /usr gerekmez)
+                        try:
+                            subprocess.run(["systemctl", "reboot"], timeout=5)
+                        except Exception:
+                            pass
                         try:
                             with open("/proc/sys/kernel/sysrq", "w") as f:
                                 f.write("1\n")
@@ -561,19 +924,13 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                                 f.write("b\n")
                         except Exception:
                             pass
-                        # 2. systemctl dene (muhtemelen basarisiz olacak)
-                        try:
-                            subprocess.run(["systemctl", "reboot"], timeout=5)
-                        except Exception:
-                            pass
-                        # 3. ctypes ile dogrudan reboot syscall (ctypes dosya basinda import edildi)
                         try:
                             libc = ctypes.CDLL(None)
                             libc.reboot(0x1234567)
                         except Exception:
                             pass
 
-                    threading.Thread(target=trigger_recovery_reboot).start()
+                    threading.Thread(target=trigger_recovery_reboot, daemon=True).start()
 
                 return {"status": "ok", "cleared": cleared}
             except Exception as e:
@@ -581,20 +938,88 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
 
         elif endpoint == "boot_repair":
             target = data.get("target")
+            p = None
             out_msg = ""
             try:
                 if target == "grub":
                     cmd = ["grub2-mkconfig", "-o", "/boot/grub2/grub.cfg"]
                     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                     out_msg = p.stdout
+                    if shutil.which("gen_grub_cfgstub") and os.path.isdir("/boot/efi/EFI/fedora"):
+                        stub_p = subprocess.run(
+                            ["gen_grub_cfgstub", "/boot/grub2", "/boot/efi/EFI/fedora"],
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            text=True,
+                        )
+                        out_msg += "\n" + stub_p.stdout
                 elif target == "efi":
-                    return {"status": "error", "message": "EFI onarımı için hedef disk ve EFI bölümü seçilmelidir; salt listeleme onarım değildir."}
+                    if not os.path.exists("/sys/firmware/efi"):
+                        return {
+                            "status": "ok",
+                            "output": "Sistem Legacy BIOS modunda çalışıyor (/sys/firmware/efi mevcut değil); UEFI NVRAM kaydı gerekmiyor.",
+                        }
+                    if not shutil.which("efibootmgr"):
+                        return {"status": "error", "message": "efibootmgr aracı sistemde bulunamadı."}
+                    esp_src = ""
+                    try:
+                        esp_src = strip_btrfs_source(
+                            subprocess.check_output(
+                                ["findmnt", "-n", "-o", "SOURCE", "/boot/efi"],
+                                text=True,
+                                stderr=subprocess.DEVNULL,
+                            ).strip()
+                        )
+                    except Exception:
+                        pass
+                    if not esp_src:
+                        return {"status": "error", "message": "/boot/efi bağlı değil veya EFI bölümü bulunamadı."}
+
+                    pkname = subprocess.check_output(
+                        ["lsblk", "-no", "PKNAME", esp_src], text=True, stderr=subprocess.DEVNULL
+                    ).splitlines()[0].strip()
+                    partn = subprocess.check_output(
+                        ["lsblk", "-no", "PARTN", esp_src], text=True, stderr=subprocess.DEVNULL
+                    ).splitlines()[0].strip()
+                    if not pkname or not partn:
+                        return {"status": "error", "message": f"EFI diski/bölüm numarası çözümlenemedi ({esp_src})."}
+
+                    loader = r"\EFI\fedora\shimx64.efi"
+                    if not os.path.exists("/boot/efi/EFI/fedora/shimx64.efi") and os.path.exists(
+                        "/boot/efi/EFI/limine/BOOTX64.EFI"
+                    ):
+                        loader = r"\EFI\limine\BOOTX64.EFI"
+
+                    cmd = [
+                        "efibootmgr",
+                        "--create",
+                        "--disk",
+                        f"/dev/{pkname}",
+                        "--part",
+                        partn,
+                        "--label",
+                        "BlazeOS",
+                        "--loader",
+                        loader,
+                    ]
+                    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    out_msg = p.stdout
                 elif target == "dracut":
                     cmd = ["dracut", "--regenerate-all", "--force"]
                     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                     out_msg = p.stdout
-                if p.returncode != 0:
-                    return {"status": "error", "output": out_msg, "message": f"Komut basarisiz (kod: {p.returncode})"}
+                else:
+                    return {
+                        "status": "error",
+                        "message": f"Bilinmeyen önyükleme onarım hedefi: {target}",
+                        "_http_status": 400,
+                    }
+
+                if p is None or p.returncode != 0:
+                    code = p.returncode if p is not None else -1
+                    return {"status": "error", "output": out_msg, "message": f"Komut basarisiz (kod: {code})"}
+
+                clear_boot_triggers()
                 return {"status": "ok", "output": out_msg}
             except Exception as e:
                 return {"status": "error", "message": str(e)}
@@ -611,6 +1036,9 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
 
         elif endpoint == "reboot":
             target = data.get("target", "system")
+            if target != "recovery":
+                clear_boot_triggers()
+
             def do_reboot():
                 time.sleep(0.5)
                 if target == "uefi":
@@ -621,14 +1049,17 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                     subprocess.run(["systemctl", "poweroff"])
                 else:
                     subprocess.run(["systemctl", "reboot"])
-            threading.Thread(target=do_reboot).start()
+
+            threading.Thread(target=do_reboot, daemon=True).start()
             return {"status": "ok"}
 
-        return {"status": "unknown_endpoint"}
+        return {"status": "unknown_endpoint", "_http_status": 404}
+
 
 def start_server():
-    server = HTTPServer(("127.0.0.1", PORT), RecoveryAPIHandler)
+    server = ReusableHTTPServer(("127.0.0.1", PORT), RecoveryAPIHandler)
     server.serve_forever()
+
 
 def wait_for_display(timeout_sec=10.0):
     start = time.time()
@@ -648,16 +1079,21 @@ def wait_for_display(timeout_sec=10.0):
         time.sleep(0.1)
     return False
 
+
 def launch_gui(url):
+    runtime_dir = get_runtime_tmpdir()
+    cache_dir = os.path.join(runtime_dir, "cache")
+    data_dir = os.path.join(runtime_dir, "data")
+    os.makedirs(cache_dir, mode=0o700, exist_ok=True)
+    os.makedirs(data_dir, mode=0o700, exist_ok=True)
+
     os.environ["GDK_BACKEND"] = "wayland,x11,*"
     os.environ["MOZ_ENABLE_WAYLAND"] = "1"
     os.environ["WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS"] = "1"
     os.environ["WEBKIT_DISABLE_DMABUF_RENDERER"] = "1"
     os.environ["WEBKIT_DISABLE_COMPOSITING_MODE"] = "1"
-    os.environ["XDG_CACHE_HOME"] = "/tmp/berp-recovery-cache"
-    os.environ["XDG_DATA_HOME"] = "/tmp/berp-recovery-data"
-    os.makedirs("/tmp/berp-recovery-cache", exist_ok=True)
-    os.makedirs("/tmp/berp-recovery-data", exist_ok=True)
+    os.environ["XDG_CACHE_HOME"] = cache_dir
+    os.environ["XDG_DATA_HOME"] = data_dir
 
     wait_for_display(15.0)
 
@@ -724,7 +1160,7 @@ def launch_gui(url):
     except Exception as e:
         print(f"[BERP-RECOVERY] GTK3 WebKit2 launch failed: {e}. Falling back to browser...")
 
-    # 3. Fallback to Chromium / Epiphany / Firefox kiosk
+    # 3. Fallback to Chromium / Epiphany / Firefox kiosk (do NOT pass token in argv!)
     for browser in ["chromium", "chromium-browser", "epiphany", "firefox"]:
         if shutil.which(browser):
             if "chromium" in browser:
@@ -734,8 +1170,8 @@ def launch_gui(url):
                 subprocess.run(["epiphany", "--application-mode", url])
                 return
             elif browser == "firefox":
-                profile_dir = "/tmp/berp-recovery-profile"
-                os.makedirs(profile_dir, exist_ok=True)
+                profile_dir = os.path.join(runtime_dir, "profile")
+                os.makedirs(profile_dir, mode=0o700, exist_ok=True)
                 user_js = os.path.join(profile_dir, "user.js")
                 with open(user_js, "w", encoding="utf-8") as f_u:
                     f_u.write('user_pref("browser.startup.homepage", "about:blank");\n')
@@ -748,20 +1184,30 @@ def launch_gui(url):
                 subprocess.run(["firefox", "--no-remote", "--profile", profile_dir, "--kiosk", "--new-window", url])
                 return
 
+
 def main():
     remount_filesystems_rw()
+    get_runtime_tmpdir()
     t = threading.Thread(target=start_server, daemon=True)
     t.start()
     time.sleep(0.2)
 
-    url = f"http://127.0.0.1:{PORT}/index.html?token={API_TOKEN}"
+    # Do not pass API_TOKEN on command line URL so /proc/<pid>/cmdline never leaks it
+    url = f"http://127.0.0.1:{PORT}/index.html"
     print("[BERP-RECOVERY] Started local recovery interface")
 
     if "--daemon" in sys.argv:
-        while True:
-            time.sleep(3600)
+        try:
+            while True:
+                time.sleep(3600)
+        finally:
+            clear_boot_triggers()
     else:
-        launch_gui(url)
+        try:
+            launch_gui(url)
+        finally:
+            clear_boot_triggers()
+
 
 if __name__ == "__main__":
     main()

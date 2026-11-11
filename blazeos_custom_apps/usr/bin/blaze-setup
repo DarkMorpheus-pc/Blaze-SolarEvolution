@@ -15,7 +15,13 @@ import re
 import glob
 import pwd
 import secrets
+import shutil
+import tempfile
 from http.server import HTTPServer, SimpleHTTPRequestHandler
+
+
+class ReusableHTTPServer(HTTPServer):
+    allow_reuse_address = True
 
 PORT = 49222
 SETUP_DIR = "/usr/share/blaze-setup"
@@ -38,12 +44,16 @@ def privileged_run(cmd, stdin_data=None):
         return subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
 
 def privileged_write(path, content):
+    parent = os.path.dirname(path)
     if os.getuid() == 0:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
         return True
     else:
+        if parent:
+            subprocess.run(["sudo", "-n", "mkdir", "-p", parent], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         cmd = ["sudo", "-n", "tee", path]
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         p.communicate(content.encode("utf-8"))
@@ -144,7 +154,69 @@ class SetupAPIHandler(SimpleHTTPRequestHandler):
                 privileged_run(["localectl", "set-x11-keymap", info["xkb_layout"], "pc105"])
             privileged_run(["localectl", "set-keymap", info["console"]])
 
+            locale = str(data.get("locale", "")).strip()
+            if re.fullmatch(r"[a-z]{2,3}_[A-Z]{2}\.UTF-8", locale):
+                privileged_run(["localectl", "set-locale", f"LANG={locale}"])
+                privileged_write("/etc/locale.conf", f"LANG={locale}\n")
+
+            # Sync Weston kiosk keyboard so SDDM Wayland greeter matches OOBE password layout
+            weston_kb = f"[keyboard]\nkeymap_layout={info['xkb_layout']}\n"
+            if info["xkb_variant"]:
+                weston_kb += f"keymap_variant={info['xkb_variant']}\n"
+            privileged_write("/etc/xdg/weston/weston.ini", weston_kb)
+
             return {"status": "ok", "keymap": km, "index": idx}
+
+        elif action == "scan_wifi":
+            networks = []
+            seen = set()
+            try:
+                out = subprocess.check_output(
+                    ["nmcli", "-t", "-f", "IN-USE,SSID,SECURITY,SIGNAL", "dev", "wifi", "list", "--rescan", "auto"],
+                    timeout=8,
+                    stderr=subprocess.DEVNULL,
+                ).decode("utf-8", errors="replace")
+                for raw_line in out.splitlines():
+                    if not raw_line.strip():
+                        continue
+                    # nmcli -t escapes literal ':' as '\:'
+                    parts = re.split(r"(?<!\\):", raw_line)
+                    if len(parts) < 4:
+                        continue
+                    in_use = parts[0].strip() == "*"
+                    ssid = ":".join(parts[1:-2]).replace("\\:", ":").strip()
+                    security = parts[-2].replace("\\:", ":").strip()
+                    try:
+                        signal = int(parts[-1].strip())
+                    except ValueError:
+                        signal = 0
+                    if not ssid or ssid in seen:
+                        continue
+                    seen.add(ssid)
+                    networks.append({
+                        "ssid": ssid,
+                        "security": security,
+                        "open": security in ("", "--"),
+                        "signal": signal,
+                        "connected": in_use,
+                    })
+                networks.sort(key=lambda n: (not n["connected"], -n["signal"]))
+            except Exception as e:
+                print(f"[BLAZE-SETUP-WARN] Wi-Fi scan failed: {e}")
+            return {"status": "ok", "networks": networks}
+
+        elif action == "connect_wifi":
+            ssid = str(data.get("ssid", "")).strip()
+            password = str(data.get("password", ""))
+            if not ssid or len(ssid) > 128 or ssid.startswith("-"):
+                return {"status": "error", "message": "Geçersiz Wi-Fi ağ adı"}
+            cmd = ["nmcli", "--wait", "15", "dev", "wifi", "connect", ssid]
+            if password:
+                cmd.extend(["password", password])
+            ok = privileged_run(cmd)
+            if not ok:
+                return {"status": "error", "message": "Kablosuz ağa bağlanılamadı. Parolayı kontrol edin."}
+            return {"status": "ok", "ssid": ssid}
 
         elif action == "get_network_status":
             interfaces = []
@@ -182,8 +254,10 @@ class SetupAPIHandler(SimpleHTTPRequestHandler):
             }
 
         elif action == "set_timezone":
-            tz = data.get("tz", "Europe/Istanbul")
-            privileged_run(["timedatectl", "set-timezone", tz])
+            tz = str(data.get("tz", "Europe/Istanbul")).strip()
+            if tz.startswith("-") or ".." in tz or not re.fullmatch(r"[A-Za-z0-9_+/-]{1,64}", tz):
+                return {"status": "error", "message": "Geçersiz saat dilimi"}
+            privileged_run(["timedatectl", "set-timezone", "--", tz])
             return {"status": "ok", "timezone": tz}
 
         elif action == "play_sound":
@@ -196,15 +270,15 @@ class SetupAPIHandler(SimpleHTTPRequestHandler):
             return {"status": "ok"}
 
         elif action == "create_user":
-            username = data.get("username", "blaze").strip().lower()
-            fullname = data.get("fullname", "Blaze").strip()
+            username = str(data.get("username", "blaze")).strip().lower()
+            fullname = re.sub(r"[:\r\n]+", " ", str(data.get("fullname", "Blaze"))).strip()
             if not fullname:
                 fullname = username.capitalize() if username else "Blaze"
-            hostname = data.get("hostname", "blazeos").strip().lower() or "blazeos"
+            hostname = str(data.get("hostname", "blazeos")).strip().lower() or "blazeos"
             password = data.get("password", "")
-            # OOBE root alanı boş bırakılırsa BlazeOS uyumluluk parolası
-            # atanır; böylece root hesabı kilitli kalmaz.
-            root_password = data.get("rootPassword", "") or "blazeroot"
+            # Root alanı boş bırakılırsa Fedora güvenlik standardına uygun
+            # olarak root hesabı kilitli tutulur; asla sabit parola atanmaz.
+            root_password = data.get("rootPassword", "")
             root_password_confirm = data.get("rootPasswordConfirm", "")
             is_admin = data.get("isAdmin", True)
 
@@ -214,7 +288,7 @@ class SetupAPIHandler(SimpleHTTPRequestHandler):
                 return {"status": "error", "message": "Geçersiz bilgisayar adı"}
             if not password:
                 return {"status": "error", "message": "Boş parola kullanılamaz"}
-            if data.get("rootPassword", "") and root_password != root_password_confirm:
+            if root_password and root_password != root_password_confirm:
                 return {"status": "error", "message": "Root parolaları eşleşmiyor"}
 
             try:
@@ -235,13 +309,13 @@ class SetupAPIHandler(SimpleHTTPRequestHandler):
             except Exception as e:
                 print(f"[BLAZE-SETUP-WARN] Failed to set hostname: {e}")
 
-            # Collect existing groups safely (Fedora 45 may not have storage or certain legacy groups)
+            # Collect existing groups safely — never add unprivileged users to 'input'
+            # (which exposes raw /dev/input/event* devices and breaks Wayland isolation).
             available_groups = []
-            if is_admin:
-                candidate_groups = ["wheel", "video", "audio", "render", "input"]
-                for g in candidate_groups:
-                    if subprocess.run(["getent", "group", g], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
-                        available_groups.append(g)
+            candidate_groups = ["wheel", "video", "audio", "render"] if is_admin else ["video", "audio", "render"]
+            for g in candidate_groups:
+                if subprocess.run(["getent", "group", g], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+                    available_groups.append(g)
 
             # Check if user already exists
             if existing is None:
@@ -256,6 +330,9 @@ class SetupAPIHandler(SimpleHTTPRequestHandler):
                 # User already exists, ensure supplementary groups and shell
                 if available_groups:
                     privileged_run(["usermod", "-aG", ",".join(available_groups), username])
+                if not is_admin:
+                    privileged_run(["gpasswd", "-d", username, "wheel"])
+                privileged_run(["gpasswd", "-d", username, "input"])
                 privileged_run(["usermod", "-s", "/bin/bash", "-c", fullname, username])
 
             # Ensure GECOS / Real Name is applied
@@ -277,9 +354,12 @@ class SetupAPIHandler(SimpleHTTPRequestHandler):
                 # Ensure account is unlocked
                 privileged_run(["passwd", "-u", username])
 
-            if not privileged_run(["chpasswd"], stdin_data=f"root:{root_password}\n".encode("utf-8")):
-                return {"status": "error", "message": "Root parolası ayarlanamadı"}
-            privileged_run(["passwd", "-u", "root"])
+            if root_password:
+                if not privileged_run(["chpasswd"], stdin_data=f"root:{root_password}\n".encode("utf-8")):
+                    return {"status": "error", "message": "Root parolası ayarlanamadı"}
+                privileged_run(["passwd", "-u", "root"])
+            else:
+                privileged_run(["passwd", "-l", "root"])
 
             # Ensure user home directory has correct ownership
             user_home = f"/home/{username}"
@@ -288,7 +368,7 @@ class SetupAPIHandler(SimpleHTTPRequestHandler):
 
             # Register with AccountsService immediately
             try:
-                os.makedirs("/var/lib/AccountsService/users", exist_ok=True)
+                privileged_run(["mkdir", "-p", "/var/lib/AccountsService/users"])
                 selected_desktop = "solarui.desktop"
                 try:
                     candidate = open("/etc/blazeos-selected-session", encoding="utf-8").read().strip()
@@ -308,17 +388,22 @@ class SetupAPIHandler(SimpleHTTPRequestHandler):
             return {"status": "ok", "user": username}
 
         elif action == "save_desktop_config":
-            username = data.get("username", "blaze").strip().lower()
-            layout = data.get("layout", "noctalia").strip().lower()
+            username = str(data.get("username", "blaze")).strip().lower()
+            if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", username):
+                return {"status": "error", "message": "Geçersiz kullanıcı adı"}
+            layout = str(data.get("layout", "noctalia")).strip().lower()
             if layout not in ["noctalia", "caelestia", "end4-pc"]:
                 layout = "noctalia"
-            theme = data.get("theme", "solar_amber")
-            appearance = data.get("appearance", "dark").strip().lower()  # "light", "dark", "auto"
-            acoustic = data.get("acoustic", True)
+            raw_theme = str(data.get("theme", "solar_amber")).strip()
+            theme = re.sub(r"[^a-zA-Z0-9_#-]", "", raw_theme) or "solar_amber"
+            appearance = str(data.get("appearance", "dark")).strip().lower()  # "light", "dark", "auto"
+            if appearance not in ["light", "dark", "auto"]:
+                appearance = "dark"
+            acoustic = bool(data.get("acoustic", True))
 
             print(f"[BLAZE-SETUP] Saving desktop config: user={username}, engine={layout}, appearance={appearance}, theme={theme}")
 
-            theme_mode = "light" if appearance == "light" else "dark"
+            theme_mode = "auto" if appearance == "auto" else ("light" if appearance == "light" else "dark")
             gtk_theme = "Adwaita" if appearance == "light" else "Adwaita-dark"
             color_scheme = "prefer-light" if appearance == "light" else "prefer-dark"
 
@@ -335,6 +420,7 @@ engine = "{layout}"
 [taskbar]
 enabled = false
 theme_mode = "{theme_mode}"
+mode = "{theme_mode}"
 
 [display]
 scale = 1.0
@@ -459,11 +545,11 @@ icon-theme='Papirus-Dark'
             return {"status": "ok"}
 
         elif action == "finish_setup":
-            username = data.get("username", "blaze").strip().lower()
-            fullname = data.get("fullname", "").strip() or username.capitalize()
-            hostname = data.get("hostname", "blazeos").strip().lower() or "blazeos"
-            autologin = data.get("autologin", False)
-            layout = data.get("layout", "noctalia").strip().lower()
+            username = str(data.get("username", "blaze")).strip().lower()
+            fullname = re.sub(r"[:\r\n]+", " ", str(data.get("fullname", ""))).strip() or username.capitalize()
+            hostname = str(data.get("hostname", "blazeos")).strip().lower() or "blazeos"
+            autologin = bool(data.get("autologin", False))
+            layout = str(data.get("layout", "noctalia")).strip().lower()
             if layout not in ["noctalia", "caelestia", "end4-pc"]:
                 layout = "noctalia"
 
@@ -543,7 +629,7 @@ icon-theme='Papirus-Dark'
         return {"status": "unknown_action"}
 
 def start_server():
-    server = HTTPServer(("127.0.0.1", PORT), SetupAPIHandler)
+    server = ReusableHTTPServer(("127.0.0.1", PORT), SetupAPIHandler)
     server.serve_forever()
 
 def wait_for_display(timeout_sec=10.0):
@@ -562,21 +648,22 @@ def wait_for_display(timeout_sec=10.0):
     return False
 
 def launch_firefox_silent(url):
-    profile_dir = "/tmp/blaze-oobe-profile"
-    os.makedirs(profile_dir, exist_ok=True)
-    chrome_dir = os.path.join(profile_dir, "chrome")
-    os.makedirs(chrome_dir, exist_ok=True)
+    profile_dir = tempfile.mkdtemp(prefix="blaze-oobe-profile-")
+    os.chmod(profile_dir, 0o700)
+    try:
+        chrome_dir = os.path.join(profile_dir, "chrome")
+        os.makedirs(chrome_dir, mode=0o700, exist_ok=True)
 
-    userchrome_css = os.path.join(chrome_dir, "userChrome.css")
-    with open(userchrome_css, "w", encoding="utf-8") as f:
-        f.write("""
+        userchrome_css = os.path.join(chrome_dir, "userChrome.css")
+        with open(userchrome_css, "w", encoding="utf-8") as f:
+            f.write("""
 #navigator-toolbox, #TabsToolbar, #nav-bar { visibility: collapse !important; }
 browser { background-color: #0a0c10 !important; }
 """)
 
-    user_js = os.path.join(profile_dir, "user.js")
-    with open(user_js, "w", encoding="utf-8") as f:
-        f.write("""
+        user_js = os.path.join(profile_dir, "user.js")
+        with open(user_js, "w", encoding="utf-8") as f:
+            f.write("""
 user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);
 user_pref("browser.startup.homepage", "about:blank");
 user_pref("browser.startup.firstrunSkipsHomepage", true);
@@ -595,16 +682,25 @@ user_pref("trailhead.firstrun.didSeeAboutWelcome", true);
 user_pref("browser.display.background_color", "#0a0c10");
 """)
 
-    cmd = ["firefox", "--no-remote", "--profile", profile_dir, "--kiosk", "--new-window", url]
-    subprocess.run(cmd)
+        cmd = ["firefox", "--no-remote", "--profile", profile_dir, "--kiosk", "--new-window", url]
+        subprocess.run(cmd)
+    finally:
+        shutil.rmtree(profile_dir, ignore_errors=True)
 
 def launch_gui(url):
-    os.environ["WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS"] = "1"
+    if os.getuid() == 0:
+        os.environ["WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS"] = "1"
     os.environ["WEBKIT_DISABLE_DMABUF_RENDERER"] = "1"
-    os.environ["XDG_CACHE_HOME"] = "/tmp/blaze-setup-cache"
-    os.environ["XDG_DATA_HOME"] = "/tmp/blaze-setup-data"
-    os.makedirs("/tmp/blaze-setup-cache", exist_ok=True)
-    os.makedirs("/tmp/blaze-setup-data", exist_ok=True)
+    rt_base = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    if not os.path.isdir(rt_base):
+        rt_base = f"/tmp/blaze-setup-{os.getuid()}"
+        os.makedirs(rt_base, mode=0o700, exist_ok=True)
+    cache_dir = os.path.join(rt_base, "blaze-setup-cache")
+    data_dir = os.path.join(rt_base, "blaze-setup-data")
+    os.makedirs(cache_dir, mode=0o700, exist_ok=True)
+    os.makedirs(data_dir, mode=0o700, exist_ok=True)
+    os.environ["XDG_CACHE_HOME"] = cache_dir
+    os.environ["XDG_DATA_HOME"] = data_dir
 
     # Wayland soketi veya X11 hazır olana kadar bekle
     wait_for_display(10.0)
@@ -622,6 +718,8 @@ def launch_gui(url):
         Gtk.init()
         win = Gtk.Window(title="Blaze Setup Assistant")
         win.set_default_size(1280, 800)
+        # Prevent Alt+F4 from closing OOBE and stranding user on an empty Niri screen
+        win.connect("delete-event", lambda *_: not os.path.exists(COMPLETED_FLAG))
         win.connect("destroy", Gtk.main_quit)
         win.fullscreen()
 

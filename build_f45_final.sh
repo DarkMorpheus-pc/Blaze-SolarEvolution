@@ -13,9 +13,12 @@ OVERLAY="${BLAZEOS_ROOT:-$(pwd)}/blazeos_custom_apps"
 SOLARUI_SRC="${BLAZEOS_ROOT:-$(pwd)}/solarui"
 
 echo "=== [0/5] Building SolarUI controller and validating tracked code ==="
-cargo build --manifest-path "$SOLARUI_SRC/Cargo.toml" --release -p solar-shell -p blaze-recovery
+cargo build --manifest-path "$SOLARUI_SRC/Cargo.toml" --release -p solar-shell -p solar-session -p solar-core -p blaze-recovery
 install -m 0755 "$SOLARUI_SRC/target/release/solar-shell" "$OVERLAY/usr/bin/solar-shell"
+install -m 0755 "$SOLARUI_SRC/target/release/solar-session" "$OVERLAY/usr/bin/solar-session"
+install -m 0755 "$SOLARUI_SRC/target/release/solar-core" "$OVERLAY/usr/bin/solar-core"
 install -m 0755 "$SOLARUI_SRC/target/release/blaze-recovery" "$OVERLAY/usr/bin/blaze-recovery"
+install -m 0755 "$SOLARUI_SRC/target/release/blaze-sentinel" "$OVERLAY/usr/bin/blaze-sentinel"
 SOLAR_SHELL_PROBE="$($OVERLAY/usr/bin/solar-shell switch __blazeos_build_probe__ 2>&1 || true)"
 if ! grep -q 'end4-pc' <<<"$SOLAR_SHELL_PROBE"; then
     echo "Refusing to build: solar-shell does not contain the End4 switch implementation" >&2
@@ -82,15 +85,22 @@ mkdir -p "$MNT"
 echo "  -> Mounting tmpfs (28G)..."
 mount -t tmpfs -o size=28G tmpfs "$MNT"
 ROOTFS="$MNT/rootfs"
+ROOTFS_WORK="$ROOTFS"
 
 echo "  -> Copying rootfs into tmpfs..."
 cp -a "'"$ROOTFS_SRC"'" "$ROOTFS"
+rm -rf "$ROOTFS/home/"*
 
 echo "  -> Ensuring root:root ownership..."
 chown -R 0:0 "$ROOTFS"
 
 echo "  -> Applying tracked BlazeOS overlay..."
+rm -f "$ROOTFS/usr/bin/solar-settings"
 cp -a --no-preserve=ownership "'"${BLAZEOS_ROOT:-$(pwd)}"'/blazeos_custom_apps/." "$ROOTFS/"
+install -m 0755 "'"${BLAZEOS_ROOT:-$(pwd)}"'/blazeos_custom_apps/usr/bin/solar-shell" "$ROOTFS/usr/bin/solar-shell"
+ln -sf solar-shell "$ROOTFS/usr/bin/solar-settings"
+head -c 4 "$ROOTFS/usr/bin/solar-shell" | grep -q "ELF"
+rm -f "$ROOTFS_WORK/etc/grub.d/11_berp"
 # Keep display branding and boot branding separate.  The transparent asset is
 # reserved for the Plymouth normal/update splash; the GDM/taskbar icon remains
 # the square application logo under /usr/share/blazeos/gdm.
@@ -202,7 +212,6 @@ fi
 for unit in \
     network-online.target.wants/NetworkManager-wait-online.service \
     multi-user.target.wants/avahi-daemon.service \
-    sockets.target.wants/avahi-daemon.socket \
     multi-user.target.wants/systemd-homed.service \
     sysinit.target.wants/iscsi-onboot.service \
     sysinit.target.wants/iscsi-starter.service \
@@ -242,9 +251,20 @@ chmod 4755 "$ROOTFS/usr/bin/chfn" 2>/dev/null || true
 chmod 4755 "$ROOTFS/usr/bin/newgrp" 2>/dev/null || true
 chmod 4755 "$ROOTFS/usr/bin/userhelper" 2>/dev/null || true
 chmod 4755 "$ROOTFS/usr/lib/polkit-1/polkit-agent-helper-1" 2>/dev/null || true
-chmod 4755 "$ROOTFS/usr/libexec/dbus-1/dbus-daemon-launch-helper" 2>/dev/null || true
+DBUS_GID=$(grep "^dbus:" "$ROOTFS/etc/group" 2>/dev/null | cut -d: -f3 | head -n1 || true)
+chown "0:${DBUS_GID:-81}" "$ROOTFS/usr/libexec/dbus-1/dbus-daemon-launch-helper" 2>/dev/null || true
+chmod 4750 "$ROOTFS/usr/libexec/dbus-1/dbus-daemon-launch-helper" 2>/dev/null || true
+POLKIT_UID=$(grep "^polkitd:" "$ROOTFS/etc/passwd" 2>/dev/null | cut -d: -f3 | head -n1 || true)
+POLKIT_GID=$(grep "^polkitd:" "$ROOTFS/etc/passwd" 2>/dev/null | cut -d: -f4 | head -n1 || true)
+if [ -n "$POLKIT_UID" ] && [ -d "$ROOTFS/etc/polkit-1/rules.d" ]; then
+    chown "${POLKIT_UID}:${POLKIT_GID:-$POLKIT_UID}" "$ROOTFS/etc/polkit-1/rules.d" 2>/dev/null || true
+    chmod 0750 "$ROOTFS/etc/polkit-1/rules.d" 2>/dev/null || true
+fi
+setcap cap_setuid+ep "$ROOTFS/usr/bin/newuidmap" 2>/dev/null || chmod 4755 "$ROOTFS/usr/bin/newuidmap" 2>/dev/null || true
+setcap cap_setgid+ep "$ROOTFS/usr/bin/newgidmap" 2>/dev/null || chmod 4755 "$ROOTFS/usr/bin/newgidmap" 2>/dev/null || true
 chmod 4755 "$ROOTFS/opt/FireHub/chrome-sandbox" 2>/dev/null || true
-chmod 2755 "$ROOTFS/usr/bin/unix_chkpwd" 2>/dev/null || true
+chmod 4755 "$ROOTFS/usr/bin/unix_chkpwd" 2>/dev/null || true
+chmod 4755 "$ROOTFS/usr/sbin/unix_chkpwd" 2>/dev/null || true
 chmod 2755 "$ROOTFS/usr/bin/crontab" 2>/dev/null || true
 chmod 2755 "$ROOTFS/usr/bin/at" 2>/dev/null || true
 chmod 2755 "$ROOTFS/usr/bin/chage" 2>/dev/null || true
@@ -287,6 +307,24 @@ chmod 755 "$ROOTFS/usr/bin/blaze-recovery-gui-launcher" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/blaze-gamezone-browser" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/blaze-setup" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/blaze-system-monitor" 2>/dev/null || true
+chmod 0755 "$ROOTFS/usr/bin/blaze-recovery" \
+    "$ROOTFS/usr/bin/berp-recovery-gui" \
+    "$ROOTFS/usr/bin/blaze-recovery-gui-launcher" \
+    "$ROOTFS/usr/bin/blaze-death-screen" \
+    "$ROOTFS/usr/bin/blaze-sentinel" \
+    "$ROOTFS/usr/bin/blaze-continuum" \
+    "$ROOTFS/usr/bin/blaze-ghost-overlay" \
+    "$ROOTFS/usr/bin/blaze-system-monitor" \
+    "$ROOTFS/usr/bin/solar-settings" \
+    "$ROOTFS/usr/bin/blaze-house" \
+    "$ROOTFS/usr/bin/blaze-setup" \
+    "$ROOTFS/usr/local/bin/blaze-snapshot" \
+    "$ROOTFS/usr/local/bin/blaze-bootloader" \
+    "$ROOTFS/usr/local/bin/blazeos-postinstall" \
+    "$ROOTFS/usr/local/bin/blazeos-limine-install" \
+    "$ROOTFS/usr/local/bin/blazeos-control" \
+    "$ROOTFS/usr/local/bin/blazeos-desktop-provision" \
+    "$ROOTFS/usr/local/bin/blazeos-remove-solarui" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/libexec/blazeos-wayland-session-ready" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/libexec/blazeos-update" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/libexec/blazeos-offline-update" 2>/dev/null || true
@@ -379,6 +417,28 @@ setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/ca
 setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/liveinst" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/blaze-setup" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/blaze-system-monitor" 2>/dev/null || true
+for bin_path in \
+    "$ROOTFS/usr/bin/blaze-recovery" \
+    "$ROOTFS/usr/bin/berp-recovery-gui" \
+    "$ROOTFS/usr/bin/blaze-recovery-gui-launcher" \
+    "$ROOTFS/usr/bin/blaze-death-screen" \
+    "$ROOTFS/usr/bin/blaze-sentinel" \
+    "$ROOTFS/usr/bin/blaze-continuum" \
+    "$ROOTFS/usr/bin/blaze-ghost-overlay" \
+    "$ROOTFS/usr/bin/blaze-system-monitor" \
+    "$ROOTFS/usr/bin/solar-settings" \
+    "$ROOTFS/usr/bin/blaze-house" \
+    "$ROOTFS/usr/bin/blaze-setup" \
+    "$ROOTFS/usr/local/bin/blaze-snapshot" \
+    "$ROOTFS/usr/local/bin/blaze-bootloader" \
+    "$ROOTFS/usr/local/bin/blazeos-postinstall" \
+    "$ROOTFS/usr/local/bin/blazeos-limine-install" \
+    "$ROOTFS/usr/local/bin/blazeos-control" \
+    "$ROOTFS/usr/local/bin/blazeos-desktop-provision" \
+    "$ROOTFS/usr/local/bin/blazeos-remove-solarui"; do
+    chmod 0755 "$bin_path" 2>/dev/null || true
+    setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$bin_path" 2>/dev/null || true
+done
 setfattr -n security.selinux -v "system_u:object_r:etc_t:s0" "$ROOTFS/etc/sddm.conf.d/00-blaze-oobe.conf" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:etc_t:s0" "$ROOTFS/etc/sudoers.d/99-blaze-setup" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" "$ROOTFS/usr/share/wayland-sessions/blaze-oobe.desktop" 2>/dev/null || true

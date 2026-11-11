@@ -28,6 +28,7 @@ input {
     }
 
     mouse {
+        accel-profile "flat"
         accel-speed 0.0
     }
 }
@@ -184,7 +185,7 @@ window-rule {
 
 // BlazeOS Control Center & Native Tools
 window-rule {
-    match app-id=r#"^(org\.blazeos\.control|FireHub|firehub|blazeos-welcome)$"#
+    match app-id=r#"^(org\.blazeos\.control|FireHub|firehub|blazeos-welcome|blaze-setup)$"#
     open-floating true
     default-column-width { proportion 0.75; }
     default-window-height { proportion 0.80; }
@@ -213,33 +214,71 @@ window-rule {
 window-rule {
     match app-id="^solar-settings$"
     open-floating true
-    default-column-width { fixed 740; }
-    default-window-height { fixed 600; }
+    default-column-width { fixed 1020; }
+    default-window-height { fixed 620; }
+    geometry-corner-radius 20
+    clip-to-geometry true
+}
+
+// Alacritty & Wayland Terminal Window Rule (Wide enough for zero Fastfetch line wrapping)
+window-rule {
+    match app-id=r#"^(Alacritty|org\.Alacritty|foot|kitty)$"#
+    open-floating true
+    default-column-width { fixed 1020; }
+    default-window-height { fixed 540; }
+    geometry-corner-radius 20
+    clip-to-geometry true
 }
 
 // SolarUI Welcome & Shortcuts Window Rule
 window-rule {
     match app-id="^solar-welcome$"
     open-floating true
-    default-column-width { fixed 660; }
-    default-window-height { fixed 520; }
+    default-column-width { fixed 750; }
+    default-window-height { fixed 590; }
+    geometry-corner-radius 20
+    clip-to-geometry true
+}
+
+// SolarUI Native Installer Window Rule
+window-rule {
+    match app-id="^solar-installer-gui$"
+    open-floating true
+    default-column-width { fixed 920; }
+    default-window-height { fixed 640; }
+    geometry-corner-radius 20
+    clip-to-geometry true
 }
 
 // SolarUI Omnibar (Raycast / Spotlight Command Hub)
 window-rule {
     match app-id="^solar-omnibar$"
     open-floating true
-    default-column-width { fixed 680; }
-    default-window-height { fixed 460; }
-    geometry-corner-radius 20
+    default-column-width { fixed 720; }
+    default-window-height { fixed 490; }
+    geometry-corner-radius 22
     clip-to-geometry true
 }
 
-// Blaze GameZone Fullscreen Gaming Shell
+// Blaze GameZone Fullscreen Gaming Shell & Native/Proton Games (Zero Blur / Zero Corner Clipping)
 window-rule {
     match app-id="^solar-gamezone$"
     open-fullscreen true
     geometry-corner-radius 0
+    clip-to-geometry false
+    background-effect {
+        blur false
+    }
+}
+
+window-rule {
+    match app-id=r#"^(steam_app_.*|gamescope|cs2|dota2|hl2_linux|lutris)$"#
+    open-floating false
+    geometry-corner-radius 0
+    clip-to-geometry false
+    background-effect {
+        blur false
+    }
 }
 
 // Steam & Dialog Window Rules
@@ -287,28 +326,41 @@ binds {
     Mod+Ctrl+Left  { move-column-left; }
     Mod+Ctrl+Right { move-column-right; }
 
-    // ── Window Actions (KDE Habits) ────────────────────────────────
-    Mod+Q     { close-window; }
-    Alt+F4    { close-window; }
-    Mod+Y     { spawn-sh "solar-shell minimize"; }
-    Mod+Ctrl+Down { spawn-sh "solar-shell minimize"; }
-    Mod+T     { toggle-window-floating; }
-    Mod+F     { toggle-window-floating; }
-    Mod+M     { maximize-column; }
-    Mod+Shift+F { fullscreen-window; }
-    Mod+Z     { spawn-sh "solar-shell snap"; }
-    Mod+Shift+V { switch-focus-between-floating-and-tiling; }
-    Mod+Tab   { toggle-overview; }
-    Mod+D     { spawn "solar-shell" "route" "dashboard"; }
+    // ── Window Actions (KDE & Console GameZone Habits) ────────────
+    Mod+Q             { close-window; }
+    Ctrl+Shift+X      { close-window; }
+    Alt+F4            { close-window; }
+    Mod+Y             { spawn-sh "solar-shell minimize"; }
+    Mod+Ctrl+Down     { spawn-sh "solar-shell minimize"; }
+    Mod+T             { toggle-window-floating; }
+    Mod+F             { toggle-window-floating; }
+    Mod+M             { maximize-column; }
+    Mod+Shift+F       { fullscreen-window; }
+    Mod+Z             { spawn-sh "solar-shell snap"; }
+    Mod+Shift+V       { switch-focus-between-floating-and-tiling; }
+    Mod+Tab           { toggle-overview; }
+    Mod+D             { spawn "solar-shell" "route" "dashboard"; }
+
+    // ── Console & Desktop Workspace Switching (Ctrl+Shift+1..4 & Mod+1..4) ──
+    Ctrl+Shift+1      { focus-workspace 1; }
+    Ctrl+Shift+2      { focus-workspace 2; }
+    Ctrl+Shift+3      { focus-workspace 3; }
+    Ctrl+Shift+4      { focus-workspace 4; }
+    Mod+1             { focus-workspace 1; }
+    Mod+2             { focus-workspace 2; }
+    Mod+3             { focus-workspace 3; }
+    Mod+4             { focus-workspace 4; }
 
     // ── SolarUI Panels & Settings (Routed via SolarSurfaceRouter) ──
     Mod+Space           { spawn "solar-shell" "omnibar"; }
+    Mod+Shift+Space     { spawn "solar-shell" "omnibar" "--force"; }
+    Mod+Alt+Space       { spawn "solar-shell" "route" "launcher"; }
     Mod+G               { spawn "solar-shell" "gamezone"; }
     Mod+Alt+K           { spawn "solar-shell" "easter-egg" "konami"; }
     Mod+S               { spawn "solar-shell" "route" "control-center"; }
-    Mod+I               { spawn "solar-shell" "route" "settings"; }
-    Mod+Comma           { spawn "noctalia" "msg" "settings-toggle"; }
-    Mod+Shift+S         { spawn "solar-shell" "route" "settings"; }
+    Mod+I               { spawn "solar-shell" "settings"; }
+    Mod+Comma           { spawn "solar-shell" "route" "settings"; }
+    Mod+Shift+S         { spawn "solar-shell" "settings"; }
     Mod+Shift+Q         { spawn "solar-shell" "route" "session"; }
     Mod+Alt+R           { spawn "solar-shell" "supervisor"; }
     Mod+Alt+S           { spawn "solar-shell" "settings"; }
@@ -316,27 +368,46 @@ binds {
     Mod+Shift+Escape    { spawn "solar-shell" "welcome"; }
 
     // ── Quick App Launchers ────────────────────────────────────────
-    Mod+Return { spawn "alacritty"; }
-    Ctrl+Alt+T { spawn "alacritty"; }
+    Mod+Return { spawn "sh" "-c" "command -v kitty >/dev/null && exec kitty || exec alacritty"; }
+    Ctrl+Alt+T { spawn "sh" "-c" "command -v kitty >/dev/null && exec kitty || exec alacritty"; }
+    Mod+H      { spawn "firehub"; }
     Mod+E      { spawn "nautilus"; }
-    Mod+B      { spawn "google-chrome-stable"; }
+    Mod+B      { spawn "sh" "-c" "command -v google-chrome-stable >/dev/null && exec google-chrome-stable || command -v firefox >/dev/null && exec firefox || exec xdg-open https://www.google.com"; }
 
     // ── Audio & Media Keys ─────────────────────────────────────────
     XF86AudioRaiseVolume allow-when-locked=true { spawn "wpctl" "set-volume" "@DEFAULT_AUDIO_SINK@" "5%+"; }
     XF86AudioLowerVolume allow-when-locked=true { spawn "wpctl" "set-volume" "@DEFAULT_AUDIO_SINK@" "5%-"; }
     XF86AudioMute        allow-when-locked=true { spawn "wpctl" "set-mute" "@DEFAULT_AUDIO_SINK@" "toggle"; }
+    XF86AudioMicMute     allow-when-locked=true { spawn "wpctl" "set-mute" "@DEFAULT_AUDIO_SOURCE@" "toggle"; }
 
     // ── Brightness Keys ────────────────────────────────────────────
     XF86MonBrightnessUp   allow-when-locked=true { spawn "brightnessctl" "set" "+5%"; }
     XF86MonBrightnessDown allow-when-locked=true { spawn "brightnessctl" "set" "5%-"; }
 
     // ── Screenshots ────────────────────────────────────────────────
-    F10       { spawn "sh" "-c" "grim -g \"$(slurp)\" - | satty --filename -"; }
-    Print     { spawn "sh" "-c" "grim -g \"$(slurp)\" - | satty --filename -"; }
-    Alt+Print { spawn "sh" "-c" "grim - | satty --filename -"; }
+    Print     { spawn "sh" "-c" "IMG=$(mktemp --suffix=.png) && grim -g \"$(slurp)\" \"$IMG\" && wl-copy < \"$IMG\" && swappy -f \"$IMG\"; rm -f \"$IMG\""; }
+    Alt+Print { spawn "sh" "-c" "IMG=$(mktemp --suffix=.png) && grim \"$IMG\" && wl-copy < \"$IMG\" && swappy -f \"$IMG\"; rm -f \"$IMG\""; }
 
     // ── Session ────────────────────────────────────────────────────
-    Mod+Shift+E { quit skip-confirmation=true; }
-    Ctrl+Alt+Delete { quit skip-confirmation=true; }
-    Mod+L       { spawn "solar-lock"; }
+    Mod+Shift+E     { quit; }
+    Ctrl+Alt+Delete { spawn "blaze-system-monitor"; }
+    Mod+L           { spawn "solar-lock"; }
+}
+
+// GameZone modal dialogs (external game scanner & Proton-GE manager) must be compact centered floating windows
+window-rule {
+    match title=r#"^(Harici Oyun veya Klasör Tanıt|Add External Game or Folder|Blaze Proton-GE & Uyumluluk Yöneticisi|Blaze Proton-GE & Compatibility Manager)$"#
+    open-floating true
+    open-focused true
+    default-column-width { fixed 640; }
+    default-window-height { fixed 380; }
+    geometry-corner-radius 20
+    clip-to-geometry true
+}
+
+// Make every launched app (Electron/Chromium: FireHub, Firefox, ...) pick the Wayland backend
+environment {
+    XDG_SESSION_TYPE "wayland"
+    ELECTRON_OZONE_PLATFORM_HINT "wayland"
+    MOZ_ENABLE_WAYLAND "1"
 }

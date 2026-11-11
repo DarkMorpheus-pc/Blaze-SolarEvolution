@@ -168,9 +168,15 @@ case "$ACTION" in
             echo "ERR: kurulacak paket belirtilmedi" >&2
             exit 2
         fi
+        for pkg in "$@"; do
+            if [[ "$pkg" == -* ]] || [[ "$pkg" == */* ]] || [[ ! "$pkg" =~ ^[A-Za-z0-9_.+@-]+$ ]]; then
+                echo "ERR: gecersiz paket veya grup adi: $pkg" >&2
+                exit 2
+            fi
+        done
         stop_pk
         echo "# Kuruluyor: $*"
-        dnf install -y "$@" 2>&1
+        dnf install -y -- "$@" 2>&1
         rc=$?
         echo "# dnf çıkış kodu: $rc"
         # Yeni masaüstü Fedora logoları getirmiş olabilir (KDE start-here vb.) —
@@ -184,19 +190,26 @@ case "$ACTION" in
 
     remove-gnome)
         # KRİTİK: GDM'in giriş ekranı gnome-shell'dir. GNOME'u kaldırmadan ÖNCE
-        # yeni masaüstüne uygun bir giriş yöneticisine geçmezsek, kullanıcı
-        # hiçbir masaüstüne giremez. Bu yüzden önce DM değiştir, sonra kaldır.
+        # SDDM giriş yöneticisinin etkin olduğundan emin ol (lightdm yalnızca
+        # gerçekten kuruluysa ve sddm yoksa düşünülür; SDDM varsayılan DM'dir).
         stop_pk
         DE="${1:-}"
-        case "$DE" in
-            KDE*)  DM="sddm" ;;
-            *)     DM="lightdm" ;;   # XFCE/MATE/Cinnamon/COSMIC/Hyprland
-        esac
-        echo "# Giriş yöneticisi kuruluyor: $DM"
-        dnf install -y "$DM" 2>&1 || true
-        echo "# $DM etkinleştiriliyor, GDM devre dışı bırakılıyor..."
+        DM="sddm"
+        if [ ! -x /usr/bin/sddm ] && [ ! -x /usr/sbin/sddm ]; then
+            if [ -x /usr/sbin/lightdm ] || [ -x /usr/bin/lightdm ]; then
+                DM="lightdm"
+            else
+                dnf install -y sddm 2>&1 || true
+                DM="sddm"
+            fi
+        fi
+        echo "# Giriş yöneticisi doğrulanıyor: $DM"
         systemctl disable gdm.service 2>&1 || true
-        systemctl enable "${DM}.service" 2>&1 || true
+        if [ "$DM" = "lightdm" ] && { [ -x /usr/sbin/lightdm ] || [ -x /usr/bin/lightdm ]; }; then
+            systemctl enable lightdm.service 2>&1 || true
+        else
+            systemctl enable sddm.service 2>&1 || true
+        fi
         echo "# GNOME masaüstü paketleri kaldırılıyor..."
         # gnome-shell kaldırılınca GDM ve GNOME oturumu da bağımlılık olarak gider.
         # Çalışan oturum, çıkışa kadar bellekteki dosyalarla ayakta kalır.
@@ -234,13 +247,6 @@ case "$ACTION" in
                 gsettings "$@"
         }
 
-        # Context Check: uzantı sürüm doğrulaması — Dash to Panel "OUT OF DATE"
-        # Fedora'nın paketlediği dash-to-panel (sürüm 72) henüz GNOME 50'nin
-        # shell-version listesinde değil; GNOME Shell bunu otomatik reddediyor
-        # (enabled-extensions'a eklesek bile YÜKLENMİYOR). Resmi/belgelenmiş
-        # workaround: sürüm doğrulamasını kapat.
-        run_as_user_gsettings set org.gnome.shell disable-extension-version-validation true 2>/dev/null || true
-
         echo "# Mevcut uzantı listesi okunuyor..."
         CURRENT=$(run_as_user_gsettings get org.gnome.shell enabled-extensions 2>/dev/null || echo "@as []")
 
@@ -261,26 +267,34 @@ PYEOF
         case "$DOCK_CHOICE" in
             dash-to-dock)
                 echo "# Dash to Dock etkinleştiriliyor (Dash to Panel kapatılıyor)..."
-                NEW_LIST=$(python3 -c "
-l = $CLEANED
-l.append('$DTD_UUID')
-print(repr(l))
-")
+                NEW_LIST=$(python3 - "$CLEANED" "$DTD_UUID" <<'PYEOF'
+import sys, ast
+lst = ast.literal_eval(sys.argv[1])
+if sys.argv[2] not in lst:
+    lst.append(sys.argv[2])
+print(repr(lst))
+PYEOF
+)
                 run_as_user_gsettings set org.gnome.shell enabled-extensions "$NEW_LIST"
                 ;;
             dash-to-panel)
-                # Context Check: Dash to Panel ŞU AN ÇAĞRILMIYOR (Welcome/Merkezi
-                # seçeneği sunmuyor) — Fedora paketi (sürüm 72) GNOME 50 ile
-                # "Unrecognized parameter affectsInputRegion" hatasıyla çöküyor
-                # (upstream home-sweet-gnome/dash-to-panel#2289). Kod burada
-                # upstream düzelip Fedora paketleyince hızla geri açılabilsin
-                # diye duruyor; şu an erişilemez (dead code, zararsız).
+                # Fedora'nın paketlediği dash-to-panel v72 GNOME 50 ile uyumsuz olduğu için
+                # yalnızca metadata.json içinde mevcut GNOME ana sürümü destekleniyorsa etkinleştirilir.
+                GNOME_MAJOR=$(gnome-shell --version 2>/dev/null | grep -oE '[0-9]+' | head -n1 || echo "")
+                DTP_META="/usr/share/gnome-shell/extensions/${DTP_UUID}/metadata.json"
+                if [ -n "$GNOME_MAJOR" ] && [ -f "$DTP_META" ] && ! grep -q "\"${GNOME_MAJOR}\"" "$DTP_META"; then
+                    echo "ERR: Dash to Panel mevcut GNOME ${GNOME_MAJOR} surumuyle uyumsuz; Dash to Dock onerilir." >&2
+                    exit 1
+                fi
                 echo "# Dash to Panel etkinleştiriliyor (Dash to Dock kapatılıyor)..."
-                NEW_LIST=$(python3 -c "
-l = $CLEANED
-l.append('$DTP_UUID')
-print(repr(l))
-")
+                NEW_LIST=$(python3 - "$CLEANED" "$DTP_UUID" <<'PYEOF'
+import sys, ast
+lst = ast.literal_eval(sys.argv[1])
+if sys.argv[2] not in lst:
+    lst.append(sys.argv[2])
+print(repr(lst))
+PYEOF
+)
                 run_as_user_gsettings set org.gnome.shell enabled-extensions "$NEW_LIST"
                 ;;
             none|*)

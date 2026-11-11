@@ -81,6 +81,12 @@ impl NoctaliaProvider {
     fn cmd(&self) -> tokio::process::Command {
         let mut cmd = tokio::process::Command::new(&self.binary_path);
         cmd.env("NOCTALIA_ASSETS_DIR", &self.assets_dir);
+        // Clean any Quickshell/Caelestia library or Qt plugin paths if switching from Caelestia
+        cmd.env_remove("LD_LIBRARY_PATH");
+        cmd.env_remove("QT_PLUGIN_PATH");
+        cmd.env_remove("QT_QPA_PLATFORM_PLUGIN_PATH");
+        cmd.env_remove("QML2_IMPORT_PATH");
+        cmd.env_remove("QML_IMPORT_PATH");
 
         let wayland_disp = if let Ok(d) = std::env::var("WAYLAND_DISPLAY") {
             Some(d)
@@ -113,6 +119,9 @@ impl NoctaliaProvider {
         }
         if let Ok(s) = std::env::var("XDG_RUNTIME_DIR") {
             cmd.env("XDG_RUNTIME_DIR", s);
+        }
+        if let Ok(sock) = solar_niri::find_niri_socket() {
+            cmd.env("NIRI_SOCKET", sock);
         }
         cmd.env("XDG_CURRENT_DESKTOP", "SolarUI");
         cmd.env("XDG_SESSION_DESKTOP", "SolarUI");
@@ -277,5 +286,29 @@ impl ShellProvider for NoctaliaProvider {
         };
 
         res
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cmd_sanitizes_caelestia_qt_and_ld_env_vars() {
+        let provider = NoctaliaProvider::new();
+        let std_cmd = provider.cmd().into_std();
+        let envs: Vec<(&std::ffi::OsStr, Option<&std::ffi::OsStr>)> = std_cmd.get_envs().collect();
+        for key in [
+            "LD_LIBRARY_PATH",
+            "QT_PLUGIN_PATH",
+            "QT_QPA_PLATFORM_PLUGIN_PATH",
+            "QML2_IMPORT_PATH",
+            "QML_IMPORT_PATH",
+        ] {
+            assert!(
+                envs.iter().any(|(k, v)| *k == std::ffi::OsStr::new(key) && v.is_none()),
+                "Expected {key} to be explicitly removed in NoctaliaProvider::cmd()"
+            );
+        }
     }
 }

@@ -8,6 +8,14 @@ if [ -f "${ROOT}/etc/blazeos-setup-completed" ]; then
     rm -f "${ROOT}/etc/sddm.conf.d/00-blaze-oobe.conf"
     rm -f "${ROOT}/usr/share/wayland-sessions/blaze-oobe.desktop"
     rm -f "${ROOT}/var/lib/AccountsService/users/blaze-setup"
+    rm -f "${ROOT}/etc/sudoers.d/99-blaze-setup"
+
+    if [ -z "${ROOT}" ] && id -u blaze-setup >/dev/null 2>&1; then
+        passwd -l blaze-setup >/dev/null 2>&1 || true
+        usermod -s /sbin/nologin blaze-setup >/dev/null 2>&1 || true
+        gpasswd -d blaze-setup wheel >/dev/null 2>&1 || true
+        gpasswd -d blaze-setup input >/dev/null 2>&1 || true
+    fi
 
     if [ -f "${ROOT}/etc/sddm.conf.d/autologin.conf" ] &&
        grep -q '^User=blaze-setup$' "${ROOT}/etc/sddm.conf.d/autologin.conf"; then

@@ -2,13 +2,11 @@
 Description=BlazeOS Plymouth failsafe
 DefaultDependencies=no
 After=local-fs.target plymouth-start.service
-Before=display-manager.service graphical.target
 ConditionKernelCommandLine=!systemd.unit=blaze-recovery-gui.target
 
 [Service]
-Type=oneshot
+Type=simple
 ExecStart=/bin/sh -c 'sleep 25; /usr/bin/plymouth quit || true'
-RemainAfterExit=yes
 
 [Install]
 WantedBy=multi-user.target

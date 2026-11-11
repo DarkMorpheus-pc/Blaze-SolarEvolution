@@ -30,10 +30,15 @@ use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Box as GtkBox, Button, CssProvider, Entry, EventControllerKey, EventControllerMotion,
+    Box as GtkBox, Button, CssProvider, Entry, EventControllerKey, EventControllerMotion, Image,
     Label, Orientation, Overlay, Picture, ScrolledWindow, Video, Window,
 };
 use crate::apps::scan_desktop_applications;
+use crate::gamezone_live::{
+    self, AccountSummary, CustomExecutableEntry, LivePreviewController, MediaUpdateEvent,
+};
+use std::collections::HashMap;
+use std::cell::RefCell;
 use std::fs::File;
 use std::io::Read;
 use std::net::{SocketAddr, TcpStream};
@@ -76,12 +81,14 @@ impl Language {
                 return Language::TR;
             }
         }
-        if let Ok(lang) = std::env::var("LANG").or_else(|_| std::env::var("LC_ALL")) {
-            if lang.to_lowercase().starts_with("tr") {
+        if let Ok(glang) = std::env::var("GAMEZONE_LANG") {
+            if glang.to_lowercase().starts_with("en") {
+                return Language::EN;
+            } else if glang.to_lowercase().starts_with("tr") {
                 return Language::TR;
             }
         }
-        Language::EN
+        Language::TR
     }
 
     pub fn save(&self) {
@@ -159,8 +166,8 @@ impl Language {
 
     pub fn bore_kernel(&self) -> &'static str {
         match self {
-            Language::TR => "1,420 G • BORE Çekirdeği",
-            Language::EN => "1,420 G • BORE Kernel",
+            Language::TR => "Linux 7.2.9 • sched_ext & NTSYNC",
+            Language::EN => "Linux 7.2.9 • sched_ext & NTSYNC",
         }
     }
 
@@ -697,7 +704,6 @@ pub fn start_linux_gamepad_listener() -> async_channel::Receiver<GamepadNavActio
                     use std::os::unix::io::AsRawFd;
                     let fd = file.as_raw_fd();
 
-                    // If sysfs didn't provide name, query via JSIOCGNAME(128)
                     if dev_name.is_empty() {
                         let mut name_buf = [0u8; 128];
                         let res = unsafe { libc::ioctl(fd, 0x80806a13, name_buf.as_mut_ptr()) };
@@ -720,11 +726,9 @@ pub fn start_linux_gamepad_listener() -> async_channel::Receiver<GamepadNavActio
                         continue;
                     }
 
-                    // Check button count via JSIOCGBUTTONS
                     let mut num_buttons: u8 = 0;
                     let res = unsafe { libc::ioctl(fd, 0x80016a11, &mut num_buttons) };
                     if res == 0 && num_buttons < 6 {
-                        // Mice / tablets typically have only 2 or 3 buttons
                         continue;
                     }
 
@@ -751,22 +755,20 @@ pub fn start_linux_gamepad_listener() -> async_channel::Receiver<GamepadNavActio
                 let event_type = buf[6];
                 let number = buf[7];
 
-                // Filter out initial synth config events (0x80)
                 let is_init = (event_type & 0x80) != 0;
                 let clean_type = event_type & !0x80;
 
                 if clean_type == 1 {
-                    // Button event (1 = pressed, 0 = released)
                     if value == 1 && !is_init {
                         let action = match number {
-                            0 => Some(GamepadNavAction::SelectA),     // A button
-                            1 => Some(GamepadNavAction::BackB),       // B button
-                            2 => Some(GamepadNavAction::OptionsX),    // X button
-                            3 => Some(GamepadNavAction::SearchY),     // Y button
-                            4 => Some(GamepadNavAction::TabPrevLB),   // Left Bumper (LB)
-                            5 => Some(GamepadNavAction::TabNextRB),   // Right Bumper (RB)
-                            6 => Some(GamepadNavAction::BackB),       // Select / View
-                            7 => Some(GamepadNavAction::SelectA),     // Start / Menu
+                            0 => Some(GamepadNavAction::SelectA),
+                            1 => Some(GamepadNavAction::BackB),
+                            2 => Some(GamepadNavAction::OptionsX),
+                            3 => Some(GamepadNavAction::SearchY),
+                            4 => Some(GamepadNavAction::TabPrevLB),
+                            5 => Some(GamepadNavAction::TabNextRB),
+                            6 => Some(GamepadNavAction::BackB),
+                            7 => Some(GamepadNavAction::SelectA),
                             _ => None,
                         };
                         if let Some(act) = action {
@@ -774,13 +776,9 @@ pub fn start_linux_gamepad_listener() -> async_channel::Receiver<GamepadNavActio
                         }
                     }
                 } else if clean_type == 2 && !is_init {
-                    // Axis event (D-Pad or Left Stick)
-                    // Threshold for directional actuation
                     const STICK_THRESHOLD: i16 = 18000;
                     const STICK_DEADZONE: i16 = 10000;
 
-                    // Number 0 = X axis (Left Stick), 1 = Y axis (Left Stick)
-                    // Number 6 = D-Pad X, 7 = D-Pad Y (standard Linux gamepad mapping)
                     if number == 0 || number == 6 {
                         if value > STICK_THRESHOLD && last_axis_x <= STICK_DEADZONE {
                             let _ = tx.try_send(GamepadNavAction::Right);
@@ -834,24 +832,19 @@ fn resolve_desktop_icon_path(icon_name: &str) -> Option<String> {
     if icon_name.starts_with('/') && Path::new(icon_name).exists() {
         return Some(icon_name.to_string());
     }
-    let home = get_user_home();
-    let user_icons = home.join(".local/share/icons");
     let candidate_dirs = [
-        PathBuf::from("/usr/share/icons/hicolor/128x128/apps"),
-        PathBuf::from("/usr/share/icons/hicolor/scalable/apps"),
-        PathBuf::from("/usr/share/icons/hicolor/48x48/apps"),
-        PathBuf::from("/usr/share/icons/hicolor/64x64/apps"),
-        PathBuf::from("/usr/share/icons/hicolor/256x256/apps"),
-        user_icons.join("hicolor/128x128/apps"),
-        user_icons.join("hicolor/scalable/apps"),
-        PathBuf::from("/usr/share/icons/breeze/apps/64"),
-        PathBuf::from("/usr/share/icons/breeze/apps/48"),
-        PathBuf::from("/usr/share/pixmaps"),
-        PathBuf::from("/usr/share/solarui/icons"),
+        "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/icons/hicolor/128x128/apps",
+        "/usr/share/icons/hicolor/128x128/apps",
+        "/usr/share/icons/hicolor/48x48/apps",
+        "/usr/share/icons/hicolor/64x64/apps",
+        "/usr/share/icons/hicolor/256x256/apps",
+        "/usr/share/icons/breeze/apps/64",
+        "/usr/share/icons/breeze/apps/48",
+        "/usr/share/pixmaps",
     ];
-    for d in &candidate_dirs {
+    for d in candidate_dirs {
         for ext in ["png", "svg"] {
-            let p = d.join(format!("{}.{}", icon_name, ext));
+            let p = Path::new(d).join(format!("{}.{}", icon_name, ext));
             if p.exists() {
                 return Some(p.to_string_lossy().to_string());
             }
@@ -869,9 +862,9 @@ fn resolve_desktop_icon_path(icon_name: &str) -> Option<String> {
     ];
     for (alias_key, alias_val) in aliases {
         if icon_name.to_lowercase().contains(alias_key) || icon_name == *alias_key {
-            for d in &candidate_dirs {
+            for d in candidate_dirs {
                 for ext in ["png", "svg"] {
-                    let p = d.join(format!("{}.{}", alias_val, ext));
+                    let p = Path::new(d).join(format!("{}.{}", alias_val, ext));
                     if p.exists() {
                         return Some(p.to_string_lossy().to_string());
                     }
@@ -882,48 +875,43 @@ fn resolve_desktop_icon_path(icon_name: &str) -> Option<String> {
     None
 }
 
+fn load_picture_file(pic: &Picture, path: &Path) {
+    if let Ok(bytes) = std::fs::read(path) {
+        let gbytes = glib::Bytes::from(&bytes);
+        if let Ok(texture) = gdk::Texture::from_bytes(&gbytes) {
+            pic.set_paintable(Some(&texture));
+            return;
+        }
+    }
+    pic.set_filename(Some(path));
+}
+
 fn create_nav_button(label_text: &str, icon_name_base: &str) -> Button {
     let btn = Button::new();
     btn.add_css_class("xbox-nav-icon-btn");
 
-    let b_box = GtkBox::new(Orientation::Horizontal, 6);
+    let b_box = GtkBox::new(Orientation::Horizontal, 7);
     b_box.set_valign(gtk4::Align::Center);
 
     let pic = Picture::new();
-    pic.set_size_request(18, 18);
+    pic.set_size_request(16, 16);
     pic.set_can_shrink(true);
-    pic.set_content_fit(gtk4::ContentFit::Cover);
+    pic.set_content_fit(gtk4::ContentFit::Contain);
     pic.add_css_class("xbox-nav-btn-icon");
 
     let icon_candidates = [
-        format!("/usr/share/solarui/icons/{}.svg", icon_name_base),
         format!("/usr/share/solarui/icons/{}.png", icon_name_base),
-        format!("{}/.local/share/solarui/icons/{}.svg", get_user_home().to_string_lossy(), icon_name_base),
-        format!("{}/.local/share/solarui/icons/{}.png", get_user_home().to_string_lossy(), icon_name_base),
+        format!("/home/darkmorpheus/SolarUI/data/icons/gamezone/{}.png", icon_name_base),
+        format!("/usr/share/solarui/icons/{}.svg", icon_name_base),
+        format!("/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/solarui/icons/{}.png", icon_name_base),
+        format!("/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/solarui/icons/{}.svg", icon_name_base),
     ];
-    let mut attached = false;
     for ic in &icon_candidates {
         if Path::new(ic).exists() {
-            pic.set_filename(Some(Path::new(ic)));
+            load_picture_file(&pic, Path::new(ic));
             b_box.append(&pic);
-            attached = true;
             break;
         }
-    }
-
-    if !attached {
-        let fallback_name = match icon_name_base {
-            "xbox_nav_library" => "applications-games-symbolic",
-            "xbox_nav_store" => "software-store-symbolic",
-            "xbox_nav_gamepass" => "input-gaming-symbolic",
-            "xbox_nav_search" => "system-search-symbolic",
-            "xbox_nav_settings" => "preferences-system-symbolic",
-            _ => "applications-games-symbolic",
-        };
-        let icon_img = gtk4::Image::from_icon_name(fallback_name);
-        icon_img.set_pixel_size(18);
-        icon_img.add_css_class("xbox-nav-btn-icon");
-        b_box.append(&icon_img);
     }
 
     let lbl = Label::new(Some(label_text));
@@ -939,9 +927,22 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     let provider = CssProvider::new();
     let css = r#"
         window {
-            background-color: #0b0e14;
-            color: #ffffff;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Segoe UI Variable", sans-serif;
+            background-color: #111216;
+            color: #f4f4f6;
+            font-family: "Inter", "Cantarell", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        button {
+            background-image: none;
+        }
+
+        *,
+        *:focus,
+        *:focus-visible,
+        *:focus-within {
+            outline-color: transparent;
+            outline-width: 0px;
+            outline-style: none;
         }
 
         .xbox-root {
@@ -950,200 +951,176 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
             margin: 0;
         }
 
-        /* ── Fullscreen Backdrop & Scrim ── */
+        /* ── Fullscreen Backdrop & Obsidian Scrim ── */
         .xbox-backdrop-layer {
-            background-color: #05070a;
+            background-color: #111216;
         }
 
         .xbox-backdrop-scrim {
             background: linear-gradient(180deg,
-                rgba(5, 7, 10, 0.25) 0%,
-                rgba(5, 7, 10, 0.45) 45%,
-                rgba(5, 7, 10, 0.88) 75%,
-                rgba(5, 7, 10, 0.98) 100%
+                rgba(12, 13, 17, 0.66) 0%,
+                rgba(12, 13, 17, 0.78) 44%,
+                rgba(12, 13, 17, 0.93) 76%,
+                rgba(12, 13, 17, 0.98) 100%
             );
         }
 
-        /* ── Top Fluent HUD Bar ── */
+        /* ── Top Living Flow HUD Bar ── */
         .xbox-top-bar {
-            padding: 24px 44px 12px 44px;
+            padding: 20px 28px 12px 28px;
             background: transparent;
         }
 
         .xbox-avatar {
+            min-width: 38px;
+            min-height: 38px;
             border-radius: 9999px;
-            border: 2px solid rgba(255, 255, 255, 0.25);
+            border: 1.5px solid rgba(255, 255, 255, 0.22);
+            background-color: #18191e;
             margin-right: 12px;
+            padding: 2px;
         }
 
         .xbox-gamertag {
-            color: #ffffff;
+            color: #f4f4f6;
             font-size: 15px;
             font-weight: 700;
             letter-spacing: -0.2px;
+            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.88);
         }
 
         .xbox-badge-tag {
-            background: #ffffff;
-            color: #000000;
+            background: rgba(244, 244, 246, 0.94);
+            color: #111215;
             font-size: 9px;
             font-weight: 900;
-            padding: 2px 6px;
-            border-radius: 4px;
+            padding: 2px 7px;
+            border-radius: 999px;
             margin-left: 8px;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.6px;
             min-height: 14px;
         }
 
         .xbox-gamerscore {
-            color: #a0a6b2;
+            color: #a1a1aa;
             font-size: 13px;
             font-weight: 600;
-            margin-left: 10px;
+            margin-left: 8px;
         }
 
         .xbox-score-icon {
-            color: #107c10;
+            color: #e54d2e;
             font-size: 13px;
             font-weight: 800;
             margin-right: 3px;
         }
 
-
         .xbox-top-nav-group {
-            background: rgba(18, 22, 28, 0.75);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 26px;
+            background: rgba(22, 23, 28, 0.86);
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            border-radius: 999px;
             padding: 4px 6px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.42);
         }
 
         .xbox-nav-icon-btn {
             background: transparent;
-            color: #d0d6e0;
-            border-radius: 20px;
-            padding: 6px 14px;
-            border: 2px solid transparent;
-            font-size: 13px;
+            color: #c8cbd2;
+            border-radius: 999px;
+            padding: 6px 12px;
+            border: 1px solid transparent;
+            font-size: 12.5px;
             font-weight: 700;
-            transition: all 150ms cubic-bezier(0.16, 1, 0.3, 1);
+            transition: all 180ms cubic-bezier(0.22, 1, 0.36, 1);
         }
 
         .xbox-nav-icon-btn:hover {
             color: #ffffff;
-            background: rgba(255, 255, 255, 0.14);
+            background: rgba(255, 255, 255, 0.08);
         }
 
-        .xbox-nav-icon-btn:focus, .xbox-nav-icon-btn.active {
+        .xbox-nav-icon-btn:focus {
             color: #ffffff;
-            background: rgba(255, 255, 255, 0.22);
-            border: 2px solid #52b7ff;
-            box-shadow: 0 0 14px rgba(82, 183, 255, 0.45);
-            transform: scale(1.04);
+            background: rgba(255, 255, 255, 0.16);
+            border: 1px solid rgba(255, 255, 255, 0.34);
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.36);
+        }
+
+        .xbox-nav-icon-btn.active {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.13);
+            border: 1px solid rgba(255, 255, 255, 0.22);
         }
 
         .xbox-nav-btn-icon {
-            margin-right: 6px;
+            margin-right: 4px;
+            min-width: 16px;
+            min-height: 16px;
         }
 
         /* ── Search & Filter Omnibar In Drawer ── */
         .xbox-search-bar {
-            background: #141a24;
-            color: #ffffff;
-            border: 1px solid #2a3546;
-            border-radius: 8px;
-            padding: 8px 14px;
+            background: #1c1e24;
+            color: #f4f4f6;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 999px;
+            padding: 9px 18px;
             font-size: 14px;
             margin-bottom: 16px;
         }
 
         .xbox-search-bar:focus {
-            border: 2px solid #52b7ff;
-            box-shadow: 0 0 16px rgba(82, 183, 255, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.32);
+            box-shadow: none;
         }
 
         /* ── Settings & Store Panels ── */
         .xbox-modal-drawer {
-            background: rgba(14, 18, 25, 0.96);
-            border-radius: 16px;
-            border: 1px solid rgba(255, 255, 255, 0.15);
+            background: rgba(20, 21, 26, 0.96);
+            border-radius: 22px;
+            border: 1px solid rgba(255, 255, 255, 0.11);
             padding: 24px 32px;
             margin-top: 8px;
             margin-bottom: 24px;
-            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+            box-shadow: 0 18px 44px rgba(0, 0, 0, 0.72);
         }
 
         .xbox-modal-card {
-            background: #1c2432;
-            border-radius: 12px;
-            border: 2px solid transparent;
+            background: #22242c;
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.09);
             padding: 16px 20px;
             margin-right: 14px;
             min-width: 220px;
-            transition: all 120ms ease;
+            transition: all 160ms cubic-bezier(0.22, 1, 0.36, 1);
         }
 
         .xbox-modal-card:hover, .xbox-modal-card:focus {
-            border: 2px solid #52b7ff;
-            background: #243042;
-            transform: scale(1.03);
+            border: 1px solid rgba(255, 255, 255, 0.36);
+            background: #2a2d37;
+            transform: scale(1.02);
         }
 
         .xbox-modal-card-title {
-            color: #ffffff;
+            color: #f4f4f6;
             font-size: 15px;
             font-weight: 700;
         }
 
         .xbox-modal-card-desc {
-            color: #a0a6b2;
+            color: #9ca3af;
             font-size: 12px;
             margin-top: 4px;
         }
 
-        .xbox-top-nav-group {
-            background: rgba(18, 22, 28, 0.65);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 24px;
-            padding: 4px 6px;
-        }
-
-        .xbox-nav-icon-btn {
-            background: transparent;
-            color: #c0c6d0;
-            border-radius: 18px;
-            padding: 7px 14px;
-            border: 2px solid transparent;
-            font-size: 12px;
-            font-weight: 700;
-            transition: all 120ms cubic-bezier(0.16, 1, 0.3, 1);
-        }
-
-        .xbox-nav-icon-btn:hover {
-            color: #ffffff;
-            background: rgba(255, 255, 255, 0.12);
-        }
-
-        .xbox-nav-icon-btn:focus {
-            color: #ffffff;
-            background: rgba(255, 255, 255, 0.20);
-            border: 2px solid #52b7ff;
-            box-shadow: 0 0 12px rgba(82, 183, 255, 0.4);
-            transform: scale(1.05);
-        }
-
-        .xbox-nav-icon-btn.active {
-            color: #ffffff;
-            background: rgba(255, 255, 255, 0.18);
-        }
-
         .xbox-hud-right {
-            color: #ffffff;
+            color: #d4d4d8;
             font-size: 13px;
             font-weight: 600;
         }
 
         .xbox-hud-time {
-            color: #ffffff;
+            color: #f4f4f6;
             font-size: 14px;
             font-weight: 700;
             margin-left: 12px;
@@ -1151,19 +1128,19 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
 
         .xbox-lang-btn {
             background: rgba(255, 255, 255, 0.08);
-            color: #c0c6d0;
+            color: #e4e4e7;
             font-size: 11px;
             font-weight: 700;
-            border-radius: 12px;
-            padding: 3px 10px;
-            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 999px;
+            padding: 4px 11px;
+            border: 1px solid rgba(255, 255, 255, 0.14);
             margin-left: 14px;
-            transition: all 120ms ease;
+            transition: all 150ms ease;
         }
 
         .xbox-lang-btn:hover, .xbox-lang-btn:focus {
-            background: #ffffff;
-            color: #000000;
+            background: #f2f3f5;
+            color: #111215;
             border-color: #ffffff;
         }
 
@@ -1175,36 +1152,188 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
         }
 
         .xbox-content-box {
-            padding: 0 44px 32px 44px;
+            padding: 0 44px 28px 44px;
             background: transparent;
         }
 
         .xbox-hero-spacer {
-            min-height: 220px;
+            min-height: 184px;
+            padding-top: 14px;
+            padding-bottom: 12px;
+        }
+
+        .gz-preview-frame {
+            background: rgba(16, 17, 22, 0.92);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 18px;
+            min-width: 304px;
+            min-height: 171px;
+            box-shadow: 0 14px 36px rgba(0, 0, 0, 0.65);
+        }
+
+        .gz-preview-pic {
+            border-radius: 17px;
+            min-width: 304px;
+            min-height: 171px;
+        }
+
+        .gz-preview-badge {
+            background: rgba(14, 15, 19, 0.84);
+            color: #f4f4f6;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            border-radius: 999px;
+            padding: 3px 10px;
+            margin: 10px;
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.6px;
+        }
+
+        .gz-hero-action-btn {
+            background: rgba(255, 255, 255, 0.09);
+            color: #f4f4f6;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 999px;
+            padding: 6px 15px;
+            font-size: 12px;
+            font-weight: 700;
+            transition: all 160ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        .gz-hero-action-btn:hover, .gz-hero-action-btn:focus {
+            background: rgba(255, 255, 255, 0.18);
+            border-color: rgba(255, 255, 255, 0.36);
+        }
+
+        .gz-hero-play-primary {
+            background: #f4f4f6;
+            color: #111216;
+            border: 1px solid #ffffff;
+            border-radius: 999px;
+            padding: 6px 18px;
+            font-size: 12px;
+            font-weight: 800;
+            transition: all 160ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        .gz-hero-play-primary:hover, .gz-hero-play-primary:focus {
+            background: #ffffff;
+            transform: scale(1.02);
+        }
+
+        .gz-subtab-bar {
+            background: rgba(22, 23, 29, 0.86);
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            border-radius: 999px;
+            padding: 4px 5px;
+            margin-bottom: 10px;
+        }
+
+        .gz-subtab-btn {
+            background: transparent;
+            color: #a1a1aa;
+            border: 1px solid transparent;
+            border-radius: 999px;
+            padding: 5px 15px;
+            font-size: 12px;
+            font-weight: 700;
+            transition: all 160ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        .gz-subtab-btn:hover {
+            color: #f4f4f6;
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .gz-subtab-btn.active {
+            background: rgba(255, 255, 255, 0.14);
+            color: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 0.24);
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.32);
+        }
+
+        .gz-card-discount-pill {
+            background: rgba(22, 101, 52, 0.92);
+            color: #dcfce7;
+            border: 1px solid rgba(74, 222, 128, 0.35);
+            border-radius: 999px;
+            padding: 2px 8px;
+            margin: 8px;
+            font-size: 10px;
+            font-weight: 800;
+        }
+
+        .gz-card-installed-pill {
+            background: rgba(207, 63, 36, 0.92);
+            color: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 0.28);
+            border-radius: 999px;
+            padding: 2px 8px;
+            margin: 8px;
+            font-size: 9.5px;
+            font-weight: 800;
+        }
+
+        .gz-local-empty-card {
+            background: rgba(24, 26, 32, 0.90);
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            border-radius: 18px;
+            padding: 18px 24px;
+            margin-bottom: 18px;
+        }
+
+        .xbox-hero-kicker {
+            color: #f0785a;
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 1.4px;
+            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.90);
+        }
+
+        .xbox-hero-headline {
+            color: #f4f4f6;
+            font-size: 28px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            margin-top: 4px;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.90);
+        }
+
+        .xbox-hero-desc {
+            color: #d4d4d8;
+            font-size: 13.5px;
+            font-weight: 500;
+            margin-top: 4px;
+            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.90);
         }
 
         /* ── Focused Title Label ── */
         .xbox-active-title-label {
-            color: #ffffff;
-            font-size: 26px;
+            color: #f4f4f6;
+            font-size: 23px;
             font-weight: 800;
-            letter-spacing: -0.5px;
-            margin-bottom: 14px;
-            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+            letter-spacing: -0.4px;
+            margin-bottom: 4px;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.75);
         }
 
         .xbox-active-badge {
-            color: #52b7ff;
-            font-size: 12px;
-            font-weight: 700;
-            margin-left: 12px;
-            letter-spacing: 0.5px;
+            background: rgba(207, 63, 36, 0.20);
+            color: #f5b4a5;
+            border: 1px solid rgba(229, 77, 46, 0.36);
+            border-radius: 999px;
+            padding: 3px 11px;
+            font-size: 10.5px;
+            font-weight: 800;
+            margin-left: 10px;
+            margin-bottom: 5px;
+            letter-spacing: 0.6px;
         }
 
         /* ── Game Carousel Row ── */
         .xbox-carousel-scroll {
             background: transparent;
-            margin-bottom: 24px;
+            margin-bottom: 16px;
         }
 
         .xbox-carousel-scroll undershoot.top,
@@ -1221,81 +1350,89 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
         }
 
         .xbox-game-card {
-            background: #141a24;
-            border-radius: 12px;
-            border: 2px solid transparent;
+            background: linear-gradient(180deg, rgba(28, 30, 36, 0.96), rgba(18, 19, 24, 0.98));
+            background-image: none;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
             padding: 0;
             margin-right: 14px;
             margin-top: 8px;
             margin-bottom: 8px;
             min-width: 156px;
             min-height: 156px;
-            transition: transform 260ms cubic-bezier(0.1, 0.9, 0.2, 1.0), border 220ms ease, box-shadow 260ms ease;
-            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+            transition: all 200ms cubic-bezier(0.22, 1, 0.36, 1);
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.52);
         }
 
         .xbox-game-card:hover {
-            border: 2px solid rgba(255, 255, 255, 0.6);
-            transform: scale(1.05) translateY(-4px);
-            box-shadow: 0 10px 22px rgba(0, 0, 0, 0.55);
+            border-color: rgba(255, 255, 255, 0.42);
+            transform: scale(1.03);
         }
 
         .xbox-game-card:focus, .xbox-game-card.active-focus {
-            border: 3px solid #52b7ff;
-            box-shadow: 0 0 32px rgba(82, 183, 255, 0.75), 0 14px 34px rgba(0, 0, 0, 0.85);
-            transform: scale(1.10) translateY(-6px);
+            border: 1.5px solid rgba(255, 255, 255, 0.80);
+            box-shadow: 0 14px 32px rgba(0, 0, 0, 0.72);
+            transform: scale(1.05);
         }
 
         .xbox-game-card-img {
-            border-radius: 8px;
+            border-radius: 19px;
             min-width: 156px;
             min-height: 156px;
         }
 
+        .xbox-card-caption {
+            background: linear-gradient(180deg, rgba(14, 15, 19, 0.0) 0%, rgba(14, 15, 19, 0.84) 48%, rgba(14, 15, 19, 0.96) 100%);
+            border-bottom-left-radius: 19px;
+            border-bottom-right-radius: 19px;
+            padding: 18px 11px 9px 11px;
+        }
+
+        .xbox-card-caption-title {
+            color: #f4f4f6;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
         /* ── Bento Grid Bottom Banners ── */
         .xbox-bento-row {
-            margin-bottom: 24px;
+            margin-bottom: 20px;
         }
 
         .xbox-bento-card {
-            background: #141a24;
-            border-radius: 12px;
-            border: 2px solid transparent;
+            background: #181a20;
+            border-radius: 18px;
+            border: 1px solid rgba(255, 255, 255, 0.10);
             padding: 0;
             margin-right: 14px;
             min-width: 275px;
             min-height: 155px;
-                        transition: all 120ms cubic-bezier(0.16, 1, 0.3, 1);
-            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+            transition: all 180ms cubic-bezier(0.22, 1, 0.36, 1);
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.48);
         }
 
-        .xbox-bento-card:hover {
-            border: 2px solid rgba(255, 255, 255, 0.5);
-            transform: scale(1.03);
-        }
-
-        .xbox-bento-card:focus {
-            border: 3px solid #107c10; /* Xbox green glow for bento */
-            box-shadow: 0 0 24px rgba(16, 124, 16, 0.65), 0 8px 24px rgba(0, 0, 0, 0.7);
-            transform: scale(1.06);
+        .xbox-bento-card:hover, .xbox-bento-card:focus {
+            border: 1.5px solid rgba(255, 255, 255, 0.48);
+            box-shadow: 0 14px 30px rgba(0, 0, 0, 0.68);
+            transform: scale(1.025);
         }
 
         .xbox-bento-overlay-box {
-            background: linear-gradient(180deg, rgba(0, 0, 0, 0.1) 0%, rgba(0, 0, 0, 0.78) 100%);
-            border-radius: 10px;
+            background: linear-gradient(180deg, rgba(12, 13, 16, 0.05) 0%, rgba(12, 13, 16, 0.82) 100%);
+            border-radius: 17px;
             padding: 14px 16px;
         }
 
         .xbox-bento-tag {
-            color: #52b7ff;
+            color: #e56b4e;
             font-size: 10px;
             font-weight: 800;
             text-transform: uppercase;
-            letter-spacing: 0.8px;
+            letter-spacing: 0.9px;
         }
 
         .xbox-bento-title {
-            color: #ffffff;
+            color: #f4f4f6;
             font-size: 15px;
             font-weight: 700;
             margin-top: 2px;
@@ -1303,7 +1440,7 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
         }
 
         .xbox-bento-subtitle {
-            color: #b0b6c2;
+            color: #a1a1aa;
             font-size: 12px;
             font-weight: 500;
             margin-top: 2px;
@@ -1311,55 +1448,55 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
 
         /* ── All Apps View Grid ── */
         .xbox-apps-drawer {
-            background: rgba(11, 14, 20, 0.94);
-            border-radius: 16px;
-            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: rgba(20, 21, 26, 0.96);
+            border-radius: 22px;
+            border: 1px solid rgba(255, 255, 255, 0.11);
             padding: 24px 32px;
             margin-top: 8px;
             margin-bottom: 24px;
         }
 
         .xbox-apps-header {
-            color: #ffffff;
+            color: #f4f4f6;
             font-size: 20px;
             font-weight: 800;
             margin-bottom: 16px;
         }
 
         .xbox-apps-close-btn {
-            background: rgba(255, 255, 255, 0.1);
-            color: #ffffff;
+            background: rgba(255, 255, 255, 0.08);
+            color: #f4f4f6;
             font-size: 12px;
             font-weight: 700;
-            border-radius: 8px;
+            border-radius: 999px;
             padding: 6px 14px;
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.16);
         }
 
         .xbox-apps-close-btn:hover, .xbox-apps-close-btn:focus {
-            background: #ef4444;
-            border-color: #ffffff;
+            background: #c83b22;
+            border-color: rgba(255, 255, 255, 0.32);
         }
 
         .xbox-app-tile {
-            background: #18202c;
-            border-radius: 10px;
-            border: 2px solid transparent;
+            background: #20222a;
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
             padding: 12px;
             margin-right: 12px;
             margin-bottom: 12px;
             min-width: 150px;
-                        transition: all 120ms ease;
+            transition: all 150ms ease;
         }
 
         .xbox-app-tile:hover, .xbox-app-tile:focus {
-            border: 2px solid #52b7ff;
-            background: #202b3a;
-            transform: scale(1.04);
+            border: 1px solid rgba(255, 255, 255, 0.36);
+            background: #282b35;
+            transform: scale(1.03);
         }
 
         .xbox-app-title {
-            color: #ffffff;
+            color: #f4f4f6;
             font-size: 12px;
             font-weight: 700;
             margin-top: 6px;
@@ -1367,15 +1504,15 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
 
         /* ── Bottom Gamepad Bar (Legend) ── */
         .xbox-controller-bar {
-            background: rgba(11, 14, 20, 0.85);
+            background: rgba(15, 16, 20, 0.90);
             border-top: 1px solid rgba(255, 255, 255, 0.08);
             padding: 10px 44px;
         }
 
         .xbox-legend-key {
-            background: rgba(255, 255, 255, 0.12);
-            color: #ffffff;
-            border: 1px solid rgba(255, 255, 255, 0.22);
+            background: rgba(255, 255, 255, 0.10);
+            color: #f4f4f6;
+            border: 1px solid rgba(255, 255, 255, 0.18);
             border-radius: 9999px;
             font-size: 11px;
             font-weight: 800;
@@ -1386,7 +1523,7 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
         }
 
         .xbox-legend-desc {
-            color: #a0a6b2;
+            color: #a1a1aa;
             font-size: 12px;
             font-weight: 600;
             margin-right: 28px;
@@ -1394,9 +1531,9 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
 
         /* ── Offline Banner ── */
         .xbox-offline-banner {
-            background: rgba(220, 38, 38, 0.25);
-            border: 1px solid #ef4444;
-            border-radius: 10px;
+            background: rgba(44, 24, 22, 0.90);
+            border: 1px solid rgba(229, 77, 46, 0.38);
+            border-radius: 14px;
             padding: 8px 16px;
             margin: 0 44px 12px 44px;
         }
@@ -1418,13 +1555,20 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
         .maximized(true)
         .build();
 
-    let all_games = Arc::new(Mutex::new(discover_all_games()));
-    let showcase_games = Arc::new(discover_store_showcase_for_lang(lang));
+    let local_detected_initial = gamezone_live::scan_computer_and_account_games(discover_all_games());
+    let installed_appids: std::collections::HashSet<String> = local_detected_initial
+        .iter()
+        .filter_map(|g| g.steam_app_id.clone())
+        .collect();
+    let cached_featured = gamezone_live::load_cached_featured_games(lang, &installed_appids);
+    let initial_featured = if !cached_featured.is_empty() {
+        cached_featured
+    } else {
+        discover_store_showcase_for_lang(lang)
+    };
     let selected_index = Arc::new(Mutex::new(0usize));
-
-    // Ensure cache directory exists and trigger background media scraper
-    init_media_cache(&all_games.lock().unwrap());
-    init_media_cache(&showcase_games);
+    let preview_ctrl = LivePreviewController::new();
+    let (media_tx, media_rx) = async_channel::unbounded::<MediaUpdateEvent>();
 
     // Fullscreen Dynamic Adaptive Backdrop
     let bg_box = GtkBox::new(Orientation::Vertical, 0);
@@ -1440,7 +1584,7 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
 
     let def_wallpaper = get_default_wallpaper_path();
     if !def_wallpaper.is_empty() {
-        bg_picture.set_filename(Some(Path::new(&def_wallpaper)));
+        load_picture_file(&bg_picture, Path::new(&def_wallpaper));
     }
 
     let bg_scrim = GtkBox::new(Orientation::Vertical, 0);
@@ -1510,42 +1654,74 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     let user_box = GtkBox::new(Orientation::Horizontal, 0);
     user_box.set_valign(gtk4::Align::Center);
 
-    let avatar_pic = Picture::new();
-    avatar_pic.set_size_request(34, 34);
-    avatar_pic.set_can_shrink(true);
-    avatar_pic.set_content_fit(gtk4::ContentFit::Cover);
-    avatar_pic.add_css_class("xbox-avatar");
+    let acct: AccountSummary = gamezone_live::detect_accounts_with_avatar();
 
-    let home = get_user_home();
-    let user_face = home.join(".face");
-    let user_face_icon = home.join(".face.icon");
-    let avatar_candidates = [
-        user_face.to_string_lossy().to_string(),
-        user_face_icon.to_string_lossy().to_string(),
-        "/usr/share/solarui/covers/user_avatar.png".to_string(),
-        "/usr/share/pixmaps/faces/user.png".to_string(),
-    ];
-    for ac in &avatar_candidates {
-        if Path::new(ac).exists() {
-            avatar_pic.set_filename(Some(Path::new(ac)));
-            break;
+    let avatar_img = Image::new();
+    avatar_img.set_pixel_size(34);
+    avatar_img.set_size_request(34, 34);
+    avatar_img.add_css_class("xbox-avatar");
+
+    let mut avatar_loaded = false;
+    if let Some(ref av_path) = acct.steam_avatar_path {
+        if let Ok(bytes) = std::fs::read(av_path) {
+            let gbytes = glib::Bytes::from(&bytes);
+            if let Ok(tex) = gdk::Texture::from_bytes(&gbytes) {
+                avatar_img.set_paintable(Some(&tex));
+                avatar_loaded = true;
+            }
         }
     }
-    user_box.append(&avatar_pic);
+    if !avatar_loaded {
+        let avatar_candidates = [
+            "/usr/share/solarui/covers/user_avatar.png",
+            "/home/darkmorpheus/SolarUI/data/covers/user_avatar.png",
+            "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/solarui/covers/user_avatar.png",
+        ];
+        for ac in avatar_candidates {
+            if let Ok(bytes) = std::fs::read(ac) {
+                let gbytes = glib::Bytes::from(&bytes);
+                if let Ok(tex) = gdk::Texture::from_bytes(&gbytes) {
+                    avatar_img.set_paintable(Some(&tex));
+                    break;
+                }
+            }
+        }
+    }
+    user_box.append(&avatar_img);
 
-    let (steam_account, epic_account) = detect_logged_in_accounts();
-    let gamertag_text = if let Some(ref s) = steam_account {
-        s.clone()
-    } else if let Some(ref e) = epic_account {
-        e.clone()
+    let (gamertag_text, badge_tag_text) = if let Some(ref s) = acct.steam_persona {
+        (s.clone(), "STEAM")
+    } else if let Some(ref e) = acct.epic_display_name {
+        (e.clone(), "EPIC")
     } else {
-        std::env::var("USER").unwrap_or_else(|_| "blaze".to_string())
+        (lang.guest_player().to_string(), "BLAZE OS")
     };
 
     let lbl_tag = Label::new(Some(&gamertag_text));
     lbl_tag.add_css_class("xbox-gamertag");
     lbl_tag.set_valign(gtk4::Align::Center);
     user_box.append(&lbl_tag);
+
+    let lbl_ultimate = Label::new(Some(badge_tag_text));
+    lbl_ultimate.add_css_class("xbox-badge-tag");
+    lbl_ultimate.set_valign(gtk4::Align::Center);
+    user_box.append(&lbl_ultimate);
+
+    let score_box = GtkBox::new(Orientation::Horizontal, 2);
+    score_box.set_valign(gtk4::Align::Center);
+    score_box.set_margin_start(10);
+
+    let lbl_score_icon = Label::new(Some("G"));
+    lbl_score_icon.add_css_class("xbox-score-icon");
+    lbl_score_icon.set_valign(gtk4::Align::Center);
+
+    let lbl_score = Label::new(Some("21,337"));
+    lbl_score.add_css_class("xbox-gamerscore");
+    lbl_score.set_valign(gtk4::Align::Center);
+
+    score_box.append(&lbl_score_icon);
+    score_box.append(&lbl_score);
+    user_box.append(&score_box);
 
     top_bar.append(&user_box);
 
@@ -1619,7 +1795,9 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     lang_btn.add_css_class("xbox-lang-btn");
     let win_l_clone = window.clone();
     let loop_l_clone = main_loop.clone();
+    let prev_ctrl_lang = preview_ctrl.clone();
     lang_btn.connect_clicked(move |_| {
+        prev_ctrl_lang.stop();
         let new_l = lang.toggle();
         new_l.save();
         win_l_clone.close();
@@ -1644,21 +1822,41 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     content_box.add_css_class("xbox-content-box");
     content_box.set_hexpand(true);
 
-    let library_view = GtkBox::new(Orientation::Vertical, 0);
-    library_view.set_hexpand(true);
+    // ── UPPER TWO-COLUMN HERO SHOWCASE + LIVE OFFICIAL TRAILER / SCREENSHOT FRAME ──
+    let hero_row = GtkBox::new(Orientation::Horizontal, 24);
+    hero_row.add_css_class("xbox-hero-spacer");
+    hero_row.set_valign(gtk4::Align::End);
+    hero_row.set_hexpand(true);
 
-    // Upper Hero Spacer (Shows the clean wallpaper art in upper 55-60% of viewport)
-    let hero_spacer = GtkBox::new(Orientation::Vertical, 0);
-    hero_spacer.add_css_class("xbox-hero-spacer");
-    library_view.append(&hero_spacer);
+    let hero_left = GtkBox::new(Orientation::Vertical, 3);
+    hero_left.set_hexpand(true);
+    hero_left.set_valign(gtk4::Align::End);
 
-    // Active Focused Game Title Label
+    let hero_kicker = Label::new(Some("BLAZE UNIVERSE • GAMEZONE"));
+    hero_kicker.add_css_class("xbox-hero-kicker");
+    hero_kicker.set_halign(gtk4::Align::Start);
+    hero_left.append(&hero_kicker);
+
+    // Official Transparent Steam Game Logo (`logo.png`)
+    let hero_logo_pic = Picture::new();
+    hero_logo_pic.set_can_shrink(true);
+    hero_logo_pic.set_content_fit(gtk4::ContentFit::Contain);
+    hero_logo_pic.set_size_request(210, 56);
+    hero_logo_pic.set_halign(gtk4::Align::Start);
+    hero_logo_pic.set_margin_top(2);
+    hero_logo_pic.set_margin_bottom(2);
+    hero_logo_pic.set_visible(false);
+    hero_left.append(&hero_logo_pic);
+
+    // Active Focused Game Title + Status Pill
     let title_row = GtkBox::new(Orientation::Horizontal, 8);
-    title_row.set_valign(gtk4::Align::End);
+    title_row.set_valign(gtk4::Align::Center);
 
     let active_title_lbl = Label::new(Some(""));
     active_title_lbl.add_css_class("xbox-active-title-label");
     active_title_lbl.set_halign(gtk4::Align::Start);
+    active_title_lbl.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    active_title_lbl.set_max_width_chars(38);
 
     let active_badge_lbl = Label::new(Some(""));
     active_badge_lbl.add_css_class("xbox-active-badge");
@@ -1666,111 +1864,641 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
 
     title_row.append(&active_title_lbl);
     title_row.append(&active_badge_lbl);
-    library_view.append(&title_row);
+    hero_left.append(&title_row);
 
-    // ── 1. PRIMARY HORIZONTAL GAME CAROUSEL (RESUME ROW) ──
-    let carousel_scroll = ScrolledWindow::builder()
+    let hero_desc = Label::new(Some(match lang {
+        Language::TR => "Linux 7.2.9 sched_ext • NTSYNC Çekirdek Senkronizasyonu • Resmi Steam Medya Motoru",
+        Language::EN => "Linux 7.2.9 sched_ext • NTSYNC Kernel Sync • Official Steam Media Engine",
+    }));
+    hero_desc.add_css_class("xbox-hero-desc");
+    hero_desc.set_halign(gtk4::Align::Start);
+    hero_desc.set_wrap(true);
+    hero_desc.set_max_width_chars(66);
+    hero_desc.set_lines(2);
+    hero_desc.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    hero_left.append(&hero_desc);
+
+    let hero_actions = GtkBox::new(Orientation::Horizontal, 10);
+    hero_actions.set_margin_top(8);
+
+    let hero_play_btn = Button::with_label(match lang {
+        Language::TR => "▶ Oyna / Mağazada Aç",
+        Language::EN => "▶ Play / Open in Store",
+    });
+    hero_play_btn.add_css_class("gz-hero-play-primary");
+
+    let hero_trailer_btn = Button::with_label(match lang {
+        Language::TR => "▶ Fragman & Ön İzleme",
+        Language::EN => "▶ Trailer & Preview",
+    });
+    hero_trailer_btn.add_css_class("gz-hero-action-btn");
+
+    hero_actions.append(&hero_play_btn);
+    hero_actions.append(&hero_trailer_btn);
+    hero_left.append(&hero_actions);
+
+    hero_row.append(&hero_left);
+
+    // Right 16:9 Live Video Trailer & Official HD Screenshot Frame
+    let preview_frame = Overlay::new();
+    preview_frame.add_css_class("gz-preview-frame");
+    preview_frame.set_size_request(304, 171);
+    preview_frame.set_valign(gtk4::Align::End);
+    preview_frame.set_halign(gtk4::Align::End);
+
+    let preview_pic = Picture::new();
+    preview_pic.add_css_class("gz-preview-pic");
+    preview_pic.set_can_shrink(true);
+    preview_pic.set_content_fit(gtk4::ContentFit::Cover);
+    preview_pic.set_size_request(304, 171);
+    if !def_wallpaper.is_empty() {
+        load_picture_file(&preview_pic, Path::new(&def_wallpaper));
+    }
+    preview_frame.set_child(Some(&preview_pic));
+
+    let preview_badge = Label::new(Some(match lang {
+        Language::TR => "◉ RESMİ ÖN İZLEME",
+        Language::EN => "◉ OFFICIAL PREVIEW",
+    }));
+    preview_badge.add_css_class("gz-preview-badge");
+    preview_badge.set_halign(gtk4::Align::Start);
+    preview_badge.set_valign(gtk4::Align::Start);
+    preview_frame.add_overlay(&preview_badge);
+
+    hero_row.append(&preview_frame);
+    content_box.append(&hero_row);
+
+    // ── SEGMENTED SUB-TAB BAR: [★ Steam Öne Çıkanlar] | [▣ Bilgisayarımdaki & Hesabımdaki Oyunlar] ──
+    let start_on_local = std::env::var("GAMEZONE_TAB").ok().as_deref() == Some("local");
+
+    let subtab_header_row = GtkBox::new(Orientation::Horizontal, 12);
+    subtab_header_row.set_valign(gtk4::Align::Center);
+    subtab_header_row.set_margin_bottom(4);
+
+    let subtab_bar = GtkBox::new(Orientation::Horizontal, 4);
+    subtab_bar.add_css_class("gz-subtab-bar");
+
+    let btn_tab_featured = Button::with_label(match lang {
+        Language::TR => "★ Steam Öne Çıkanlar",
+        Language::EN => "★ Steam Featured",
+    });
+    btn_tab_featured.add_css_class("gz-subtab-btn");
+    if !start_on_local {
+        btn_tab_featured.add_css_class("active");
+    }
+
+    let local_tab_label = |count: usize| -> String {
+        match lang {
+            Language::TR => format!("▣ Bilgisayarımdaki & Hesabımdaki Oyunlar ({})", count),
+            Language::EN => format!("▣ My PC & Account Games ({})", count),
+        }
+    };
+
+    let btn_tab_local = Button::with_label(&local_tab_label(local_detected_initial.len()));
+    btn_tab_local.add_css_class("gz-subtab-btn");
+    if start_on_local {
+        btn_tab_local.add_css_class("active");
+    }
+
+    subtab_bar.append(&btn_tab_featured);
+    subtab_bar.append(&btn_tab_local);
+    subtab_header_row.append(&subtab_bar);
+
+    let subtab_spacer = GtkBox::new(Orientation::Horizontal, 0);
+    subtab_spacer.set_hexpand(true);
+    subtab_header_row.append(&subtab_spacer);
+
+    let btn_add_external = Button::with_label(match lang {
+        Language::TR => "+ Harici Oyun / Klasör Tanıt",
+        Language::EN => "+ Add External Game / Folder",
+    });
+    btn_add_external.add_css_class("gz-hero-action-btn");
+    btn_add_external.set_margin_bottom(8);
+    subtab_header_row.append(&btn_add_external);
+
+    content_box.append(&subtab_header_row);
+
+    // ── CAROUSEL VIEWS (FEATURED SHOWCASE vs DETECTED PC/ACCOUNT GAMES) ──
+    let featured_scroll = ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Automatic)
         .vscrollbar_policy(gtk4::PolicyType::Never)
         .hexpand(true)
         .build();
-    carousel_scroll.add_css_class("xbox-carousel-scroll");
+    featured_scroll.add_css_class("xbox-carousel-scroll");
+    featured_scroll.set_visible(!start_on_local);
 
-    let carousel_box = GtkBox::new(Orientation::Horizontal, 0);
+    let featured_carousel_box = GtkBox::new(Orientation::Horizontal, 0);
+    featured_scroll.set_child(Some(&featured_carousel_box));
+    content_box.append(&featured_scroll);
 
-    let recent_ids = get_recent_game_ids();
-    let mut recent_games: Vec<GameEntry> = Vec::new();
-    {
-        let inst = all_games.lock().unwrap();
-        for id in &recent_ids {
-            if let Some(g) = inst.iter().find(|g| &g.id == id) {
-                recent_games.push(g.clone());
-            } else if let Some(g) = showcase_games.iter().find(|g| &g.id == id) {
-                recent_games.push(g.clone());
-            }
-        }
-        for g in inst.iter() {
-            if !recent_games.iter().any(|rg| rg.id == g.id) {
-                recent_games.push(g.clone());
-            }
-        }
-    }
-    for sg in showcase_games.iter() {
-        if !recent_games.iter().any(|rg| rg.id == sg.id) {
-            recent_games.push(sg.clone());
-        }
-    }
+    let local_section_box = GtkBox::new(Orientation::Vertical, 8);
+    local_section_box.set_visible(start_on_local);
 
-    let mut game_buttons: Vec<Button> = Vec::new();
-    let active_game_list = Arc::new(Mutex::new(recent_games.clone()));
+    let local_empty_card = GtkBox::new(Orientation::Horizontal, 16);
+    local_empty_card.add_css_class("gz-local-empty-card");
+    local_empty_card.set_visible(local_detected_initial.is_empty());
 
-    let bg_pic_for_events = bg_picture.clone();
-    let active_title_clone = active_title_lbl.clone();
-    let active_badge_clone = active_badge_lbl.clone();
+    let le_text_box = GtkBox::new(Orientation::Vertical, 4);
+    le_text_box.set_hexpand(true);
+    let le_title = Label::new(Some(match lang {
+        Language::TR => "Bilgisayarınızda veya Bağlı Hesaplarınızda Henüz Oyun Algılanmadı",
+        Language::EN => "No Installed or Account Games Detected Yet",
+    }));
+    le_title.add_css_class("xbox-modal-card-title");
+    le_title.set_halign(gtk4::Align::Start);
 
-    for (idx, game) in recent_games.iter().enumerate() {
-        let card = Button::new();
-        card.add_css_class("xbox-game-card");
+    let le_desc = Label::new(Some(match lang {
+        Language::TR => "Steam, Epic (Heroic), GOG, Lutris, Flatpak veya ~/Oyunlar ve ~/Games klasörlerine indirdiğiniz harici oyunlar otomatik algılanıp bu sekmeye taşınır.",
+        Language::EN => "Games from Steam, Epic (Heroic), GOG, Lutris, Flatpak, or ~/Games are automatically detected and placed here.",
+    }));
+    le_desc.add_css_class("xbox-modal-card-desc");
+    le_desc.set_halign(gtk4::Align::Start);
+    le_desc.set_wrap(true);
+    le_text_box.append(&le_title);
+    le_text_box.append(&le_desc);
+    local_empty_card.append(&le_text_box);
+    local_section_box.append(&local_empty_card);
 
-        let c_box = GtkBox::new(Orientation::Vertical, 0);
-        let img = create_game_cover_image(game);
-        img.set_size_request(156, 156);
-        img.add_css_class("xbox-game-card-img");
-        c_box.append(&img);
-        card.set_child(Some(&c_box));
+    let local_scroll = ScrolledWindow::builder()
+        .hscrollbar_policy(gtk4::PolicyType::Automatic)
+        .vscrollbar_policy(gtk4::PolicyType::Never)
+        .hexpand(true)
+        .build();
+    local_scroll.add_css_class("xbox-carousel-scroll");
+    let local_carousel_box = GtkBox::new(Orientation::Horizontal, 0);
+    local_scroll.set_child(Some(&local_carousel_box));
+    local_section_box.append(&local_scroll);
 
-        let g_clone = game.clone();
-        let bg_clone = bg_pic_for_events.clone();
-        let title_lbl_c = active_title_clone.clone();
-        let badge_lbl_c = active_badge_clone.clone();
-        let s_idx_c = selected_index.clone();
+    content_box.append(&local_section_box);
 
-        let pic_fetch = bg_pic_for_events.clone();
-        let game_fetch = game.clone();
-        card.connect_has_focus_notify(move |btn| {
-            if btn.has_focus() {
-                *s_idx_c.lock().unwrap() = idx;
-                title_lbl_c.set_text(&g_clone.title);
-                let badge_txt = if g_clone.is_installed {
-                    "READY TO PLAY"
-                } else {
-                    "STORE AVAILABLE"
-                };
-                badge_lbl_c.set_text(badge_txt);
-                update_backdrop(Some(&g_clone), &bg_clone);
-                fetch_and_apply_store_screenshot(&game_fetch, &pic_fetch, &pic_fetch);
-            }
-        });
+    // ── SHARED REACTIVE STATE FOR LIVE MEDIA & SUB-TABS ──
+    let featured_games_rc: Rc<RefCell<Vec<GameEntry>>> = Rc::new(RefCell::new(initial_featured.clone()));
+    let local_games_rc: Rc<RefCell<Vec<GameEntry>>> = Rc::new(RefCell::new(local_detected_initial.clone()));
+    let active_tab_rc: Rc<RefCell<u8>> = Rc::new(RefCell::new(if start_on_local { 1 } else { 0 }));
+    let focused_game_rc: Rc<RefCell<Option<GameEntry>>> = Rc::new(RefCell::new(None));
+    let cover_pics_map: Rc<RefCell<HashMap<String, Vec<Picture>>>> = Rc::new(RefCell::new(HashMap::new()));
+    let featured_btns_rc: Rc<RefCell<Vec<Button>>> = Rc::new(RefCell::new(Vec::new()));
+    let local_btns_rc: Rc<RefCell<Vec<Button>>> = Rc::new(RefCell::new(Vec::new()));
 
-        let g_hover = game.clone();
-        let bg_hover = bg_pic_for_events.clone();
-        let title_lbl_h = active_title_clone.clone();
-        let badge_lbl_h = active_badge_clone.clone();
-        let motion_ctrl = EventControllerMotion::new();
-        motion_ctrl.connect_enter(move |_ctrl, _x, _y| {
-            title_lbl_h.set_text(&g_hover.title);
-            let badge_txt = if g_hover.is_installed {
-                "READY TO PLAY"
+    let active_game_list: Arc<Mutex<Vec<GameEntry>>> = Arc::new(Mutex::new(if start_on_local {
+        local_detected_initial.clone()
+    } else {
+        initial_featured.clone()
+    }));
+    let active_buttons_rc: Rc<RefCell<Vec<Button>>> = Rc::new(RefCell::new(Vec::new()));
+
+    // Focuses a game: updates official transparent logo, title, price/description, backdrop & starts live trailer!
+    let focus_game_ui: Rc<dyn Fn(&GameEntry)> = {
+        let focused_rc = focused_game_rc.clone();
+        let title_lbl = active_title_lbl.clone();
+        let badge_lbl = active_badge_lbl.clone();
+        let desc_lbl = hero_desc.clone();
+        let play_btn = hero_play_btn.clone();
+        let logo_pic = hero_logo_pic.clone();
+        let bg_pic = bg_picture.clone();
+        let prev_pic = preview_pic.clone();
+        let prev_badge = preview_badge.clone();
+        let prev_ctrl = preview_ctrl.clone();
+        let mtx = media_tx.clone();
+
+        Rc::new(move |game: &GameEntry| {
+            *focused_rc.borrow_mut() = Some(game.clone());
+            title_lbl.set_text(&game.title);
+
+            let badge_txt = if game.is_installed {
+                match lang {
+                    Language::TR => "KURULU • OYNA".to_string(),
+                    Language::EN => "INSTALLED • PLAY".to_string(),
+                }
             } else {
-                "STORE AVAILABLE"
+                game.category.to_uppercase()
             };
-            badge_lbl_h.set_text(badge_txt);
-            update_backdrop(Some(&g_hover), &bg_hover);
-        });
-        card.add_controller(motion_ctrl);
+            badge_lbl.set_text(&badge_txt);
+            desc_lbl.set_text(&game.banner_desc);
 
-        let g_click = game.clone();
-        let alert_c = trigger_offline_alert.clone();
-        card.connect_clicked(move |_| {
-            handle_game_activation(&g_click, &*alert_c);
+            if game.is_installed {
+                play_btn.set_label(match lang {
+                    Language::TR => "▶ Hemen Oyna",
+                    Language::EN => "▶ Play Now",
+                });
+            } else {
+                play_btn.set_label(match lang {
+                    Language::TR => "↗ Steam Mağazasında Aç",
+                    Language::EN => "↗ Open in Steam Store",
+                });
+            }
+
+            // Check if official transparent `logo.png` is cached on disk
+            let mut logo_found = None;
+            let mut check_dirs = vec![gamezone_live::media_cache_dir_for(&game.id)];
+            if let Some(ref aid) = game.steam_app_id {
+                check_dirs.push(gamezone_live::media_cache_dir_for(&format!("steam-{}", aid)));
+            }
+            for d in check_dirs {
+                let lp = d.join("logo.png");
+                if gamezone_live::is_valid_image_file(&lp) {
+                    logo_found = Some(lp);
+                    break;
+                }
+            }
+            if let Some(lp) = logo_found {
+                load_picture_file(&logo_pic, &lp);
+                logo_pic.set_visible(true);
+            } else {
+                logo_pic.set_visible(false);
+            }
+
+            update_backdrop(Some(game), &bg_pic);
+
+            prev_ctrl.stop();
+            prev_badge.set_text(match lang {
+                Language::TR => "◉ RESMİ ÖN İZLEME",
+                Language::EN => "◉ OFFICIAL PREVIEW",
+            });
+            if let Some(img_p) = get_game_screenshot_path(game).or_else(|| get_game_cover_path(game)) {
+                load_picture_file(&prev_pic, Path::new(&img_p));
+            }
+
+            gamezone_live::fetch_game_details_and_trailer_async(game.clone(), mtx.clone());
+        })
+    };
+
+    // Hero action button handlers
+    {
+        let fg_play = focused_game_rc.clone();
+        let alert_hp = trigger_offline_alert.clone();
+        hero_play_btn.connect_clicked(move |_| {
+            if let Some(ref g) = *fg_play.borrow() {
+                handle_game_activation(g, &*alert_hp);
+            }
         });
 
-        carousel_box.append(&card);
-        game_buttons.push(card);
+        let fg_tr = focused_game_rc.clone();
+        let mtx_tr = media_tx.clone();
+        hero_trailer_btn.connect_clicked(move |_| {
+            if let Some(ref g) = *fg_tr.borrow() {
+                gamezone_live::fetch_game_details_and_trailer_async(g.clone(), mtx_tr.clone());
+            }
+        });
     }
 
-    carousel_scroll.set_child(Some(&carousel_box));
-    library_view.append(&carousel_scroll);
+    // Populates a horizontal game card row and wires focus/hover/click + live cover map
+    let populate_carousel_row: Rc<dyn Fn(&GtkBox, &[GameEntry], &Rc<RefCell<Vec<Button>>>)> = {
+        let cover_map = cover_pics_map.clone();
+        let focus_fn = focus_game_ui.clone();
+        let focused_rc = focused_game_rc.clone();
+        let s_idx = selected_index.clone();
+        let alert_fn = trigger_offline_alert.clone();
+
+        Rc::new(move |row_box: &GtkBox, games: &[GameEntry], btns_out: &Rc<RefCell<Vec<Button>>>| {
+            while let Some(child) = row_box.first_child() {
+                row_box.remove(&child);
+            }
+            let mut btns = btns_out.borrow_mut();
+            btns.clear();
+
+            for (idx, game) in games.iter().enumerate() {
+                let card = Button::new();
+                card.add_css_class("xbox-game-card");
+
+                let card_overlay = Overlay::new();
+                let img = create_game_cover_image(game);
+                img.set_size_request(156, 156);
+                img.add_css_class("xbox-game-card-img");
+                card_overlay.set_child(Some(&img));
+
+                cover_map
+                    .borrow_mut()
+                    .entry(game.id.clone())
+                    .or_default()
+                    .push(img.clone());
+
+                // Top-right badge pill (Installed OR Steam Discount %)
+                if game.is_installed {
+                    let pill = Label::new(Some(match lang {
+                        Language::TR => "KURULU",
+                        Language::EN => "INSTALLED",
+                    }));
+                    pill.add_css_class("gz-card-installed-pill");
+                    pill.set_halign(gtk4::Align::End);
+                    pill.set_valign(gtk4::Align::Start);
+                    card_overlay.add_overlay(&pill);
+                } else if let Some(pos) = game.category.find("-%") {
+                    let disc: String = game.category[pos..]
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or("")
+                        .to_string();
+                    if !disc.is_empty() {
+                        let pill = Label::new(Some(&disc));
+                        pill.add_css_class("gz-card-discount-pill");
+                        pill.set_halign(gtk4::Align::End);
+                        pill.set_valign(gtk4::Align::Start);
+                        card_overlay.add_overlay(&pill);
+                    }
+                }
+
+                let cap_box = GtkBox::new(Orientation::Vertical, 1);
+                cap_box.add_css_class("xbox-card-caption");
+                cap_box.set_valign(gtk4::Align::End);
+                cap_box.set_hexpand(true);
+                let cap_lbl = Label::new(Some(&game.title));
+                cap_lbl.add_css_class("xbox-card-caption-title");
+                cap_lbl.set_halign(gtk4::Align::Start);
+                cap_lbl.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+                cap_lbl.set_max_width_chars(17);
+                cap_box.append(&cap_lbl);
+                card_overlay.add_overlay(&cap_box);
+
+                card.set_child(Some(&card_overlay));
+
+                let g_foc = game.clone();
+                let focus_c = focus_fn.clone();
+                let focused_check_f = focused_rc.clone();
+                let s_idx_c = s_idx.clone();
+                card.connect_has_focus_notify(move |btn| {
+                    if btn.has_focus() {
+                        *s_idx_c.lock().unwrap() = idx;
+                        let already = focused_check_f
+                            .borrow()
+                            .as_ref()
+                            .map(|cur| cur.id == g_foc.id)
+                            .unwrap_or(false);
+                        if !already {
+                            focus_c(&g_foc);
+                        }
+                    }
+                });
+
+                let g_hov = game.clone();
+                let focus_h = focus_fn.clone();
+                let focused_check_h = focused_rc.clone();
+                let motion_ctrl = EventControllerMotion::new();
+                motion_ctrl.connect_enter(move |_ctrl, _x, _y| {
+                    let already = focused_check_h
+                        .borrow()
+                        .as_ref()
+                        .map(|cur| cur.id == g_hov.id)
+                        .unwrap_or(false);
+                    if !already {
+                        focus_h(&g_hov);
+                    }
+                });
+                card.add_controller(motion_ctrl);
+
+                let g_clk = game.clone();
+                let alert_c = alert_fn.clone();
+                card.connect_clicked(move |_| {
+                    handle_game_activation(&g_clk, &*alert_c);
+                });
+
+                row_box.append(&card);
+                btns.push(card);
+            }
+        })
+    };
+
+    // Populate both carousels initially
+    populate_carousel_row(
+        &featured_carousel_box,
+        &featured_games_rc.borrow(),
+        &featured_btns_rc,
+    );
+    populate_carousel_row(
+        &local_carousel_box,
+        &local_games_rc.borrow(),
+        &local_btns_rc,
+    );
+    *active_buttons_rc.borrow_mut() = if start_on_local {
+        local_btns_rc.borrow().clone()
+    } else {
+        featured_btns_rc.borrow().clone()
+    };
+
+    // Helper closure to switch between Featured (0) and PC/Account Games (1)
+    let switch_subtab: Rc<dyn Fn(u8)> = {
+        let tab_rc = active_tab_rc.clone();
+        let b_feat = btn_tab_featured.clone();
+        let b_loc = btn_tab_local.clone();
+        let f_scroll = featured_scroll.clone();
+        let l_sec = local_section_box.clone();
+        let f_games = featured_games_rc.clone();
+        let l_games = local_games_rc.clone();
+        let f_btns = featured_btns_rc.clone();
+        let l_btns = local_btns_rc.clone();
+        let act_list = active_game_list.clone();
+        let act_btns = active_buttons_rc.clone();
+        let s_idx = selected_index.clone();
+        let focus_fn = focus_game_ui.clone();
+
+        Rc::new(move |target_tab: u8| {
+            *tab_rc.borrow_mut() = target_tab;
+            *s_idx.lock().unwrap() = 0;
+            if target_tab == 0 {
+                b_feat.add_css_class("active");
+                b_loc.remove_css_class("active");
+                f_scroll.set_visible(true);
+                l_sec.set_visible(false);
+                let fg = f_games.borrow().clone();
+                *act_list.lock().unwrap() = fg.clone();
+                *act_btns.borrow_mut() = f_btns.borrow().clone();
+                if let Some(first) = fg.first() {
+                    focus_fn(first);
+                }
+            } else {
+                b_loc.add_css_class("active");
+                b_feat.remove_css_class("active");
+                f_scroll.set_visible(false);
+                l_sec.set_visible(true);
+                let lg = l_games.borrow().clone();
+                *act_list.lock().unwrap() = lg.clone();
+                *act_btns.borrow_mut() = l_btns.borrow().clone();
+                if let Some(first) = lg.first() {
+                    focus_fn(first);
+                }
+            }
+        })
+    };
+
+    {
+        let sw_f = switch_subtab.clone();
+        btn_tab_featured.connect_clicked(move |_| {
+            sw_f(0);
+        });
+        let sw_l = switch_subtab.clone();
+        btn_tab_local.connect_clicked(move |_| {
+            sw_l(1);
+        });
+    }
+
+    // "+ Harici Oyun / Klasör Tanıt" Modal Dialog -> detects external games & moves to Local sub-tab!
+    {
+        let parent_win = window.clone();
+        let l_games_rc = local_games_rc.clone();
+        let l_cbox = local_carousel_box.clone();
+        let l_btns = local_btns_rc.clone();
+        let l_empty = local_empty_card.clone();
+        let b_loc = btn_tab_local.clone();
+        let pop_fn = populate_carousel_row.clone();
+        let sw_fn = switch_subtab.clone();
+        let mtx_ext = media_tx.clone();
+
+        btn_add_external.connect_clicked(move |_| {
+            open_external_game_scanner_modal(
+                &parent_win,
+                lang,
+                l_games_rc.clone(),
+                l_cbox.clone(),
+                l_btns.clone(),
+                l_empty.clone(),
+                b_loc.clone(),
+                pop_fn.clone(),
+                sw_fn.clone(),
+                mtx_ext.clone(),
+            );
+        });
+    }
+
+    // Reactive UI listener for downloaded Official Covers, Transparent Logos, Hero Banners & Trailers
+    {
+        let rx = media_rx.clone();
+        let cover_map = cover_pics_map.clone();
+        let focused_rc = focused_game_rc.clone();
+        let logo_pic = hero_logo_pic.clone();
+        let bg_pic = bg_picture.clone();
+        let desc_lbl = hero_desc.clone();
+        let prev_pic = preview_pic.clone();
+        let prev_badge = preview_badge.clone();
+        let prev_ctrl = preview_ctrl.clone();
+
+        glib::spawn_future_local(async move {
+            while let Ok(ev) = rx.recv().await {
+                match ev {
+                    MediaUpdateEvent::CoverReady { game_id, path } => {
+                        if let Some(pics) = cover_map.borrow().get(&game_id) {
+                            for p in pics {
+                                load_picture_file(p, &path);
+                            }
+                        }
+                    }
+                    MediaUpdateEvent::LogoReady { game_id, path } => {
+                        let is_cur = focused_rc
+                            .borrow()
+                            .as_ref()
+                            .map(|g| g.id == game_id)
+                            .unwrap_or(false);
+                        if is_cur {
+                            load_picture_file(&logo_pic, &path);
+                            logo_pic.set_visible(true);
+                        }
+                    }
+                    MediaUpdateEvent::HeroReady { game_id, path } => {
+                        let is_cur = focused_rc
+                            .borrow()
+                            .as_ref()
+                            .map(|g| g.id == game_id)
+                            .unwrap_or(false);
+                        if is_cur {
+                            load_picture_file(&bg_pic, &path);
+                        }
+                    }
+                    MediaUpdateEvent::DetailsReady {
+                        game_id,
+                        meta,
+                        screenshot_paths,
+                        ..
+                    } => {
+                        let is_cur = focused_rc
+                            .borrow()
+                            .as_ref()
+                            .map(|g| g.id == game_id)
+                            .unwrap_or(false);
+                        if is_cur {
+                            if !meta.short_description.is_empty() {
+                                desc_lbl.set_text(&meta.short_description);
+                            }
+                            if let Some(first_ss) = screenshot_paths.first() {
+                                load_picture_file(&bg_pic, first_ss);
+                            }
+                            prev_ctrl.start_video_or_slideshow(
+                                meta.stream_url,
+                                screenshot_paths,
+                                prev_pic.clone(),
+                                prev_badge.clone(),
+                            );
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // Trigger official media downloads for initial lists + live Steam Featured API refresh
+    gamezone_live::spawn_official_media_fetcher(initial_featured.clone(), media_tx.clone());
+    if !local_detected_initial.is_empty() {
+        gamezone_live::spawn_official_media_fetcher(local_detected_initial.clone(), media_tx.clone());
+    }
+
+    if is_online {
+        let (feat_tx, feat_rx) = async_channel::bounded::<Vec<GameEntry>>(1);
+        let inst_ids_bg = installed_appids.clone();
+        std::thread::spawn(move || {
+            if let Some(mut live_items) =
+                gamezone_live::fetch_live_steam_featured_blocking(lang, &inst_ids_bg)
+            {
+                let (deck_cat, deck_desc) = match lang {
+                    Language::TR => (
+                        "Konsol Arayüzü",
+                        "Tam ekran Steam Big Picture ve kumanda destekli oyun merkezi.",
+                    ),
+                    Language::EN => (
+                        "Console Interface",
+                        "Fullscreen Steam Big Picture and controller-native gaming hub.",
+                    ),
+                };
+                live_items.push(new_game_entry(
+                    "steam-deck",
+                    "Steam Big Picture",
+                    deck_cat,
+                    "steam -gamepadui",
+                    deck_desc,
+                    false,
+                    None,
+                    Some("/usr/share/solarui/covers/steam-deck.jpg".to_string()),
+                    None,
+                    None,
+                    Some("https://store.steampowered.com/".to_string()),
+                    None,
+                ));
+                let _ = feat_tx.send_blocking(live_items);
+            }
+        });
+
+        let f_games_rc = featured_games_rc.clone();
+        let f_cbox = featured_carousel_box.clone();
+        let f_btns = featured_btns_rc.clone();
+        let pop_fn = populate_carousel_row.clone();
+        let tab_rc = active_tab_rc.clone();
+        let act_list = active_game_list.clone();
+        let act_btns = active_buttons_rc.clone();
+        let focus_fn = focus_game_ui.clone();
+        let mtx_live = media_tx.clone();
+
+        glib::spawn_future_local(async move {
+            if let Ok(live_list) = feat_rx.recv().await {
+                *f_games_rc.borrow_mut() = live_list.clone();
+                pop_fn(&f_cbox, &live_list, &f_btns);
+                gamezone_live::spawn_official_media_fetcher(live_list.clone(), mtx_live);
+                if *tab_rc.borrow() == 0 {
+                    *act_list.lock().unwrap() = live_list.clone();
+                    *act_btns.borrow_mut() = f_btns.borrow().clone();
+                    if let Some(first) = live_list.first() {
+                        focus_fn(first);
+                    }
+                }
+            }
+        });
+    }
 
     // ── STORE SELECTION DRAWER / MODAL ──
     let store_drawer = GtkBox::new(Orientation::Vertical, 12);
@@ -1789,14 +2517,8 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     let store_close_btn = Button::with_label(lang.back_to_home());
     store_close_btn.add_css_class("xbox-apps-close-btn");
     let st_toggle = store_drawer.clone();
-    let lib_toggle_st = library_view.clone();
-    let btn_lib_close_st = btn_library.clone();
-    let btn_st_close_st = btn_store.clone();
     store_close_btn.connect_clicked(move |_| {
         st_toggle.set_visible(false);
-        lib_toggle_st.set_visible(true);
-        btn_st_close_st.remove_css_class("active");
-        btn_lib_close_st.add_css_class("active");
     });
     store_hdr.append(&store_title);
     store_hdr.append(&store_close_btn);
@@ -1893,8 +2615,8 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     cso_title.add_css_class("xbox-modal-card-title");
     cso_title.set_halign(gtk4::Align::Start);
     let cso_desc = Label::new(Some(match lang {
-        Language::TR => "Yerel Uygulamalar & Emülatörler",
-        Language::EN => "Local Apps & Emulators",
+        Language::TR => "FireHub Mağaza • Portadora & Flathub",
+        Language::EN => "FireHub Store • Portadora & Flathub",
     }));
     cso_desc.add_css_class("xbox-modal-card-desc");
     cso_desc.set_halign(gtk4::Align::Start);
@@ -1902,7 +2624,9 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     cso_box.append(&cso_desc);
     card_soft.set_child(Some(&cso_box));
     card_soft.connect_clicked(|_| {
-        let _ = Command::new("gnome-software").spawn();
+        if Command::new("firehub").spawn().is_err() {
+            let _ = Command::new("/opt/FireHub/firehub").spawn();
+        }
     });
     store_cards_row.append(&card_soft);
 
@@ -1910,7 +2634,7 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     content_box.append(&store_drawer);
 
     // ── SETTINGS DRAWER / MODAL ──
-    let settings_drawer = GtkBox::new(Orientation::Vertical, 14);
+    let settings_drawer = GtkBox::new(Orientation::Vertical, 12);
     settings_drawer.add_css_class("xbox-modal-drawer");
     settings_drawer.set_visible(false);
 
@@ -1926,42 +2650,35 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     let set_close_btn = Button::with_label(lang.back_to_home());
     set_close_btn.add_css_class("xbox-apps-close-btn");
     let set_toggle = settings_drawer.clone();
-    let lib_toggle_set = library_view.clone();
-    let btn_lib_close_set = btn_library.clone();
-    let btn_set_close_set = btn_settings.clone();
     set_close_btn.connect_clicked(move |_| {
         set_toggle.set_visible(false);
-        lib_toggle_set.set_visible(true);
-        btn_set_close_set.remove_css_class("active");
-        btn_lib_close_set.add_css_class("active");
     });
     set_hdr.append(&set_title);
     set_hdr.append(&set_close_btn);
     settings_drawer.append(&set_hdr);
 
-    // Row 1: System & Gaming Engine
-    let set_row1 = GtkBox::new(Orientation::Horizontal, 14);
+    let set_cards_row = GtkBox::new(Orientation::Horizontal, 14);
 
-    // Setting 1: ProtonUp-Qt
+    // Setting 1: Built-in Proton-GE Manager
     let card_set_proton = Button::new();
     card_set_proton.add_css_class("xbox-modal-card");
     let cp_box = GtkBox::new(Orientation::Vertical, 4);
-    let cp_title = Label::new(Some("ProtonUp-Qt"));
+    let cp_title = Label::new(Some("Blaze Proton-GE Yöneticisi"));
     cp_title.add_css_class("xbox-modal-card-title");
     cp_title.set_halign(gtk4::Align::Start);
     let cp_desc = Label::new(Some(match lang {
-        Language::TR => "GE-Proton & Wine Uyumluluk Yöneticisi",
-        Language::EN => "GE-Proton & Wine Compatibility Manager",
+        Language::TR => "GE-Proton & NTSYNC Uyumluluk Yöneticisi",
+        Language::EN => "GE-Proton & NTSYNC Compatibility Manager",
     }));
     cp_desc.add_css_class("xbox-modal-card-desc");
     cp_desc.set_halign(gtk4::Align::Start);
     cp_box.append(&cp_title);
     cp_box.append(&cp_desc);
     card_set_proton.set_child(Some(&cp_box));
-    card_set_proton.connect_clicked(|_| {
-        let _ = Command::new("protonup-qt").spawn();
+    card_set_proton.connect_clicked(move |_| {
+        open_proton_ge_manager_modal(lang);
     });
-    set_row1.append(&card_set_proton);
+    set_cards_row.append(&card_set_proton);
 
     // Setting 2: SolarUI Desktop Settings
     let card_set_solar = Button::new();
@@ -1985,21 +2702,24 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     card_set_solar.connect_clicked(|_| {
         let _ = Command::new("solar-settings").spawn();
     });
-    set_row1.append(&card_set_solar);
+    set_cards_row.append(&card_set_solar);
 
-    // Setting 3: BORE Performance Governor
+    // Setting 3: sched_ext & NTSYNC Performance Governor
     let card_set_perf = Button::new();
     card_set_perf.add_css_class("xbox-modal-card");
     let cperf_box = GtkBox::new(Orientation::Vertical, 4);
     let cperf_title = Label::new(Some(match lang {
-        Language::TR => "BORE & Güç Profili",
-        Language::EN => "BORE & Power Profile",
+        Language::TR => "sched_ext & NTSYNC Güç Profili",
+        Language::EN => "sched_ext & NTSYNC Power Profile",
     }));
     cperf_title.add_css_class("xbox-modal-card-title");
     cperf_title.set_halign(gtk4::Align::Start);
-    let cperf_desc = Label::new(Some(match lang {
-        Language::TR => "Düşük Gecikmeli Oyun Çekirdeği Aktif",
-        Language::EN => "Low-Latency Gaming Kernel Active",
+    let kern_ver = std::fs::read_to_string("/proc/sys/kernel/osrelease")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| "7.2.x".to_string());
+    let cperf_desc = Label::new(Some(&match lang {
+        Language::TR => format!("Linux {} Düşük Gecikmeli Oyun Çekirdeği Aktif", kern_ver),
+        Language::EN => format!("Linux {} Low-Latency Gaming Kernel Active", kern_ver),
     }));
     cperf_desc.add_css_class("xbox-modal-card-desc");
     cperf_desc.set_halign(gtk4::Align::Start);
@@ -2009,15 +2729,10 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     card_set_perf.connect_clicked(|_| {
         activate_gaming_optimizations();
         let _ = Command::new("notify-send")
-            .args(["-a", "Blaze GameZone", "-i", "preferences-system", "Performans Modu", "BORE Düşük Gecikme Profili yenilendi."])
+            .args(["-a", "Blaze GameZone", "-i", "preferences-system", "Performans Modu", "sched_ext + NTSYNC Düşük Gecikme Profili etkinleştirildi."])
             .spawn();
     });
-    set_row1.append(&card_set_perf);
-
-    settings_drawer.append(&set_row1);
-
-    // Row 2: Diagnostics & Operations
-    let set_row2 = GtkBox::new(Orientation::Horizontal, 14);
+    set_cards_row.append(&card_set_perf);
 
     // Setting 4: Clear Poster Cache
     let card_set_cache = Button::new();
@@ -2038,63 +2753,9 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     card_set_cache.connect_clicked(|_| {
         clean_gamezone_cache();
     });
-    set_row2.append(&card_set_cache);
+    set_cards_row.append(&card_set_cache);
 
-    // Setting 5: Gamepad Test
-    let card_set_gamepad = Button::new();
-    card_set_gamepad.add_css_class("xbox-modal-card");
-    let cgp_box = GtkBox::new(Orientation::Vertical, 4);
-    let cgp_title = Label::new(Some(match lang {
-        Language::TR => "Oyun Kumandası Testi",
-        Language::EN => "Gamepad Diagnostic & Test",
-    }));
-    cgp_title.add_css_class("xbox-modal-card-title");
-    cgp_title.set_halign(gtk4::Align::Start);
-    let cgp_desc = Label::new(Some(match lang {
-        Language::TR => "D-Pad, Analog ve Tetik Tuşlarını Doğrula",
-        Language::EN => "Verify D-Pad, Sticks & Triggers",
-    }));
-    cgp_desc.add_css_class("xbox-modal-card-desc");
-    cgp_desc.set_halign(gtk4::Align::Start);
-    cgp_box.append(&cgp_title);
-    cgp_box.append(&cgp_desc);
-    card_set_gamepad.set_child(Some(&cgp_box));
-    card_set_gamepad.connect_clicked(|_| {
-        if Command::new("jstest-gtk").spawn().is_err() {
-            let _ = Command::new("notify-send")
-                .args(["-a", "Blaze GameZone", "-i", "input-gaming", "Oyun Kumandası", "Kumanda dinleyicisi arka planda aktif."])
-                .spawn();
-        }
-    });
-    set_row2.append(&card_set_gamepad);
-
-    // Setting 6: Return to Desktop
-    let card_set_quit = Button::new();
-    card_set_quit.add_css_class("xbox-modal-card");
-    let cq_box = GtkBox::new(Orientation::Vertical, 4);
-    let cq_title = Label::new(Some(match lang {
-        Language::TR => "Masaüstüne Dön",
-        Language::EN => "Return to Desktop",
-    }));
-    cq_title.add_css_class("xbox-modal-card-title");
-    cq_title.set_halign(gtk4::Align::Start);
-    let cq_desc = Label::new(Some(match lang {
-        Language::TR => "SolarUI Masaüstü Kabuğuna Geç",
-        Language::EN => "Switch back to SolarUI Desktop Shell",
-    }));
-    cq_desc.add_css_class("xbox-modal-card-desc");
-    cq_desc.set_halign(gtk4::Align::Start);
-    cq_box.append(&cq_title);
-    cq_box.append(&cq_desc);
-    card_set_quit.set_child(Some(&cq_box));
-    let loop_set_quit = main_loop.clone();
-    card_set_quit.connect_clicked(move |_| {
-        println!("User clicked Return to Desktop from GameZone Settings.");
-        loop_set_quit.quit();
-    });
-    set_row2.append(&card_set_quit);
-
-    settings_drawer.append(&set_row2);
+    settings_drawer.append(&set_cards_row);
     content_box.append(&settings_drawer);
 
     // ── ALL APPLICATIONS DRAWER (COLLAPSIBLE / FULLSCREEN OVERLAY) ──
@@ -2117,14 +2778,8 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     let apps_close_btn = Button::with_label(lang.back_to_home());
     apps_close_btn.add_css_class("xbox-apps-close-btn");
     let drawer_toggle = apps_drawer.clone();
-    let lib_toggle_apps = library_view.clone();
-    let btn_lib_close_apps = btn_library.clone();
-    let btn_srch_close_apps = btn_search.clone();
     apps_close_btn.connect_clicked(move |_| {
         drawer_toggle.set_visible(false);
-        lib_toggle_apps.set_visible(true);
-        btn_srch_close_apps.remove_css_class("active");
-        btn_lib_close_apps.add_css_class("active");
     });
 
     apps_header_box.append(&apps_title_lbl);
@@ -2161,15 +2816,9 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
             }
         }
         if !icon_found {
-            let def_candidates = [
-                "/usr/share/icons/hicolor/128x128/apps/application-generic.png",
-                "/usr/share/pixmaps/application-default-icon.png",
-            ];
-            for def_p in def_candidates {
-                if Path::new(def_p).exists() {
-                    app_img.set_filename(Some(Path::new(def_p)));
-                    break;
-                }
+            let def_p = "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/icons/hicolor/128x128/apps/application-generic.png";
+            if Path::new(def_p).exists() {
+                app_img.set_filename(Some(Path::new(def_p)));
             }
         }
         t_box.append(&app_img);
@@ -2191,7 +2840,7 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
                 .args(["-a", "Blaze GameZone", "-i", "application-x-executable", "Uygulama Başlatılıyor", &app_name])
                 .spawn();
             let parts: Vec<&str> = app_exec.split_whitespace().collect();
-            if let Some(cmd) = parts.first() {
+            if let Some(cmd) = parts.get(0) {
                 let _ = Command::new(cmd).args(&parts[1..]).spawn();
             }
         });
@@ -2214,19 +2863,6 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     let bento_row = GtkBox::new(Orientation::Horizontal, 0);
     bento_row.add_css_class("xbox-bento-row");
 
-    let get_cover_asset_path = |filename: &str| -> Option<String> {
-        let candidates = [
-            format!("/usr/share/solarui/covers/{}", filename),
-            format!("{}/.local/share/solarui/covers/{}", get_user_home().to_string_lossy(), filename),
-        ];
-        for c in &candidates {
-            if Path::new(c).exists() {
-                return Some(c.clone());
-            }
-        }
-        None
-    };
-
     // Tile 1: "Browse your games & apps"
     let bento_apps = Button::new();
     bento_apps.add_css_class("xbox-bento-card");
@@ -2236,8 +2872,15 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     let b1_pic = Picture::new();
     b1_pic.set_can_shrink(true);
     b1_pic.set_content_fit(gtk4::ContentFit::Cover);
-    if let Some(p) = get_cover_asset_path("bento_browse.png") {
-        b1_pic.set_filename(Some(Path::new(&p)));
+    for b1_path in [
+        "/usr/share/solarui/covers/bento_browse.png",
+        "/home/darkmorpheus/SolarUI/data/covers/bento_browse.png",
+        "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/solarui/covers/bento_browse.png",
+    ] {
+        if Path::new(b1_path).exists() {
+            load_picture_file(&b1_pic, Path::new(b1_path));
+            break;
+        }
     }
     bento1_overlay.set_child(Some(&b1_pic));
 
@@ -2275,8 +2918,15 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     let b2_pic = Picture::new();
     b2_pic.set_can_shrink(true);
     b2_pic.set_content_fit(gtk4::ContentFit::Cover);
-    if let Some(p) = get_cover_asset_path("bento_performance.png") {
-        b2_pic.set_filename(Some(Path::new(&p)));
+    for b2_path in [
+        "/usr/share/solarui/covers/bento_performance.png",
+        "/home/darkmorpheus/SolarUI/data/covers/bento_performance.png",
+        "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/solarui/covers/bento_performance.png",
+    ] {
+        if Path::new(b2_path).exists() {
+            load_picture_file(&b2_pic, Path::new(b2_path));
+            break;
+        }
     }
     bento2_overlay.set_child(Some(&b2_pic));
 
@@ -2284,7 +2934,7 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     b2_content.add_css_class("xbox-bento-overlay-box");
     b2_content.set_valign(gtk4::Align::End);
 
-    let b2_tag = Label::new(Some("PERFORMANCE & BORE"));
+    let b2_tag = Label::new(Some("SCHED_EXT & NTSYNC"));
     b2_tag.add_css_class("xbox-bento-tag");
     b2_tag.set_halign(gtk4::Align::Start);
 
@@ -2292,7 +2942,7 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     b2_title.add_css_class("xbox-bento-title");
     b2_title.set_halign(gtk4::Align::Start);
 
-    let b2_sub = Label::new(Some("BORE Scheduler • Low Latency"));
+    let b2_sub = Label::new(Some(&format!("Linux {} • eBPF & NTSYNC", kern_ver)));
     b2_sub.add_css_class("xbox-bento-subtitle");
     b2_sub.set_halign(gtk4::Align::Start);
 
@@ -2303,12 +2953,13 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     bento_perf.set_child(Some(&bento2_overlay));
 
     bento_perf.connect_clicked(|_| {
+        activate_gaming_optimizations();
         let _ = Command::new("notify-send")
             .args([
                 "-a", "Blaze GameZone",
                 "-i", "preferences-system",
                 "Performans Modu",
-                "BORE Düşük Gecikmeli Oyun Çekirdeği devrede.",
+                "sched_ext & NTSYNC Oyun Çekirdeği devrede.",
             ])
             .spawn();
     });
@@ -2323,8 +2974,15 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     let b3_pic = Picture::new();
     b3_pic.set_can_shrink(true);
     b3_pic.set_content_fit(gtk4::ContentFit::Cover);
-    if let Some(p) = get_cover_asset_path("bento_store.png") {
-        b3_pic.set_filename(Some(Path::new(&p)));
+    for b3_path in [
+        "/usr/share/solarui/covers/bento_store.png",
+        "/home/darkmorpheus/SolarUI/data/covers/bento_store.png",
+        "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/solarui/covers/bento_store.png",
+    ] {
+        if Path::new(b3_path).exists() {
+            load_picture_file(&b3_pic, Path::new(b3_path));
+            break;
+        }
     }
     bento3_overlay.set_child(Some(&b3_pic));
 
@@ -2349,6 +3007,15 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     b3_content.append(&b3_sub);
     bento3_overlay.add_overlay(&b3_content);
     bento_store.set_child(Some(&bento3_overlay));
+
+    let alert_st = trigger_offline_alert.clone();
+    bento_store.connect_clicked(move |_| {
+        if !is_system_online() {
+            alert_st("İnternete bağlı değilsiniz. Sadece yüklü oyunları çalıştırabilirsiniz.");
+        } else {
+            open_browser_url("https://store.steampowered.com/");
+        }
+    });
     bento_row.append(&bento_store);
 
     // Tile 4: "Play like a Pro / Settings & Proton"
@@ -2360,8 +3027,15 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     let b4_pic = Picture::new();
     b4_pic.set_can_shrink(true);
     b4_pic.set_content_fit(gtk4::ContentFit::Cover);
-    if let Some(p) = get_cover_asset_path("bento_settings.png") {
-        b4_pic.set_filename(Some(Path::new(&p)));
+    for b4_path in [
+        "/usr/share/solarui/covers/bento_settings.png",
+        "/home/darkmorpheus/SolarUI/data/covers/bento_settings.png",
+        "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/solarui/covers/bento_settings.png",
+    ] {
+        if Path::new(b4_path).exists() {
+            load_picture_file(&b4_pic, Path::new(b4_path));
+            break;
+        }
     }
     bento4_overlay.set_child(Some(&b4_pic));
 
@@ -2377,7 +3051,7 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     b4_title.add_css_class("xbox-bento-title");
     b4_title.set_halign(gtk4::Align::Start);
 
-    let b4_sub = Label::new(Some("ProtonUp-Qt • Gamepad Config"));
+    let b4_sub = Label::new(Some("Blaze Proton-GE • Gamepad Config"));
     b4_sub.add_css_class("xbox-bento-subtitle");
     b4_sub.set_halign(gtk4::Align::Start);
 
@@ -2387,13 +3061,12 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     bento4_overlay.add_overlay(&b4_content);
     bento_pro.set_child(Some(&bento4_overlay));
 
-    bento_pro.connect_clicked(|_| {
-        let _ = Command::new("protonup-qt").spawn();
+    bento_pro.connect_clicked(move |_| {
+        open_proton_ge_manager_modal(lang);
     });
     bento_row.append(&bento_pro);
 
-    library_view.append(&bento_row);
-    content_box.prepend(&library_view);
+    content_box.append(&bento_row);
 
     main_scroll.set_child(Some(&content_box));
     root_box.append(&main_scroll);
@@ -2442,66 +3115,43 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     window.set_child(Some(&main_overlay));
 
     // Initial game selection & backdrop
-    if let Some(first_g) = recent_games.first() {
-        active_title_lbl.set_text(&first_g.title);
-        active_badge_lbl.set_text(if first_g.is_installed { "READY TO PLAY" } else { "STORE AVAILABLE" });
-        update_backdrop(Some(first_g), &bg_picture);
-    } else {
-        update_backdrop(None, &bg_picture);
+    {
+        let start_list = active_game_list.lock().unwrap().clone();
+        if let Some(first_g) = start_list.first() {
+            focus_game_ui(first_g);
+        } else {
+            update_backdrop(None, &bg_picture);
+        }
+    }
+
+    // Stop trailer child cleanly whenever window closes
+    {
+        let prev_close = preview_ctrl.clone();
+        window.connect_close_request(move |_| {
+            prev_close.stop();
+            glib::Propagation::Proceed
+        });
     }
 
     // Top buttons connections
-    let drawer_lib_apps = apps_drawer.clone();
+    let drawer_lib = apps_drawer.clone();
     let drawer_st_lib = store_drawer.clone();
     let drawer_set_lib = settings_drawer.clone();
-    let lib_view_main = library_view.clone();
-    let carousel_btns_lib = game_buttons.clone();
-    let btn_lib_c = btn_library.clone();
-    let btn_st_c1 = btn_store.clone();
-    let btn_disc_c1 = btn_discover.clone();
-    let btn_srch_c1 = btn_search.clone();
-    let btn_set_c1 = btn_settings.clone();
-
     btn_library.connect_clicked(move |_| {
-        drawer_lib_apps.set_visible(false);
         drawer_st_lib.set_visible(false);
         drawer_set_lib.set_visible(false);
-        lib_view_main.set_visible(true);
-        btn_lib_c.add_css_class("active");
-        btn_st_c1.remove_css_class("active");
-        btn_disc_c1.remove_css_class("active");
-        btn_srch_c1.remove_css_class("active");
-        btn_set_c1.remove_css_class("active");
-        if let Some(first_btn) = carousel_btns_lib.first() {
-            first_btn.grab_focus();
-        }
+        let is_v = drawer_lib.is_visible();
+        drawer_lib.set_visible(!is_v);
     });
 
     let drawer_st_open = store_drawer.clone();
     let drawer_apps_st = apps_drawer.clone();
     let drawer_set_st = settings_drawer.clone();
-    let lib_view_st = library_view.clone();
-    let btn_lib_c2 = btn_library.clone();
-    let btn_st_c2 = btn_store.clone();
-    let btn_disc_c2 = btn_discover.clone();
-    let btn_srch_c2 = btn_search.clone();
-    let btn_set_c2 = btn_settings.clone();
     btn_store.connect_clicked(move |_| {
         drawer_apps_st.set_visible(false);
         drawer_set_st.set_visible(false);
         let is_v = drawer_st_open.is_visible();
         drawer_st_open.set_visible(!is_v);
-        lib_view_st.set_visible(is_v);
-        if !is_v {
-            btn_st_c2.add_css_class("active");
-            btn_lib_c2.remove_css_class("active");
-        } else {
-            btn_st_c2.remove_css_class("active");
-            btn_lib_c2.add_css_class("active");
-        }
-        btn_disc_c2.remove_css_class("active");
-        btn_srch_c2.remove_css_class("active");
-        btn_set_c2.remove_css_class("active");
     });
 
     let alert_cloud_top = trigger_offline_alert.clone();
@@ -2514,151 +3164,92 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     });
 
     let drawer_search = apps_drawer.clone();
-    let drawer_st_srch = store_drawer.clone();
-    let drawer_set_srch = settings_drawer.clone();
-    let lib_view_srch = library_view.clone();
     let search_inp_foc = search_input.clone();
-    let btn_lib_c3 = btn_library.clone();
-    let btn_st_c3 = btn_store.clone();
-    let btn_disc_c3 = btn_discover.clone();
-    let btn_srch_c3 = btn_search.clone();
-    let btn_set_c3 = btn_settings.clone();
     btn_search.connect_clicked(move |_| {
-        drawer_st_srch.set_visible(false);
-        drawer_set_srch.set_visible(false);
         let is_v = drawer_search.is_visible();
         drawer_search.set_visible(!is_v);
-        lib_view_srch.set_visible(is_v);
         if !is_v {
             search_inp_foc.grab_focus();
-            btn_srch_c3.add_css_class("active");
-            btn_lib_c3.remove_css_class("active");
-        } else {
-            btn_srch_c3.remove_css_class("active");
-            btn_lib_c3.add_css_class("active");
         }
-        btn_st_c3.remove_css_class("active");
-        btn_disc_c3.remove_css_class("active");
-        btn_set_c3.remove_css_class("active");
     });
 
     let drawer_set_open = settings_drawer.clone();
     let drawer_apps_set = apps_drawer.clone();
     let drawer_st_set = store_drawer.clone();
-    let lib_view_set = library_view.clone();
-    let btn_lib_c4 = btn_library.clone();
-    let btn_st_c4 = btn_store.clone();
-    let btn_disc_c4 = btn_discover.clone();
-    let btn_srch_c4 = btn_search.clone();
-    let btn_set_c4 = btn_settings.clone();
     btn_settings.connect_clicked(move |_| {
         drawer_apps_set.set_visible(false);
         drawer_st_set.set_visible(false);
         let is_v = drawer_set_open.is_visible();
         drawer_set_open.set_visible(!is_v);
-        lib_view_set.set_visible(is_v);
-        if !is_v {
-            btn_set_c4.add_css_class("active");
-            btn_lib_c4.remove_css_class("active");
-        } else {
-            btn_set_c4.remove_css_class("active");
-            btn_lib_c4.add_css_class("active");
-        }
-        btn_st_c4.remove_css_class("active");
-        btn_disc_c4.remove_css_class("active");
-        btn_srch_c4.remove_css_class("active");
     });
 
     // Bento Store Card opens store_drawer
     let bento_st_drawer = store_drawer.clone();
-    let lib_view_bento_st = library_view.clone();
-    let btn_st_bento = btn_store.clone();
-    let btn_lib_bento_st = btn_library.clone();
     bento_store.connect_clicked(move |_| {
         let is_v = bento_st_drawer.is_visible();
         bento_st_drawer.set_visible(!is_v);
-        lib_view_bento_st.set_visible(is_v);
-        if !is_v {
-            btn_st_bento.add_css_class("active");
-            btn_lib_bento_st.remove_css_class("active");
-        } else {
-            btn_st_bento.remove_css_class("active");
-            btn_lib_bento_st.add_css_class("active");
-        }
     });
 
     // Bento Pro Card opens settings_drawer
     let bento_set_drawer = settings_drawer.clone();
-    let lib_view_bento_set = library_view.clone();
-    let btn_set_bento = btn_settings.clone();
-    let btn_lib_bento_set = btn_library.clone();
     bento_pro.connect_clicked(move |_| {
         let is_v = bento_set_drawer.is_visible();
         bento_set_drawer.set_visible(!is_v);
-        lib_view_bento_set.set_visible(is_v);
-        if !is_v {
-            btn_set_bento.add_css_class("active");
-            btn_lib_bento_set.remove_css_class("active");
-        } else {
-            btn_set_bento.remove_css_class("active");
-            btn_lib_bento_set.add_css_class("active");
-        }
     });
 
     // Keyboard & Gamepad Controller
     let key_controller = EventControllerKey::new();
     let s_idx_key = selected_index.clone();
     let all_g_key = active_game_list.clone();
-    let c_btns_key = game_buttons.clone();
+    let c_btns_key = active_buttons_rc.clone();
     let loop_key = main_loop.clone();
+    let focus_k = focus_game_ui.clone();
     let alert_key = trigger_offline_alert.clone();
-    let win_key = window.clone();
+    let prev_ctrl_key = preview_ctrl.clone();
+    let tab_rc_key = active_tab_rc.clone();
+    let sw_tab_key = switch_subtab.clone();
 
     key_controller.connect_key_pressed(move |_ctrl, keyval, _code, _state| {
         match keyval {
             gdk::Key::Escape => {
                 println!("Exiting Blaze GameZone to Desktop...");
+                prev_ctrl_key.stop();
                 loop_key.quit();
                 glib::Propagation::Stop
             }
+            gdk::Key::Tab => {
+                let next_tab = if *tab_rc_key.borrow() == 0 { 1 } else { 0 };
+                sw_tab_key(next_tab);
+                glib::Propagation::Stop
+            }
             gdk::Key::Left => {
-                let target_btn = {
-                    let mut idx = s_idx_key.lock().unwrap();
-                    if *idx > 0 {
-                        *idx -= 1;
-                        c_btns_key.get(*idx).cloned()
-                    } else {
-                        None
+                let mut idx = s_idx_key.lock().unwrap();
+                if *idx > 0 {
+                    *idx -= 1;
+                    if let Some(btn) = c_btns_key.borrow().get(*idx) {
+                        btn.grab_focus();
                     }
-                };
-                if let Some(btn) = target_btn {
-                    btn.grab_focus();
+                    if let Some(game) = all_g_key.lock().unwrap().get(*idx) {
+                        focus_k(game);
+                    }
                 }
                 glib::Propagation::Stop
             }
             gdk::Key::Right => {
-                let target_btn = {
-                    let total = all_g_key.lock().unwrap().len();
-                    let mut idx = s_idx_key.lock().unwrap();
-                    if *idx + 1 < total {
-                        *idx += 1;
-                        c_btns_key.get(*idx).cloned()
-                    } else {
-                        None
+                let mut idx = s_idx_key.lock().unwrap();
+                let total = all_g_key.lock().unwrap().len();
+                if *idx + 1 < total {
+                    *idx += 1;
+                    if let Some(btn) = c_btns_key.borrow().get(*idx) {
+                        btn.grab_focus();
                     }
-                };
-                if let Some(btn) = target_btn {
-                    btn.grab_focus();
+                    if let Some(game) = all_g_key.lock().unwrap().get(*idx) {
+                        focus_k(game);
+                    }
                 }
                 glib::Propagation::Stop
             }
             gdk::Key::Return | gdk::Key::KP_Enter => {
-                if let Some(focused) = gtk4::prelude::GtkWindowExt::focus(&win_key) {
-                    let on_carousel = c_btns_key.iter().any(|b| b.upcast_ref::<gtk4::Widget>() == &focused);
-                    if !on_carousel {
-                        return glib::Propagation::Proceed;
-                    }
-                }
                 let idx = *s_idx_key.lock().unwrap();
                 if let Some(game) = all_g_key.lock().unwrap().get(idx) {
                     handle_game_activation(game, &*alert_key);
@@ -2675,15 +3266,22 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     let gamepad_rx = start_linux_gamepad_listener();
     let s_idx_gp = selected_index.clone();
     let all_g_gp = active_game_list.clone();
-    let c_btns_gp = game_buttons.clone();
+    let c_btns_gp = active_buttons_rc.clone();
     let loop_gp = main_loop.clone();
+    let focus_gp = focus_game_ui.clone();
     let alert_gp = trigger_offline_alert.clone();
+    let prev_ctrl_gp = preview_ctrl.clone();
+    let win_gp = window.clone();
 
     glib::spawn_future_local(async move {
         while let Ok(action) = gamepad_rx.recv().await {
+            if !win_gp.is_active() {
+                continue;
+            }
             match action {
                 GamepadNavAction::BackB => {
                     println!("Gamepad (B): Exiting Blaze GameZone to Desktop...");
+                    prev_ctrl_gp.stop();
                     loop_gp.quit();
                 }
                 GamepadNavAction::SelectA => {
@@ -2693,32 +3291,28 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
                     }
                 }
                 GamepadNavAction::Left => {
-                    let target_btn = {
-                        let mut idx = s_idx_gp.lock().unwrap();
-                        if *idx > 0 {
-                            *idx -= 1;
-                            c_btns_gp.get(*idx).cloned()
-                        } else {
-                            None
+                    let mut idx = s_idx_gp.lock().unwrap();
+                    if *idx > 0 {
+                        *idx -= 1;
+                        if let Some(btn) = c_btns_gp.borrow().get(*idx) {
+                            btn.grab_focus();
                         }
-                    };
-                    if let Some(btn) = target_btn {
-                        btn.grab_focus();
+                        if let Some(game) = all_g_gp.lock().unwrap().get(*idx) {
+                            focus_gp(game);
+                        }
                     }
                 }
                 GamepadNavAction::Right => {
-                    let target_btn = {
-                        let total = all_g_gp.lock().unwrap().len();
-                        let mut idx = s_idx_gp.lock().unwrap();
-                        if *idx + 1 < total {
-                            *idx += 1;
-                            c_btns_gp.get(*idx).cloned()
-                        } else {
-                            None
+                    let mut idx = s_idx_gp.lock().unwrap();
+                    let total = all_g_gp.lock().unwrap().len();
+                    if *idx + 1 < total {
+                        *idx += 1;
+                        if let Some(btn) = c_btns_gp.borrow().get(*idx) {
+                            btn.grab_focus();
                         }
-                    };
-                    if let Some(btn) = target_btn {
-                        btn.grab_focus();
+                        if let Some(game) = all_g_gp.lock().unwrap().get(*idx) {
+                            focus_gp(game);
+                        }
                     }
                 }
                 GamepadNavAction::OptionsX => {
@@ -2742,8 +3336,139 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     window.present();
 }
 
+fn open_external_game_scanner_modal(
+    parent: &Window,
+    lang: Language,
+    local_games_rc: Rc<RefCell<Vec<GameEntry>>>,
+    local_cbox: GtkBox,
+    local_btns: Rc<RefCell<Vec<Button>>>,
+    local_empty_card: GtkBox,
+    btn_tab_local: Button,
+    populate_fn: Rc<dyn Fn(&GtkBox, &[GameEntry], &Rc<RefCell<Vec<Button>>>)>,
+    switch_subtab: Rc<dyn Fn(u8)>,
+    media_tx: async_channel::Sender<MediaUpdateEvent>,
+) {
+    let modal = Window::builder()
+        .title(match lang {
+            Language::TR => "Harici Oyun veya Klasör Tanıt",
+            Language::EN => "Add External Game or Folder",
+        })
+        .transient_for(parent)
+        .modal(true)
+        .default_width(540)
+        .default_height(300)
+        .build();
 
-#[allow(dead_code)]
+    let box_root = GtkBox::new(Orientation::Vertical, 12);
+    box_root.add_css_class("xbox-modal-drawer");
+    box_root.set_margin_top(16);
+    box_root.set_margin_bottom(16);
+    box_root.set_margin_start(16);
+    box_root.set_margin_end(16);
+
+    let hdr = Label::new(Some(match lang {
+        Language::TR => "Farklı Kaynaktan İndirilen Oyunu veya Klasörü Ekle",
+        Language::EN => "Register Externally Downloaded Game or Folder",
+    }));
+    hdr.add_css_class("xbox-apps-header");
+    hdr.set_halign(gtk4::Align::Start);
+    box_root.append(&hdr);
+
+    let sub = Label::new(Some(match lang {
+        Language::TR => "Klasör yolu (örn. /mnt/nvme/Oyunlar veya ~/Downloads/Oyun) ya da doğrudan çalıştırılabilir dosya (.exe, .AppImage, .x86_64) girin. Resmi kapak, logo ve fragman otomatik çekilir.",
+        Language::EN => "Enter a game folder (e.g. /mnt/nvme/Games) or executable (.exe, .AppImage, .x86_64). Official cover, logo & trailer will be fetched automatically.",
+    }));
+    sub.add_css_class("xbox-modal-card-desc");
+    sub.set_halign(gtk4::Align::Start);
+    sub.set_wrap(true);
+    box_root.append(&sub);
+
+    let entry_title = Entry::new();
+    entry_title.add_css_class("xbox-search-bar");
+    entry_title.set_placeholder_text(Some(match lang {
+        Language::TR => "Oyun Adı (isteğe bağlı — tek .exe/.AppImage eklerken)",
+        Language::EN => "Game Title (optional — when adding a single binary)",
+    }));
+    box_root.append(&entry_title);
+
+    let entry_path = Entry::new();
+    entry_path.add_css_class("xbox-search-bar");
+    entry_path.set_placeholder_text(Some("/home/blaze/Oyunlar  veya  /home/blaze/Oyunlar/Hades/Hades.exe"));
+    box_root.append(&entry_path);
+
+    let actions = GtkBox::new(Orientation::Horizontal, 10);
+    actions.set_halign(gtk4::Align::End);
+
+    let btn_cancel = Button::with_label(lang.close());
+    btn_cancel.add_css_class("xbox-apps-close-btn");
+    let m_cancel = modal.clone();
+    btn_cancel.connect_clicked(move |_| {
+        m_cancel.close();
+    });
+
+    let btn_save = Button::with_label(match lang {
+        Language::TR => "Tara ve Bilgisayarımdaki Oyunlara Taşı",
+        Language::EN => "Scan & Move to My PC Games",
+    });
+    btn_save.add_css_class("gz-hero-play-primary");
+
+    let m_save = modal.clone();
+    btn_save.connect_clicked(move |_| {
+        let raw_p = entry_path.text().trim().to_string();
+        let raw_t = entry_title.text().trim().to_string();
+        if raw_p.is_empty() {
+            return;
+        }
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/home/blaze".to_string());
+        let expanded = if let Some(rest) = raw_p.strip_prefix("~/") {
+            format!("{}/{}", home, rest)
+        } else {
+            raw_p
+        };
+        let pb = PathBuf::from(&expanded);
+        let mut cfg = gamezone_live::load_custom_sources();
+        if pb.is_dir() {
+            if !cfg.directories.contains(&expanded) {
+                cfg.directories.push(expanded);
+            }
+        } else {
+            let inferred_title = if !raw_t.is_empty() {
+                raw_t
+            } else {
+                pb.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("Harici Oyun")
+                    .to_string()
+            };
+            cfg.executables.push(CustomExecutableEntry {
+                title: inferred_title,
+                path: expanded,
+            });
+        }
+        gamezone_live::save_custom_sources(&cfg);
+
+        let rescanned = gamezone_live::scan_computer_and_account_games(discover_all_games());
+        *local_games_rc.borrow_mut() = rescanned.clone();
+        local_empty_card.set_visible(rescanned.is_empty());
+        btn_tab_local.set_label(&match lang {
+            Language::TR => format!("▣ Bilgisayarımdaki & Hesabımdaki Oyunlar ({})", rescanned.len()),
+            Language::EN => format!("▣ My PC & Account Games ({})", rescanned.len()),
+        });
+        populate_fn(&local_cbox, &rescanned, &local_btns);
+        gamezone_live::spawn_official_media_fetcher(rescanned, media_tx.clone());
+        switch_subtab(1);
+        m_save.close();
+    });
+
+    actions.append(&btn_cancel);
+    actions.append(&btn_save);
+    box_root.append(&actions);
+
+    modal.set_child(Some(&box_root));
+    modal.present();
+}
+
+
 fn update_hero_showcase(
     game: &GameEntry,
     title_lbl: &Label,
@@ -2781,20 +3506,18 @@ fn update_hero_showcase(
 }
 
 fn get_default_wallpaper_path() -> String {
-    let home = get_user_home();
     let candidates = [
-        "/usr/share/blazeos/wallpapers/Wallpaperdefault.jpg".to_string(),
-        "/usr/share/blazeos/wallpapers/default.png".to_string(),
-        "/usr/share/blazeos/wallpapers/xbox_dynamic.png".to_string(),
-        "/usr/share/blazeos/wallpapers/galaxy.png".to_string(),
-        "/usr/share/blazeos/wallpapers/blazeos-wallpaper-1.png".to_string(),
-        "/usr/share/backgrounds/default.png".to_string(),
-        format!("{}/.local/share/blazeos/wallpapers/xbox_dynamic.png", home.to_string_lossy()),
-        format!("{}/.local/share/blazeos/wallpapers/galaxy.png", home.to_string_lossy()),
+        "/usr/share/blazeos/wallpapers/xbox_dynamic.png",
+        "/usr/share/solarui/covers/xbox_dynamic.png",
+        "/home/darkmorpheus/SolarUI/data/covers/xbox_dynamic.png",
+        "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/blazeos/wallpapers/xbox_dynamic.png",
+        "/usr/share/blazeos/wallpapers/galaxy.png",
+        "/usr/share/blazeos/wallpapers/default.png",
+        "/usr/share/blazeos/wallpapers/blazeos-wallpaper-1.png",
     ];
-    for c in &candidates {
+    for c in candidates {
         if Path::new(c).exists() {
-            return c.clone();
+            return c.to_string();
         }
     }
     String::new()
@@ -2803,17 +3526,13 @@ fn get_default_wallpaper_path() -> String {
 fn update_backdrop(game: Option<&GameEntry>, bg_picture: &Picture) {
     if let Some(g) = game {
         if let Some(ss) = get_game_screenshot_path(g) {
-            bg_picture.set_filename(Some(Path::new(&ss)));
-            return;
-        }
-        if let Some(cover) = get_game_cover_path(g) {
-            bg_picture.set_filename(Some(Path::new(&cover)));
+            load_picture_file(bg_picture, Path::new(&ss));
             return;
         }
     }
     let def_wall = get_default_wallpaper_path();
     if !def_wall.is_empty() {
-        bg_picture.set_filename(Some(Path::new(&def_wall)));
+        load_picture_file(bg_picture, Path::new(&def_wall));
     } else {
         bg_picture.set_filename(None::<&Path>);
     }
@@ -2831,7 +3550,6 @@ fn handle_game_activation(game: &GameEntry, on_offline_alert: &dyn Fn(&str)) {
         }
         *last = Some(Instant::now());
     }
-
     if !game.is_installed {
         if !is_system_online() {
             on_offline_alert("İnternete bağlı değilsiniz. Sadece yüklü oyunları ve uygulamaları çalıştırabilirsiniz.");
@@ -2902,7 +3620,7 @@ fn fetch_and_apply_store_screenshot(game: &GameEntry, hero_pic: &Picture, bg_pic
                             .and_then(|v| v.get("data"))
                             .and_then(|v| v.get("screenshots"))
                             .and_then(|v| v.as_array()) {
-                            if let Some(first_ss) = ss_list.first().and_then(|s| s.get("path_full")).and_then(|s| s.as_str()) {
+                            if let Some(first_ss) = ss_list.get(0).and_then(|s| s.get("path_full")).and_then(|s| s.as_str()) {
                                 let _ = std::fs::create_dir_all(&cache_dir);
                                 let _ = Command::new("curl")
                                     .args(["-sL", "-m", "6", first_ss, "-o", ss_dest.to_str().unwrap()])
@@ -2920,7 +3638,6 @@ fn fetch_and_apply_store_screenshot(game: &GameEntry, hero_pic: &Picture, bg_pic
 }
 
 // ── 10 Saniye Hover: Steam Oynanış Videosu / Fragmanı Kendi Çerçevesinde Başlatma ──
-#[allow(dead_code)]
 fn trigger_store_video_preview(game: &GameEntry, hero_vid: &Video, hero_pic: &Picture, trailer_badge: &Label) {
     println!("Triggering 10s gameplay video preview for {}", game.title);
     trailer_badge.set_text("▶ Oynanış Fragmanı Başlatıldı (Kendi Çerçevesinde)");
@@ -2962,7 +3679,7 @@ fn trigger_store_video_preview(game: &GameEntry, hero_vid: &Video, hero_pic: &Pi
                             .and_then(|v| v.get("data"))
                             .and_then(|v| v.get("movies"))
                             .and_then(|v| v.as_array()) {
-                            if let Some(first_movie) = movies.first() {
+                            if let Some(first_movie) = movies.get(0) {
                                 if let Some(mid) = first_movie.get("id").and_then(|m| m.as_i64()) {
                                     let video_url = format!("https://cdn.cloudflare.steamstatic.com/steam/apps/{}/movie480.mp4", mid);
                                     println!("Streaming trailer in widget frame: {}", video_url);
@@ -2978,37 +3695,35 @@ fn trigger_store_video_preview(game: &GameEntry, hero_vid: &Video, hero_pic: &Pi
 }
 
 fn get_game_screenshot_path(game: &GameEntry) -> Option<String> {
-    if let Some(p) = &game.screenshot_path {
-        if Path::new(p).exists() {
-            return Some(p.clone());
-        }
-    }
     let mut check_keys = vec![game.id.clone()];
     if let Some(app_id) = &game.steam_app_id {
         check_keys.push(format!("steam-{}", app_id));
         check_keys.push(app_id.clone());
     }
-    let cache_root = dirs_cache_dir();
     for key in &check_keys {
-        let dir = cache_root.join(key);
-        for ext in ["screenshot.jpg", "screenshot.png", "hero.jpg", "cover.jpg"] {
+        let dir = gamezone_live::media_cache_dir_for(key);
+        for ext in ["screenshot_0.jpg", "trailer_thumb.jpg", "hero.jpg", "screenshot.jpg", "cover.jpg"] {
             let p = dir.join(ext);
-            if p.exists() {
+            if gamezone_live::is_valid_image_file(&p) {
                 return Some(p.to_string_lossy().to_string());
             }
         }
     }
-    let home = get_user_home();
-    let user_covers = home.join(".local/share/solarui/covers");
+    if let Some(p) = &game.screenshot_path {
+        if Path::new(p).exists() {
+            return Some(p.clone());
+        }
+    }
     let bundled_dirs = [
-        PathBuf::from("/usr/share/solarui/covers"),
-        user_covers.clone(),
+        "/usr/share/solarui/covers",
+        "/home/darkmorpheus/SolarUI/data/covers",
+        "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/solarui/covers",
     ];
-    for d in &bundled_dirs {
+    for d in bundled_dirs {
         for key in &check_keys {
-            for prefix in [&format!("{}-screenshot", key), key] {
+            for prefix in [&format!("{}-screenshot", key), &format!("{}-hero", key)] {
                 for ext in ["jpg", "png", "svg"] {
-                    let p = d.join(format!("{}.{}", prefix, ext));
+                    let p = Path::new(d).join(format!("{}.{}", prefix, ext));
                     if p.exists() {
                         return Some(p.to_string_lossy().to_string());
                     }
@@ -3019,7 +3734,6 @@ fn get_game_screenshot_path(game: &GameEntry) -> Option<String> {
     None
 }
 
-#[allow(dead_code)]
 fn get_game_trailer_path(game: &GameEntry) -> Option<String> {
     if let Some(m) = &game.movie_url {
         if Path::new(m).exists() {
@@ -3038,15 +3752,14 @@ fn get_game_trailer_path(game: &GameEntry) -> Option<String> {
             return Some(p.to_string_lossy().to_string());
         }
     }
-    let home = get_user_home();
     let bundled_dirs = [
-        PathBuf::from("/usr/share/solarui/covers"),
-        home.join(".local/share/solarui/covers"),
+        "/usr/share/solarui/covers",
+        "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/solarui/covers",
     ];
-    for d in &bundled_dirs {
+    for d in bundled_dirs {
         for key in &check_keys {
             for prefix in [&format!("{}-trailer", key), key] {
-                let p = d.join(format!("{}.mp4", prefix));
+                let p = Path::new(d).join(format!("{}.mp4", prefix));
                 if p.exists() {
                     return Some(p.to_string_lossy().to_string());
                 }
@@ -3057,35 +3770,33 @@ fn get_game_trailer_path(game: &GameEntry) -> Option<String> {
 }
 
 fn get_game_cover_path(game: &GameEntry) -> Option<String> {
-    if let Some(p) = &game.cover_path {
-        if Path::new(p).exists() {
-            return Some(p.clone());
-        }
-    }
     let mut check_keys = vec![game.id.clone()];
     if let Some(app_id) = &game.steam_app_id {
         check_keys.push(format!("steam-{}", app_id));
         check_keys.push(app_id.clone());
     }
-    let cache_root = dirs_cache_dir();
     for key in &check_keys {
-        let dir = cache_root.join(key);
-        for ext in ["cover.jpg", "cover.png", "cover.svg", "hero.jpg", "screenshot.jpg"] {
+        let dir = gamezone_live::media_cache_dir_for(key);
+        for ext in ["cover.jpg", "cover.png", "hero.jpg", "screenshot_0.jpg"] {
             let p = dir.join(ext);
-            if p.exists() {
+            if gamezone_live::is_valid_image_file(&p) {
                 return Some(p.to_string_lossy().to_string());
             }
         }
     }
-    let home = get_user_home();
+    if let Some(p) = &game.cover_path {
+        if Path::new(p).exists() {
+            return Some(p.clone());
+        }
+    }
     let bundled_dirs = [
-        PathBuf::from("/usr/share/solarui/covers"),
-        home.join(".local/share/solarui/covers"),
+        "/usr/share/solarui/covers",
+        "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/solarui/covers",
     ];
-    for d in &bundled_dirs {
+    for d in bundled_dirs {
         for key in &check_keys {
             for ext in ["jpg", "png", "svg"] {
-                let p = d.join(format!("{}.{}", key, ext));
+                let p = Path::new(d).join(format!("{}.{}", key, ext));
                 if p.exists() {
                     return Some(p.to_string_lossy().to_string());
                 }
@@ -3103,16 +3814,16 @@ fn create_game_cover_image(game: &GameEntry) -> Picture {
     pic.add_css_class("game-cover-pic");
 
     if let Some(p) = get_game_cover_path(game) {
-        pic.set_filename(Some(Path::new(&p)));
+        load_picture_file(&pic, Path::new(&p));
     } else {
-        let home = get_user_home();
         let bundled = [
-            PathBuf::from("/usr/share/solarui/covers/steam-deck.jpg"),
-            home.join(".local/share/solarui/covers/steam-deck.jpg"),
+            "/usr/share/solarui/covers/steam-deck.jpg",
+            "/home/darkmorpheus/SolarUI/data/covers/steam-deck.jpg",
+            "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/solarui/covers/steam-deck.jpg",
         ];
-        for b in &bundled {
-            if b.exists() {
-                pic.set_filename(Some(b));
+        for b in bundled {
+            if Path::new(b).exists() {
+                load_picture_file(&pic, Path::new(b));
                 break;
             }
         }
@@ -3180,7 +3891,6 @@ fn dirs_cache_dir() -> PathBuf {
     home.join(".cache/blaze-gamezone/media")
 }
 
-#[allow(clippy::too_many_arguments)]
 fn new_game_entry(
     id: &str,
     title: &str,
@@ -3223,8 +3933,8 @@ pub fn detect_logged_in_accounts() -> (Option<String>, Option<String>) {
         home.join(".var/app/com.valvesoftware.Steam/.local/share/Steam/config/loginusers.vdf"),
     ];
     let mut steam_user = None;
-    for vdf in &steam_vdfs {
-        if let Ok(content) = std::fs::read_to_string(vdf) {
+    for vdf in steam_vdfs {
+        if let Ok(content) = std::fs::read_to_string(&vdf) {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if trimmed.starts_with("\"PersonaName\"") {
@@ -3291,6 +4001,25 @@ pub fn discover_store_showcase() -> Vec<GameEntry> {
 
 pub fn discover_store_showcase_for_lang(lang: Language) -> Vec<GameEntry> {
     let mut list = Vec::new();
+
+    let (deck_cat, deck_desc) = match lang {
+        Language::TR => ("Konsol Arayüzü", "Tam ekran Steam Big Picture ve kumanda destekli oyun merkezi."),
+        Language::EN => ("Console Interface", "Fullscreen Steam Big Picture and controller-native gaming hub."),
+    };
+    list.push(new_game_entry(
+        "steam-deck",
+        "Steam Big Picture",
+        deck_cat,
+        "steam -gamepadui",
+        deck_desc,
+        false,
+        None,
+        Some("/usr/share/solarui/covers/steam-deck.jpg".to_string()),
+        None,
+        None,
+        Some("https://store.steampowered.com/".to_string()),
+        None,
+    ));
 
     let (beam_cat, beam_desc) = match lang {
         Language::TR => ("Araç Fiziği Simülasyonu", "Gerçek zamanlı yumuşak gövde araç fiziği simülasyonu."),
@@ -3399,7 +4128,7 @@ pub fn discover_store_showcase_for_lang(lang: Language) -> Vec<GameEntry> {
         xb_desc,
         false,
         None,
-        None,
+        Some("/usr/share/solarui/covers/xbox-cloud.jpg".to_string()),
         None,
         None,
         Some("https://www.xbox.com/play".to_string()),
@@ -3413,10 +4142,11 @@ pub fn discover_store_showcase_for_lang(lang: Language) -> Vec<GameEntry> {
 pub fn discover_all_games() -> Vec<GameEntry> {
     let mut list = Vec::new();
     let cache_dir = dirs_cache_dir();
-    let home = get_user_home();
+    let home_pb = get_user_home();
+    let home = home_pb.to_string_lossy().to_string();
 
     // 1. Kurulu Başlatıcı Kartları (Yalnızca sistemde varsa kütüphaneye ekle)
-    let is_flatpak_steam = home.join(".var/app/com.valvesoftware.Steam").exists()
+    let is_flatpak_steam = home_pb.join(".var/app/com.valvesoftware.Steam").exists()
         || Path::new("/var/lib/flatpak/app/com.valvesoftware.Steam").exists();
     if is_game_installed(None, "steam", "steam-deck") || is_flatpak_steam {
         let exec_cmd = if is_game_installed(None, "steam", "steam-deck") {
@@ -3440,7 +4170,7 @@ pub fn discover_all_games() -> Vec<GameEntry> {
         ));
     }
 
-    let is_flatpak_heroic = home.join(".var/app/com.heroicgameslauncher.hgl").exists()
+    let is_flatpak_heroic = home_pb.join(".var/app/com.heroicgameslauncher.hgl").exists()
         || Path::new("/var/lib/flatpak/app/com.heroicgameslauncher.hgl").exists();
     if is_game_installed(None, "heroic", "heroic") || is_flatpak_heroic {
         let exec_cmd = if is_game_installed(None, "heroic", "heroic") {
@@ -3464,7 +4194,7 @@ pub fn discover_all_games() -> Vec<GameEntry> {
         ));
     }
 
-    let is_flatpak_lutris = home.join(".var/app/net.lutris.Lutris").exists()
+    let is_flatpak_lutris = home_pb.join(".var/app/net.lutris.Lutris").exists()
         || Path::new("/var/lib/flatpak/app/net.lutris.Lutris").exists();
     if is_game_installed(None, "lutris", "lutris") || is_flatpak_lutris {
         let exec_cmd = if is_game_installed(None, "lutris", "lutris") {
@@ -3488,7 +4218,7 @@ pub fn discover_all_games() -> Vec<GameEntry> {
         ));
     }
 
-    let is_flatpak_retroarch = home.join(".var/app/org.libretro.RetroArch").exists()
+    let is_flatpak_retroarch = home_pb.join(".var/app/org.libretro.RetroArch").exists()
         || Path::new("/var/lib/flatpak/app/org.libretro.RetroArch").exists();
     if is_game_installed(None, "retroarch", "retroarch") || is_flatpak_retroarch {
         let exec_cmd = if is_game_installed(None, "retroarch", "retroarch") {
@@ -3512,15 +4242,15 @@ pub fn discover_all_games() -> Vec<GameEntry> {
         ));
     }
 
-    // 2. Kurulu Steam Oyunlarını Tara (~/.steam/steam/steamapps/*.acf & Flatpak Steam)
+    // 2. Kurulu Steam Oyunlarını Tara (~/.steam/steam/steamapps/*.acf & Flatpak)
     let steam_dirs = [
-        home.join(".steam/steam/steamapps"),
-        home.join(".local/share/Steam/steamapps"),
-        home.join(".var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps"),
-        home.join(".var/app/com.valvesoftware.Steam/.steam/steam/steamapps"),
+        PathBuf::from(&home).join(".steam/steam/steamapps"),
+        PathBuf::from(&home).join(".local/share/Steam/steamapps"),
+        PathBuf::from(&home).join(".var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps"),
+        PathBuf::from(&home).join(".var/app/com.valvesoftware.Steam/.steam/steam/steamapps"),
     ];
 
-    for s_dir in &steam_dirs {
+    for s_dir in steam_dirs {
         if s_dir.exists() {
             if let Ok(entries) = std::fs::read_dir(s_dir) {
                 for e in entries.flatten() {
@@ -3640,7 +4370,12 @@ pub fn discover_all_games() -> Vec<GameEntry> {
                                     exec = line[5..].trim().to_string();
                                 }
                             }
-                            if !name.is_empty() && !exec.is_empty() && !list.iter().any(|g| g.title == name) {
+                            if !name.is_empty()
+                                && !exec.is_empty()
+                                && !exec.contains("solar-gamezone")
+                                && !name.to_lowercase().contains("gamezone")
+                                && !list.iter().any(|g| g.title == name)
+                            {
                                 list.push(GameEntry {
                                     id: name.to_lowercase().replace(' ', "-"),
                                     title: name.clone(),
@@ -3707,7 +4442,7 @@ fn launch_game_entry(game: &GameEntry) {
         .spawn();
 
     let parts: Vec<&str> = game.exec.split_whitespace().collect();
-    if let Some(cmd) = parts.first() {
+    if let Some(cmd) = parts.get(0) {
         let args = &parts[1..];
         let _ = Command::new(cmd)
             .args(args)
@@ -3715,7 +4450,6 @@ fn launch_game_entry(game: &GameEntry) {
     }
 }
 
-#[allow(dead_code)]
 fn get_live_system_metrics() -> (String, String, String) {
     let ram_str = if let Ok(mem) = std::fs::read_to_string("/proc/meminfo") {
         let mut total = 0u64;
@@ -3738,22 +4472,186 @@ fn get_live_system_metrics() -> (String, String, String) {
         "21%".to_string()
     };
 
-    ("18%".to_string(), ram_str, "60".to_string())
+    (format!("18%"), ram_str, format!("60"))
+}
+
+fn open_proton_ge_manager_modal(lang: Language) {
+    // If external protonup-qt exists and user installed it, we still offer our native GTK4 manager
+    let win = Window::builder()
+        .title(match lang {
+            Language::TR => "Blaze Proton-GE & Uyumluluk Yöneticisi",
+            Language::EN => "Blaze Proton-GE & Compatibility Manager",
+        })
+        .default_width(640)
+        .default_height(440)
+        .modal(true)
+        .build();
+
+    let root = GtkBox::new(Orientation::Vertical, 14);
+    root.set_margin_top(20);
+    root.set_margin_bottom(20);
+    root.set_margin_start(22);
+    root.set_margin_end(22);
+
+    let hdr = Label::new(Some(match lang {
+        Language::TR => "Blaze Proton-GE & NTSYNC Uyumluluk Yöneticisi",
+        Language::EN => "Blaze Proton-GE & NTSYNC Compatibility Manager",
+    }));
+    hdr.add_css_class("xbox-apps-header");
+    hdr.set_halign(gtk4::Align::Start);
+    root.append(&hdr);
+
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/blaze".to_string());
+    let compat_dir = PathBuf::from(&home).join(".steam/root/compatibilitytools.d");
+    let _ = std::fs::create_dir_all(&compat_dir);
+
+    let mut installed = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&compat_dir) {
+        for e in entries.flatten() {
+            if e.path().is_dir() {
+                installed.push(e.file_name().to_string_lossy().to_string());
+            }
+        }
+    }
+    installed.sort();
+
+    let ntsync_ok = Path::new("/dev/ntsync").exists();
+    let scx_ok = Path::new("/sys/kernel/sched_ext").exists();
+    let status_text = format!(
+        "• Hedef Dizin: {}\n• Çekirdek NTSYNC (/dev/ntsync): {}\n• Çekirdek sched_ext (eBPF): {}\n• Kurulu Proton-GE Sürümleri: {}",
+        compat_dir.display(),
+        if ntsync_ok { "AKTİF (Hazır)" } else { "Modül Bekleniyor (modprobe ntsync)" },
+        if scx_ok { "AKTİF (Hazır)" } else { "Standart EEVDF Zamanlayıcı" },
+        if installed.is_empty() { "Henüz kurulu GE-Proton yok".to_string() } else { installed.join(", ") }
+    );
+
+    let info_lbl = Label::new(Some(&status_text));
+    info_lbl.set_halign(gtk4::Align::Start);
+    info_lbl.set_wrap(true);
+    root.append(&info_lbl);
+
+    let prog_lbl = Label::new(Some(match lang {
+        Language::TR => "En son GE-Proton sürümünü GitHub üzerinden doğrudan Steam uyumluluk dizinine indirebilirsiniz.",
+        Language::EN => "Download and extract the latest GE-Proton release directly into your Steam compatibilitytools.d directory.",
+    }));
+    prog_lbl.set_halign(gtk4::Align::Start);
+    prog_lbl.set_wrap(true);
+    root.append(&prog_lbl);
+
+    let btn_row = GtkBox::new(Orientation::Horizontal, 12);
+    let dl_btn = Button::with_label(match lang {
+        Language::TR => "En Güncel GE-Proton Sürümünü İndir & Kur",
+        Language::EN => "Download & Install Latest GE-Proton",
+    });
+    dl_btn.add_css_class("xbox-apps-close-btn");
+
+    let prog_lbl_clone = prog_lbl.clone();
+    let compat_clone = compat_dir.clone();
+    dl_btn.connect_clicked(move |b| {
+        b.set_sensitive(false);
+        prog_lbl_clone.set_text("GitHub API üzerinden en son GloriousEggroll/proton-ge-custom sürümü sorgulanıyor...");
+        let (tx, rx) = async_channel::unbounded::<(String, bool)>();
+        let target_dir = compat_clone.clone();
+        std::thread::spawn(move || {
+            let script = format!(
+                r#"set -e
+mkdir -p "{dir}"
+API_JSON=$(curl -fsSL https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases/latest)
+TAR_URL=$(printf '%s' "$API_JSON" | grep -oE 'https://github.com/GloriousEggroll/proton-ge-custom/releases/download/[^"]+\.tar\.gz' | head -n 1)
+TAG_NAME=$(printf '%s' "$API_JSON" | grep -oE '"tag_name":\s*"[^"]+"' | head -n 1 | cut -d'"' -f4)
+if [ -z "$TAR_URL" ]; then
+    echo "ERR:GitHub API'den GE-Proton indirme bağlantısı alınamadı."
+    exit 1
+fi
+echo "INFO:$TAG_NAME indiriliyor ve {dir} dizinine açılıyor..."
+curl -fL "$TAR_URL" | tar -xz -C "{dir}"
+echo "OK:$TAG_NAME başarıyla kuruldu! Steam'i yeniden başlattığınızda Uyumluluk sekmesinde görünecektir."
+"#,
+                dir = target_dir.display()
+            );
+            match Command::new("sh").arg("-c").arg(&script).output() {
+                Ok(out) if out.status.success() => {
+                    let msg = String::from_utf8_lossy(&out.stdout).lines().last().unwrap_or("Tamamlandı").to_string();
+                    let _ = tx.send_blocking((msg, true));
+                }
+                Ok(out) => {
+                    let err = String::from_utf8_lossy(&out.stderr).to_string();
+                    let _ = tx.send_blocking((format!("Hata: {}", err.trim()), true));
+                }
+                Err(e) => {
+                    let _ = tx.send_blocking((format!("İndirme başlatılamadı: {}", e), true));
+                }
+            }
+        });
+
+        let lbl_ui = prog_lbl_clone.clone();
+        let btn_ui = b.clone();
+        glib::MainContext::default().spawn_local(async move {
+            while let Ok((msg, done)) = rx.recv().await {
+                lbl_ui.set_text(&msg);
+                if done {
+                    btn_ui.set_sensitive(true);
+                }
+            }
+        });
+    });
+    btn_row.append(&dl_btn);
+
+    let close_btn = Button::with_label(match lang {
+        Language::TR => "Kapat",
+        Language::EN => "Close",
+    });
+    close_btn.add_css_class("xbox-apps-close-btn");
+    let win_weak = win.downgrade();
+    close_btn.connect_clicked(move |_| {
+        if let Some(w) = win_weak.upgrade() {
+            w.close();
+        }
+    });
+    btn_row.append(&close_btn);
+
+    root.append(&btn_row);
+    win.set_child(Some(&root));
+    win.present();
 }
 
 fn activate_gaming_optimizations() {
-    println!("Activating Blaze GameZone Low-Latency Performance Mode...");
-    let _ = Command::new("powerprofilesctl").args(["set", "performance"]).status();
-    let _ = Command::new("sh")
-        .arg("-c")
-        .arg("echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor 2>/dev/null || true")
-        .status();
+    println!("Activating Blaze GameZone Low-Latency Performance Mode (sched_ext + NTSYNC)...");
+    if Command::new("sudo")
+        .args(["-n", "/usr/bin/blaze-gamemode", "on"])
+        .status()
+        .is_err()
+    {
+        let _ = Command::new("powerprofilesctl").args(["set", "performance"]).status();
+        let _ = Command::new("sudo")
+            .args([
+                "-n",
+                "sh",
+                "-c",
+                "for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do [ -w \"$g\" ] && echo performance > \"$g\"; done; sysctl -w kernel.split_lock_mitigate=0 >/dev/null 2>&1 || true; modprobe ntsync 2>/dev/null || true",
+            ])
+            .status();
+    }
     let _ = crate::delight::play_acoustic_feedback("easter-egg");
 }
 
 fn restore_normal_optimizations() {
     println!("Restoring balanced power and scheduler profile...");
-    let _ = Command::new("powerprofilesctl").args(["set", "balanced"]).status();
+    if Command::new("sudo")
+        .args(["-n", "/usr/bin/blaze-gamemode", "off"])
+        .status()
+        .is_err()
+    {
+        let _ = Command::new("powerprofilesctl").args(["set", "balanced"]).status();
+        let _ = Command::new("sudo")
+            .args([
+                "-n",
+                "sh",
+                "-c",
+                "for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do [ -w \"$g\" ] && echo schedutil > \"$g\" 2>/dev/null || echo powersave > \"$g\" 2>/dev/null || true; done",
+            ])
+            .status();
+    }
 }
 
 #[cfg(test)]

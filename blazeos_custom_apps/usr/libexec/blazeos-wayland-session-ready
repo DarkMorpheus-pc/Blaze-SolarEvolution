@@ -30,6 +30,6 @@ if [ -x /usr/libexec/polkit-mate-authentication-agent-1 ] && \
     /usr/libexec/polkit-mate-authentication-agent-1 &
 fi
 
-systemctl --user reset-failed xdg-desktop-portal-gtk.service 2>/dev/null || :
+systemctl --user reset-failed xdg-desktop-portal-gtk.service xdg-desktop-portal-gnome.service 2>/dev/null || :
 systemctl --user restart xdg-desktop-portal.service 2>/dev/null || :
 echo "Wayland session environment published: ${WAYLAND_DISPLAY}"

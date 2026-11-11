@@ -1,10 +1,11 @@
 [Unit]
 Description=Blaze Boot Success & Recovery Reset
-After=graphical.target
+After=graphical.target multi-user.target
 
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/blaze-recovery --clear-trigger
+ExecStartPost=-/usr/bin/sh -c 'if [ -f /boot/grub2/grubenv ]; then grub2-editenv /boot/grub2/grubenv set boot_counter=0 blaze_recovery=- 2>/dev/null || true; grub2-editenv /boot/grub2/grubenv unset blaze_recovery 2>/dev/null || true; fi; rm -f /var/run/blaze_recovery_trigger /run/blaze_recovery_trigger /var/lib/blaze/berp-trigger /boot/bere/recovery_triggered /etc/blaze_recovery_alert /run/blaze_recovery_alert; if [ -d /var/lib/blaze ] || [ -f /var/lib/blaze/berp-counter ]; then mkdir -p -m 0700 /var/lib/blaze && printf "0\n" > /var/lib/blaze/berp-counter; fi'
 RemainAfterExit=yes
 
 [Install]

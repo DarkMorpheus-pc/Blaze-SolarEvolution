@@ -15,6 +15,14 @@ HELPER="/usr/libexec/blazeos-welcome-helper"
 
 mkdir -p "$CONFIG_DIR"
 
+mark_welcome_completed() {
+    {
+        echo "completed_at=$(date -Iseconds)"
+        echo "version=$WIZARD_VERSION"
+        echo "ram_gb=${MEM_GB:-0}"
+    } > "$MARKER_FILE" 2>/dev/null || true
+}
+
 # --force: uygulama menüsünden yeniden çalıştırınca canlı-geçidi + marker atlanır
 FORCE=0
 [ "${1:-}" = "--force" ] && FORCE=1
@@ -27,6 +35,27 @@ fi
 
 # ---- Zaten tamamlandı mı? sessizce çık (--force ile atlanır) ----------------
 [ "$FORCE" -eq 0 ] && [ -f "$MARKER_FILE" ] && exit 0
+
+# Ensure marker is always written on exit in normal first-boot mode so autostart
+# never re-runs endlessly (including on SolarUI where solar-shell handles welcome
+# or when yad is unavailable).
+if [ "$FORCE" -eq 0 ]; then
+    trap 'mark_welcome_completed' EXIT
+fi
+
+if [ "$FORCE" -eq 0 ]; then
+    case "${XDG_CURRENT_DESKTOP:-}:${DESKTOP_SESSION:-}" in
+        *SolarUI*|*solarui*|*niri*|*Niri*)
+            mark_welcome_completed
+            exit 0
+            ;;
+    esac
+fi
+
+if ! command -v yad >/dev/null 2>&1; then
+    mark_welcome_completed
+    exit 0
+fi
 
 # ---- Dil algıla + kullanıcıya sor ------------------------------------------
 SYS_LANG="${LANG%_*}"
@@ -85,9 +114,9 @@ t() {
         tr:step_waydroid)    echo "Waydroid Kurulumu" ;;
         tr:step_waydroid_text) echo "Android uygulamaları çalıştırmak için Waydroid'i şimdi kuralım mı?\n\nÖnce paket kurulacak (~30 MB), ardından Android imajları indirilecek (~700 MB-1.5 GB)." ;;
         tr:step_de)          echo "Masaüstü Ortamı" ;;
-        tr:step_de_intro)    echo "Varsayılan olarak GNOME 50 kurulu. İstersen ek masaüstü ortamları ekleyebilirsin." ;;
+        tr:step_de_intro)    echo "İstersen sistemine ek masaüstü ortamları ekleyebilirsin." ;;
         tr:ram_low)          echo "Algılanan RAM: ${MEM_GB} GB — düşük. <b>XFCE</b> veya <b>Cinnamon</b> öneririz." ;;
-        tr:ram_ok)           echo "Algılanan RAM: ${MEM_GB} GB — GNOME 50 rahatça çalışır." ;;
+        tr:ram_ok)           echo "Algılanan RAM: ${MEM_GB} GB — Tüm masaüstü ortamları rahatça çalışır." ;;
         tr:step_done)        echo "Kurulum Tamamlandı" ;;
         tr:step_done_text)   echo "BlazeOS Galaxy SolarEvolution kullanıma hazır!\n\nKeyfini çıkar — destek: blazeos.com.tr" ;;
         tr:msg_running)      echo "Çalışıyor, lütfen bekle..." ;;
@@ -124,9 +153,9 @@ t() {
         ru:step_waydroid)    echo "Установка Waydroid" ;;
         ru:step_waydroid_text) echo "Установить Waydroid для запуска Android-приложений?\n\nСначала установится пакет (~30 МБ), затем загрузятся образы Android (~700 МБ-1.5 ГБ)." ;;
         ru:step_de)          echo "Рабочая среда" ;;
-        ru:step_de_intro)    echo "По умолчанию установлен GNOME 50. Вы можете добавить другие среды рабочего стола." ;;
+        ru:step_de_intro)    echo "Вы можете добавить дополнительные среды рабочего стола." ;;
         ru:ram_low)          echo "Обнаружено RAM: ${MEM_GB} ГБ — мало. Рекомендуем <b>XFCE</b> или <b>Cinnamon</b>." ;;
-        ru:ram_ok)           echo "Обнаружено RAM: ${MEM_GB} ГБ — GNOME 50 работает комфортно." ;;
+        ru:ram_ok)           echo "Обнаружено RAM: ${MEM_GB} ГБ — Все среды работают комфортно." ;;
         ru:step_done)        echo "Установка завершена" ;;
         ru:step_done_text)   echo "BlazeOS Galaxy SolarEvolution готов к работе!\n\nПриятного использования — поддержка: blazeos.com.tr" ;;
         ru:msg_running)      echo "Выполняется, пожалуйста подождите..." ;;
@@ -163,9 +192,9 @@ t() {
         de:step_waydroid)    echo "Waydroid einrichten" ;;
         de:step_waydroid_text) echo "Waydroid für Android-Apps einrichten?\n\nZuerst Paket (~30 MB), dann Android-Abbilder (~700 MB-1,5 GB)." ;;
         de:step_de)          echo "Desktop-Umgebung" ;;
-        de:step_de_intro)    echo "GNOME 50 ist standardmäßig installiert. Optional zusätzliche Desktops hinzufügen." ;;
+        de:step_de_intro)    echo "Optional zusätzliche Desktop-Umgebungen hinzufügen." ;;
         de:ram_low)          echo "Erkannter RAM: ${MEM_GB} GB — gering. Empfehlen <b>XFCE</b> oder <b>Cinnamon</b>." ;;
-        de:ram_ok)           echo "Erkannter RAM: ${MEM_GB} GB — GNOME 50 läuft problemlos." ;;
+        de:ram_ok)           echo "Erkannter RAM: ${MEM_GB} GB — Alle Desktops laufen problemlos." ;;
         de:step_done)        echo "Einrichtung abgeschlossen" ;;
         de:step_done_text)   echo "BlazeOS Galaxy SolarEvolution ist einsatzbereit!\n\nViel Spaß — Support: blazeos.com.tr" ;;
         de:msg_running)      echo "Bitte warten..." ;;
@@ -202,9 +231,9 @@ t() {
         *:step_waydroid)     echo "Waydroid Setup" ;;
         *:step_waydroid_text) echo "Set up Waydroid to run Android apps?\n\nFirst the package (~30 MB) will be installed, then Android images (~700 MB-1.5 GB) will be downloaded." ;;
         *:step_de)           echo "Desktop Environment" ;;
-        *:step_de_intro)     echo "GNOME 50 is installed by default. You can optionally add more desktops." ;;
+        *:step_de_intro)     echo "You can optionally add additional desktop environments." ;;
         *:ram_low)           echo "Detected RAM: ${MEM_GB} GB — low. We recommend <b>XFCE</b> or <b>Cinnamon</b>." ;;
-        *:ram_ok)            echo "Detected RAM: ${MEM_GB} GB — GNOME 50 runs comfortably." ;;
+        *:ram_ok)            echo "Detected RAM: ${MEM_GB} GB — All desktop environments run comfortably." ;;
         *:step_done)         echo "Setup Complete" ;;
         *:step_done_text)    echo "BlazeOS Galaxy SolarEvolution is ready!\n\nEnjoy — support: blazeos.com.tr" ;;
         *:msg_running)       echo "Running, please wait..." ;;

@@ -24,7 +24,6 @@ fn main() -> Result<()> {
     std::env::set_var("MOZ_ENABLE_WAYLAND", "1");
     std::env::set_var("QT_QPA_PLATFORM", "wayland;xcb");
     std::env::set_var("GDK_BACKEND", "wayland,x11");
-    std::env::set_var("SDL_VIDEODRIVER", "wayland");
     std::env::set_var("CLUTTER_BACKEND", "wayland");
 
     // ChromeOS Ash Performance & Low-Power Idle Optimizations
@@ -49,7 +48,6 @@ fn main() -> Result<()> {
     }
     std::env::set_var("QT_QUICK_BACKEND", "rhi");
     std::env::set_var("QSG_RHI_BACKEND", "opengl");
-    std::env::set_var("QT_WAYLAND_DISABLE_WINDOWDECORATION", "1");
 
     // Initialize portal configs & systemd graphical session target for PipeWire / OBS screencast
     setup_desktop_portals();
@@ -195,9 +193,45 @@ fn find_binary(name: &str) -> Option<PathBuf> {
 }
 
 fn find_solar_niri_config() -> Option<PathBuf> {
-    // 1. User config: ~/.config/solarui/niri.kdl
+    // 1. User config: ~/.config/solarui/niri.kdl (reconciled with ~/.config/niri/config.kdl)
     if let Ok(home) = std::env::var("HOME") {
-        let user_cfg = PathBuf::from(home).join(".config/solarui/niri.kdl");
+        let home_path = PathBuf::from(&home);
+        let solar_dir = home_path.join(".config/solarui");
+        let niri_dir = home_path.join(".config/niri");
+        let user_cfg = solar_dir.join("niri.kdl");
+        let std_niri_cfg = niri_dir.join("config.kdl");
+
+        // Ensure ~/.config/solarui/niri.kdl exists (seed from /etc/solarui/niri.kdl if missing)
+        if !user_cfg.exists() {
+            let _ = std::fs::create_dir_all(&solar_dir);
+            if std_niri_cfg.exists() && !std_niri_cfg.is_symlink() {
+                let _ = std::fs::copy(&std_niri_cfg, &user_cfg);
+            } else if Path::new("/etc/solarui/niri.kdl").exists() {
+                let _ = std::fs::copy("/etc/solarui/niri.kdl", &user_cfg);
+            }
+        }
+
+        // If user edited ~/.config/niri/config.kdl as a regular file, sync the newer file into ~/.config/solarui/niri.kdl
+        if let Ok(meta) = std::fs::symlink_metadata(&std_niri_cfg) {
+            if !meta.file_type().is_symlink() {
+                let std_mtime = meta.modified().ok();
+                let solar_mtime = std::fs::metadata(&user_cfg).ok().and_then(|m| m.modified().ok());
+                if let (Some(n_time), Some(s_time)) = (std_mtime, solar_mtime) {
+                    if n_time > s_time {
+                        info!("Detected newer user edits in ~/.config/niri/config.kdl; syncing to ~/.config/solarui/niri.kdl");
+                        let _ = std::fs::copy(&std_niri_cfg, &user_cfg);
+                    }
+                }
+                if user_cfg.exists() {
+                    let _ = std::fs::remove_file(&std_niri_cfg);
+                    let _ = std::os::unix::fs::symlink("../solarui/niri.kdl", &std_niri_cfg);
+                }
+            }
+        } else if user_cfg.exists() {
+            let _ = std::fs::create_dir_all(&niri_dir);
+            let _ = std::os::unix::fs::symlink("../solarui/niri.kdl", &std_niri_cfg);
+        }
+
         if user_cfg.exists() {
             return Some(user_cfg);
         }

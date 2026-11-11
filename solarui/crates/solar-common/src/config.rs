@@ -224,11 +224,87 @@ impl SolarConfig {
 
     fn load_from(path: &std::path::Path) -> std::io::Result<Self> {
         match fs::read_to_string(path) {
-            Ok(content) => toml::from_str(&content)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+            Ok(content) => match toml::from_str(&content) {
+                Ok(cfg) => Ok(cfg),
+                Err(first_err) => {
+                    let deduped = Self::dedup_toml_sections(&content);
+                    if deduped != content {
+                        if let Ok(cfg) = toml::from_str(&deduped) {
+                            tracing::warn!(
+                                "Duplicate TOML section/key detected in {:?}; merged automatically.",
+                                path
+                            );
+                            return Ok(cfg);
+                        }
+                    }
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        first_err,
+                    ))
+                }
+            },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(e) => Err(e),
         }
+    }
+
+    /// Merges duplicate `[section]` headers and duplicate `key = value` lines within the same section
+    /// (preserving the latest assignment, e.g. when a user appends `[omnibar]` at the end of `config.toml`).
+    fn dedup_toml_sections(content: &str) -> String {
+        let mut section_order: Vec<String> = Vec::new();
+        let mut sections: std::collections::HashMap<String, Vec<(Option<String>, String)>> =
+            std::collections::HashMap::new();
+        let mut current_section = String::new();
+        section_order.push(current_section.clone());
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with('[')
+                && trimmed.ends_with(']')
+                && !trimmed.starts_with("[[")
+                && trimmed.len() > 2
+            {
+                current_section = trimmed.to_string();
+                if !section_order.contains(&current_section) {
+                    section_order.push(current_section.clone());
+                }
+                continue;
+            }
+
+            let key_opt = if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                trimmed
+                    .split_once('=')
+                    .map(|(k, _)| k.trim().to_string())
+                    .filter(|k| !k.is_empty())
+            } else {
+                None
+            };
+
+            let entries = sections.entry(current_section.clone()).or_default();
+            if let Some(ref key) = key_opt {
+                if let Some(existing) = entries
+                    .iter_mut()
+                    .find(|(k, _)| k.as_deref() == Some(key.as_str()))
+                {
+                    existing.1 = line.to_string();
+                    continue;
+                }
+            }
+            entries.push((key_opt, line.to_string()));
+        }
+
+        let mut out = Vec::new();
+        for sec in section_order {
+            if !sec.is_empty() {
+                out.push(sec.clone());
+            }
+            if let Some(lines) = sections.get(&sec) {
+                for (_, l) in lines {
+                    out.push(l.clone());
+                }
+            }
+        }
+        out.join("\n")
     }
 
     pub fn load() -> Self {
@@ -268,6 +344,7 @@ pub enum ShellEngine {
     #[default]
     Noctalia,
     Caelestia,
+    #[serde(rename = "end4-pc")]
     End4Pc,
 }
 
@@ -314,14 +391,25 @@ impl std::str::FromStr for ShellEngine {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum SurfaceProvider {
     #[default]
     Noctalia,
     Caelestia,
+    #[serde(rename = "end4-pc")]
     End4Pc,
     SolarUI,
+}
+
+impl<'de> Deserialize<'de> for SurfaceProvider {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        value.parse().map_err(serde::de::Error::custom)
+    }
 }
 
 impl SurfaceProvider {
@@ -459,6 +547,10 @@ impl Default for PerformanceConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OmnibarConfig {
     #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub override_shell_launcher: bool,
+    #[serde(default = "default_true")]
     pub enable_web_search: bool,
     #[serde(default = "default_search_engine")]
     pub search_engine: String,
@@ -473,6 +565,8 @@ fn default_search_engine() -> String {
 impl Default for OmnibarConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
+            override_shell_launcher: false,
             enable_web_search: true,
             search_engine: default_search_engine(),
             ai_api_key: String::new(),
@@ -635,5 +729,31 @@ mod tests {
         assert_eq!(parsed.performance.profile, PerformanceProfile::Ultra);
         assert!(parsed.performance.blur);
         assert!(!parsed.taskbar.enabled);
+    }
+
+    #[test]
+    fn duplicate_toml_sections_and_keys_are_merged_preserving_last_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[shell]
+engine = "caelestia"
+
+[omnibar]
+enabled = true
+enable_web_search = true
+
+[omnibar]
+enable_web_search = false
+"#,
+        )
+        .unwrap();
+
+        let cfg = SolarConfig::load_from(&path).expect("Should merge duplicate [omnibar] table");
+        assert_eq!(cfg.shell.engine, ShellEngine::Caelestia);
+        assert!(cfg.omnibar.enabled);
+        assert!(!cfg.omnibar.enable_web_search);
     }
 }

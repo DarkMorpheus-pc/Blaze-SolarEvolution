@@ -65,7 +65,7 @@ DESKTOPS_DEF = [
         "session": "plasma",
         "session_desktop": "plasma.desktop",
         "session_type": "wayland",
-        "packages": "plasma-workspace-wayland kde-settings",
+        "packages": "plasma-desktop plasma-workspace kde-settings",
         "check_files": ["/usr/share/wayland-sessions/plasma.desktop"],
     },
     {
@@ -98,7 +98,7 @@ DESKTOPS_DEF = [
         "session": "cinnamon",
         "session_desktop": "cinnamon.desktop",
         "session_type": "wayland",
-        "packages": "@cinnamon-desktop-environment",
+        "packages": "@cinnamon-desktop-environment cinnamon",
         "check_files": ["/usr/share/wayland-sessions/cinnamon-wayland.desktop", "/usr/share/xsessions/cinnamon.desktop"],
     },
     {
@@ -125,6 +125,21 @@ DESKTOPS_DEF = [
     },
 ]
 
+DE_DEFINITIONS = DESKTOPS_DEF
+
+
+def mark_style_center_completed():
+    try:
+        cfg_root = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+        marker_dir = os.path.join(cfg_root, "blazeos")
+        os.makedirs(marker_dir, exist_ok=True)
+        marker_path = os.path.join(marker_dir, "style-center-completed")
+        if not os.path.exists(marker_path):
+            with open(marker_path, "w", encoding="utf-8") as f:
+                f.write("completed\n")
+    except OSError:
+        pass
+
 
 class BlazeControlWindow(Adw.PreferencesWindow):
     def __init__(self, *args, **kwargs):
@@ -132,6 +147,9 @@ class BlazeControlWindow(Adw.PreferencesWindow):
         self.is_tr = os.environ.get("LANG", "").startswith("tr")
         self.set_title("BlazeOS Merkezi" if self.is_tr else "BlazeOS Control")
         self.set_default_size(920, 680)
+
+        mark_style_center_completed()
+        self.connect("close-request", self._on_close_request)
 
         self.task_running = False
         self.log_timer = None
@@ -145,6 +163,10 @@ class BlazeControlWindow(Adw.PreferencesWindow):
         requested_page = os.environ.get("BLAZEOS_CONTROL_PAGE", "")
         if requested_page in {"updates", "desktop", "appearance", "performance", "tools", "info"}:
             self.set_visible_page_name(requested_page)
+
+    def _on_close_request(self, *_args):
+        mark_style_center_completed()
+        return False
 
     # --------------------------------------------------------------------------
     # 1. UPDATES PAGE
@@ -305,6 +327,7 @@ class BlazeControlWindow(Adw.PreferencesWindow):
         self.add(page)
 
     def apply_appearance(self, kind, preset_id, title):
+        mark_style_center_completed()
         result = subprocess.run(
             ["/usr/bin/blaze-style-center", "--desktop", kind, "--apply", preset_id],
             capture_output=True, text=True
@@ -658,18 +681,58 @@ class BlazeControlWindow(Adw.PreferencesWindow):
             self.log_buffer.delete(self.log_buffer.get_start_iter(),
                                    self.log_buffer.get_iter_at_offset(excess))
 
-    def get_current_session(self):
+    def detect_current_session(self):
+        for raw in (
+            os.environ.get("DESKTOP_SESSION", ""),
+            os.environ.get("XDG_CURRENT_DESKTOP", ""),
+        ):
+            val = raw.strip().lower().removesuffix(".desktop")
+            if not val:
+                continue
+            if "solarui" in val:
+                return "solarui"
+            if "gnome" in val:
+                return "gnome"
+            if "kde" in val or "plasma" in val:
+                return "plasma"
+            if "cinnamon" in val:
+                return "cinnamon"
+            if "cosmic" in val:
+                return "cosmic"
+            if "hyprland" in val:
+                return "hyprland"
+            if "xfce" in val:
+                return "xfce"
+            if "sway" in val:
+                return "sway"
+            if "niri" in val:
+                return "niri"
+
+        if os.path.exists("/etc/blazeos-selected-session"):
+            try:
+                with open("/etc/blazeos-selected-session", "r", encoding="utf-8") as f:
+                    selected = f.read().strip().removesuffix(".desktop")
+                    if selected == "cinnamon-wayland":
+                        return "cinnamon"
+                    if selected:
+                        return selected
+            except OSError:
+                pass
+
         user = pwd.getpwuid(os.getuid()).pw_name
         acc_file = f"/var/lib/AccountsService/users/{user}"
         if os.path.exists(acc_file):
             try:
-                with open(acc_file, "r") as f:
+                with open(acc_file, "r", encoding="utf-8") as f:
                     for line in f:
                         if line.startswith("Session="):
                             return line.split("=", 1)[1].strip()
             except Exception:
                 pass
         return "solarui"
+
+    def get_current_session(self):
+        return self.detect_current_session()
 
     def set_desktop_session(self, de):
         user = pwd.getpwuid(os.getuid()).pw_name
@@ -681,7 +744,7 @@ class BlazeControlWindow(Adw.PreferencesWindow):
 
         # Quote the path before constructing the privileged shell command.
         acc_file = shlex.quote(acc_file)
-        hide_gnome = "true" if session_name == "solarui" else "false"
+        session_desktop_q = shlex.quote(session_desktop)
 
         def do_write():
             script = (
@@ -689,10 +752,7 @@ class BlazeControlWindow(Adw.PreferencesWindow):
                 f"cat > {acc_file} << 'EOF'\n{content}EOF\n"
                 f"chmod 0600 {acc_file}\n"
                 f"restorecon -F {acc_file} 2>/dev/null || true\n"
-                f"if [ -f /usr/share/wayland-sessions/gnome.desktop ]; then "
-                f"  sed -i '/^NoDisplay=/d' /usr/share/wayland-sessions/gnome.desktop; "
-                f"  sed -i '/^\\[Desktop Entry\\]/a NoDisplay={hide_gnome}' /usr/share/wayland-sessions/gnome.desktop; "
-                f"fi\n"
+                f"printf '%s\\n' {session_desktop_q} > /etc/blazeos-selected-session\n"
                 f"if [ -f /etc/gdm/custom.conf ]; then "
                 f"  sed -i 's/^DefaultSession=.*/DefaultSession={session_desktop}/' /etc/gdm/custom.conf 2>/dev/null || true; "
                 f"fi\n"

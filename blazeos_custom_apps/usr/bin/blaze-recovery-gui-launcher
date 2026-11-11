@@ -1,9 +1,9 @@
 #!/bin/bash
 # ==============================================================================
 # BlazeOS Recovery Environment (BERE) GUI Launcher
-# Root olarak DRM direct erişimi ile Niri compositor baslatilir.
-# seatd veya logind gerektirmez: LIBSEAT_BACKEND=direct yeterlidir.
-# Fallback: Weston kiosk. Her ikisi basarisiz olursa metin konsoluna duser.
+# Root olarak DRM direct erişimi ile Niri / Cage / Weston compositor baslatilir.
+# seatd veya logind gerektirmez: LIBSEAT_BACKEND=direct / seatd yeterlidir.
+# Fallback: Cage / Weston kiosk. Her ikisi basarisiz olursa metin konsoluna duser.
 # ==============================================================================
 set -euo pipefail
 
@@ -30,19 +30,20 @@ fi
 # Niri: seat grubu kontrolunu atla
 export NIRI_SKIP_SEAT_CHECK=1
 
-# XDG_RUNTIME_DIR hazirla
-mkdir -p /run/user/0
+# XDG_RUNTIME_DIR ve /run/log hazirla
+mkdir -p /run/user/0 /run/log
 chmod 0700 /run/user/0
+BERE_LOG="/run/log/bere-gui.log"
 
 log() {
-    echo "[BERE-GUI] $*" >&2
+    echo "[BERE-GUI] $*" | tee -a "$BERE_LOG" >&2
 }
 
 # seatd arka plan servisini baslat
 SEATD_PID=""
 cleanup() {
     if [ -n "$SEATD_PID" ]; then
-        kill "$SEATD_PID" 2>/dev/null || true
+        kill "$SEATD_PID" 2>>"$BERE_LOG" || true
     fi
 }
 trap cleanup EXIT INT TERM
@@ -50,7 +51,7 @@ trap cleanup EXIT INT TERM
 if command -v seatd >/dev/null 2>&1; then
     log "seatd arka plan servisi baslatiliyor..."
     rm -f /run/seatd.sock
-    seatd -u root -g root >/tmp/seatd.log 2>&1 &
+    seatd -u root -g root >>"$BERE_LOG" 2>>"$BERE_LOG" &
     SEATD_PID=$!
     for _ in $(seq 1 20); do
         if [ -S /run/seatd.sock ]; then
@@ -64,7 +65,7 @@ fi
 
 # DRM aygit dugumunu bekle (maks 6 saniye)
 log "DRM aygiti bekleniyor..."
-for i in $(seq 1 60); do
+for _ in $(seq 1 60); do
     if ls /dev/dri/card* >/dev/null 2>&1; then
         log "DRM hazir: $(ls /dev/dri/card*)"
         break
@@ -89,7 +90,7 @@ done
 if [ -n "$NIRI_BIN" ]; then
     log "Niri baslatiliyor (LIBSEAT_BACKEND=${LIBSEAT_BACKEND:-seatd}, SEATD_VTY=1)..."
     "$NIRI_BIN" --config /usr/share/berp-recovery/niri-recovery.kdl \
-        >/tmp/bere-niri.log 2>&1 &
+        >>"$BERE_LOG" 2>>"$BERE_LOG" &
     NIRI_PID=$!
     GUI_READY=0
     for _ in $(seq 1 80); do
@@ -102,36 +103,43 @@ if [ -n "$NIRI_BIN" ]; then
             GUI_READY=1
             break
         fi
-        kill -0 "$NIRI_PID" 2>/dev/null || break
+        kill -0 "$NIRI_PID" 2>>"$BERE_LOG" || break
         sleep 0.1
     done
     if [ "$GUI_READY" -eq 1 ]; then
         log "Niri hazir ($WAYLAND_DISPLAY). berp-recovery-gui bekleniyor..."
-        # berp-recovery-gui niri-recovery.kdl icinde spawn-at-startup ile baslatilir.
-        # Surec baslatilamadiysa veya niri tek basina calisiyorsa buradan tetikle:
         if ! pgrep -f berp-recovery-gui >/dev/null 2>&1; then
-            /usr/bin/berp-recovery-gui >/tmp/bere-gui.log 2>&1 &
+            /usr/bin/berp-recovery-gui >>"$BERE_LOG" 2>>"$BERE_LOG" &
         fi
-        wait "$NIRI_PID" 2>/dev/null || true
+        wait "$NIRI_PID" 2>>"$BERE_LOG" || true
         log "Niri oturumu tamamlandi."
         exit 0
     else
-        log "Niri GUI soketi olusmadi; log: /tmp/bere-niri.log"
-        kill "$NIRI_PID" 2>/dev/null || true
-        wait "$NIRI_PID" 2>/dev/null || true
+        log "Niri GUI soketi olusmadi; log: $BERE_LOG"
+        kill "$NIRI_PID" 2>>"$BERE_LOG" || true
+        wait "$NIRI_PID" 2>>"$BERE_LOG" || true
     fi
 fi
 
-# 2. Fallback: Weston kiosk modu (Weston 15 standard)
-if command -v weston >/dev/null 2>&1; then
-    log "Weston kiosk moduna geciliyor (--backend=drm --shell=kiosk)..."
-    if weston --backend=drm --shell=kiosk --log=/tmp/weston-recovery.log -- /usr/bin/berp-recovery-gui; then
+# 2. Fallback: Cage kiosk compositor
+if command -v cage >/dev/null 2>&1; then
+    log "Cage kiosk moduna geciliyor..."
+    if cage -s -- /usr/bin/berp-recovery-gui >>"$BERE_LOG" 2>>"$BERE_LOG"; then
         exit 0
     fi
-    log "Weston da basarisiz oldu. Log: /tmp/weston-recovery.log"
+    log "Cage basarisiz oldu. Log: $BERE_LOG"
 fi
 
-# 3. Hicbiri calismadi veya GUI kapandi: Asla siyah ekranda kalma, dogrudan BERP konsol TUI kurtarmasina gec
+# 3. Fallback: Weston kiosk modu (Weston 15 standard)
+if command -v weston >/dev/null 2>&1; then
+    log "Weston kiosk moduna geciliyor (--backend=drm --shell=kiosk)..."
+    if weston --backend=drm --shell=kiosk --log="$BERE_LOG" -- /usr/bin/berp-recovery-gui 2>>"$BERE_LOG"; then
+        exit 0
+    fi
+    log "Weston da basarisiz oldu. Log: $BERE_LOG"
+fi
+
+# 4. Hicbiri calismadi veya GUI kapandi: Asla siyah ekranda kalma, dogrudan BERP konsol TUI kurtarmasina gec
 log "BERP konsol (TUI) kurtarma moduna geciliyor..."
 if command -v reset >/dev/null 2>&1; then
     reset || true
