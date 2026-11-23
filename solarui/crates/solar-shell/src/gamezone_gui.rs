@@ -833,7 +833,6 @@ fn resolve_desktop_icon_path(icon_name: &str) -> Option<String> {
         return Some(icon_name.to_string());
     }
     let candidate_dirs = [
-        "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/icons/hicolor/128x128/apps",
         "/usr/share/icons/hicolor/128x128/apps",
         "/usr/share/icons/hicolor/48x48/apps",
         "/usr/share/icons/hicolor/64x64/apps",
@@ -901,10 +900,7 @@ fn create_nav_button(label_text: &str, icon_name_base: &str) -> Button {
 
     let icon_candidates = [
         format!("/usr/share/solarui/icons/{}.png", icon_name_base),
-        format!("/home/darkmorpheus/SolarUI/data/icons/gamezone/{}.png", icon_name_base),
         format!("/usr/share/solarui/icons/{}.svg", icon_name_base),
-        format!("/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/solarui/icons/{}.png", icon_name_base),
-        format!("/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/solarui/icons/{}.svg", icon_name_base),
     ];
     for ic in &icon_candidates {
         if Path::new(ic).exists() {
@@ -1674,8 +1670,6 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     if !avatar_loaded {
         let avatar_candidates = [
             "/usr/share/solarui/covers/user_avatar.png",
-            "/home/darkmorpheus/SolarUI/data/covers/user_avatar.png",
-            "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/solarui/covers/user_avatar.png",
         ];
         for ac in avatar_candidates {
             if let Ok(bytes) = std::fs::read(ac) {
@@ -2816,7 +2810,7 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
             }
         }
         if !icon_found {
-            let def_p = "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/icons/hicolor/128x128/apps/application-generic.png";
+            let def_p = "/usr/share/icons/hicolor/128x128/apps/application-generic.png";
             if Path::new(def_p).exists() {
                 app_img.set_filename(Some(Path::new(def_p)));
             }
@@ -2874,8 +2868,6 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     b1_pic.set_content_fit(gtk4::ContentFit::Cover);
     for b1_path in [
         "/usr/share/solarui/covers/bento_browse.png",
-        "/home/darkmorpheus/SolarUI/data/covers/bento_browse.png",
-        "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/solarui/covers/bento_browse.png",
     ] {
         if Path::new(b1_path).exists() {
             load_picture_file(&b1_pic, Path::new(b1_path));
@@ -2920,8 +2912,6 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     b2_pic.set_content_fit(gtk4::ContentFit::Cover);
     for b2_path in [
         "/usr/share/solarui/covers/bento_performance.png",
-        "/home/darkmorpheus/SolarUI/data/covers/bento_performance.png",
-        "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/solarui/covers/bento_performance.png",
     ] {
         if Path::new(b2_path).exists() {
             load_picture_file(&b2_pic, Path::new(b2_path));
@@ -2976,8 +2966,6 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     b3_pic.set_content_fit(gtk4::ContentFit::Cover);
     for b3_path in [
         "/usr/share/solarui/covers/bento_store.png",
-        "/home/darkmorpheus/SolarUI/data/covers/bento_store.png",
-        "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/solarui/covers/bento_store.png",
     ] {
         if Path::new(b3_path).exists() {
             load_picture_file(&b3_pic, Path::new(b3_path));
@@ -3029,8 +3017,6 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     b4_pic.set_content_fit(gtk4::ContentFit::Cover);
     for b4_path in [
         "/usr/share/solarui/covers/bento_settings.png",
-        "/home/darkmorpheus/SolarUI/data/covers/bento_settings.png",
-        "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/solarui/covers/bento_settings.png",
     ] {
         if Path::new(b4_path).exists() {
             load_picture_file(&b4_pic, Path::new(b4_path));
@@ -3509,8 +3495,6 @@ fn get_default_wallpaper_path() -> String {
     let candidates = [
         "/usr/share/blazeos/wallpapers/xbox_dynamic.png",
         "/usr/share/solarui/covers/xbox_dynamic.png",
-        "/home/darkmorpheus/SolarUI/data/covers/xbox_dynamic.png",
-        "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/blazeos/wallpapers/xbox_dynamic.png",
         "/usr/share/blazeos/wallpapers/galaxy.png",
         "/usr/share/blazeos/wallpapers/default.png",
         "/usr/share/blazeos/wallpapers/blazeos-wallpaper-1.png",
@@ -3716,8 +3700,6 @@ fn get_game_screenshot_path(game: &GameEntry) -> Option<String> {
     }
     let bundled_dirs = [
         "/usr/share/solarui/covers",
-        "/home/darkmorpheus/SolarUI/data/covers",
-        "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/solarui/covers",
     ];
     for d in bundled_dirs {
         for key in &check_keys {
@@ -3754,7 +3736,6 @@ fn get_game_trailer_path(game: &GameEntry) -> Option<String> {
     }
     let bundled_dirs = [
         "/usr/share/solarui/covers",
-        "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/solarui/covers",
     ];
     for d in bundled_dirs {
         for key in &check_keys {
@@ -3791,7 +3772,6 @@ fn get_game_cover_path(game: &GameEntry) -> Option<String> {
     }
     let bundled_dirs = [
         "/usr/share/solarui/covers",
-        "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/solarui/covers",
     ];
     for d in bundled_dirs {
         for key in &check_keys {
@@ -3818,8 +3798,6 @@ fn create_game_cover_image(game: &GameEntry) -> Picture {
     } else {
         let bundled = [
             "/usr/share/solarui/covers/steam-deck.jpg",
-            "/home/darkmorpheus/SolarUI/data/covers/steam-deck.jpg",
-            "/home/darkmorpheus/BlazeFedora/blazeos_custom_apps/usr/share/solarui/covers/steam-deck.jpg",
         ];
         for b in bundled {
             if Path::new(b).exists() {

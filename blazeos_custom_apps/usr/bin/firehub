@@ -14,7 +14,13 @@ fi
 FLAGS=()
 
 # 1. Wayland detection: enable Ozone native Wayland backend
-if [ -n "$WAYLAND_DISPLAY" ] || [ "$XDG_SESSION_TYPE" = "wayland" ]; then
+if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    export XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-wayland}"
+    FLAGS+=(
+        "--ozone-platform=wayland"
+        "--enable-features=WaylandWindowDecorations"
+    )
+elif [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; then
     FLAGS+=(
         "--ozone-platform-hint=auto"
         "--enable-features=WaylandWindowDecorations"
@@ -22,7 +28,7 @@ if [ -n "$WAYLAND_DISPLAY" ] || [ "$XDG_SESSION_TYPE" = "wayland" ]; then
 fi
 
 # 2. Virtual machine / software rendering / QEMU / KVM GPU safety
-if [ ! -e /dev/dri/renderD128 ] || grep -qiE "qemu|kvm|virtualbox|vmware" /sys/class/dmi/id/product_name 2>/dev/null; then
+if [ ! -e /dev/dri/renderD128 ] || systemd-detect-virt -q 2>/dev/null || grep -qiE "qemu|kvm|virtualbox|vmware" /sys/class/dmi/id/product_name /sys/class/dmi/id/sys_vendor 2>/dev/null; then
     FLAGS+=(
         "--disable-gpu-sandbox"
     )

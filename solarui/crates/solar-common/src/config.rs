@@ -31,6 +31,8 @@ pub struct MonitorOutputConfig {
     pub scale: f64,
     #[serde(default)]
     pub mode: Option<String>,
+    #[serde(default)]
+    pub custom_mode: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -43,7 +45,11 @@ pub struct DisplayConfig {
     #[serde(default = "default_text_scale")]
     pub text_scale: f64,
 
-    /// Per-output monitor configurations for independent multi-monitor scaling
+    /// Active user-selected desktop wallpaper path (shared across shells)
+    #[serde(default)]
+    pub wallpaper: String,
+
+    /// Per-output monitor configurations for independent multi-monitor scaling & mode
     #[serde(default)]
     pub outputs: Vec<MonitorOutputConfig>,
 }
@@ -61,6 +67,7 @@ impl Default for DisplayConfig {
         Self {
             scale: default_scale(),
             text_scale: default_text_scale(),
+            wallpaper: String::new(),
             outputs: Vec::new(),
         }
     }
@@ -346,6 +353,7 @@ pub enum ShellEngine {
     Caelestia,
     #[serde(rename = "end4-pc")]
     End4Pc,
+    We10x,
 }
 
 impl<'de> Deserialize<'de> for ShellEngine {
@@ -364,6 +372,7 @@ impl ShellEngine {
             ShellEngine::Noctalia => "noctalia",
             ShellEngine::Caelestia => "caelestia",
             ShellEngine::End4Pc => "end4-pc",
+            ShellEngine::We10x => "we10x",
         }
     }
 }
@@ -377,14 +386,15 @@ impl std::fmt::Display for ShellEngine {
 impl std::str::FromStr for ShellEngine {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().trim() {
+        match s.to_ascii_lowercase().trim() {
             "noctalia" | "noctalia-v5" | "native" => Ok(ShellEngine::Noctalia),
             "caelestia" | "quickshell" | "qml" => Ok(ShellEngine::Caelestia),
             "end4-pc" | "end4pc" | "end4" => Ok(ShellEngine::End4Pc),
+            "we10x" | "we10xos" | "win10" | "windows10" => Ok(ShellEngine::We10x),
             // Legacy Hybrid configurations migrate to the safe single-shell mode.
             "hybrid" | "mixed" | "surface-router" => Ok(ShellEngine::Noctalia),
             other => Err(format!(
-                "Bilinmeyen kabuk motoru: '{}'. Geçerli seçenekler: noctalia, caelestia, end4-pc",
+                "Bilinmeyen kabuk motoru: '{}'. Geçerli seçenekler: noctalia, caelestia, end4-pc, we10x",
                 other
             )),
         }
@@ -399,6 +409,7 @@ pub enum SurfaceProvider {
     Caelestia,
     #[serde(rename = "end4-pc")]
     End4Pc,
+    We10x,
     SolarUI,
 }
 
@@ -418,6 +429,7 @@ impl SurfaceProvider {
             SurfaceProvider::Noctalia => "noctalia",
             SurfaceProvider::Caelestia => "caelestia",
             SurfaceProvider::End4Pc => "end4-pc",
+            SurfaceProvider::We10x => "we10x",
             SurfaceProvider::SolarUI => "solarui",
         }
     }
@@ -432,13 +444,14 @@ impl std::fmt::Display for SurfaceProvider {
 impl std::str::FromStr for SurfaceProvider {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().trim() {
+        match s.to_ascii_lowercase().trim() {
             "noctalia" | "noctalia-v5" => Ok(SurfaceProvider::Noctalia),
             "caelestia" | "quickshell" => Ok(SurfaceProvider::Caelestia),
             "end4-pc" | "end4pc" | "end4" => Ok(SurfaceProvider::End4Pc),
+            "we10x" | "we10xos" | "win10" | "windows10" => Ok(SurfaceProvider::We10x),
             "solarui" | "native" => Ok(SurfaceProvider::SolarUI),
             other => Err(format!(
-                "Bilinmeyen sağlayıcı: '{}'. Geçerli seçenekler: noctalia, caelestia, end4-pc, solarui",
+                "Bilinmeyen sağlayıcı: '{}'. Geçerli seçenekler: noctalia, caelestia, end4-pc, we10x, solarui",
                 other
             )),
         }
@@ -473,7 +486,7 @@ impl std::fmt::Display for PerformanceProfile {
 impl std::str::FromStr for PerformanceProfile {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().trim() {
+        match s.to_ascii_lowercase().trim() {
             "legacy" | "low" | "battery" => Ok(PerformanceProfile::Legacy),
             "balanced" | "default" | "normal" => Ok(PerformanceProfile::Balanced),
             "ultra" | "high" | "full" => Ok(PerformanceProfile::Ultra),
@@ -499,6 +512,20 @@ pub struct SolarShellConfig {
     pub notifications_provider: SurfaceProvider,
     #[serde(default = "default_surface_noctalia")]
     pub osd_provider: SurfaceProvider,
+    #[serde(default = "default_we10x_start_icon")]
+    pub we10x_start_icon: String,
+    #[serde(default = "default_theme_mode")]
+    pub we10x_theme_mode: String,
+    #[serde(default = "default_true")]
+    pub we10x_desktop_icons: bool,
+    #[serde(default = "default_we10x_accent_color")]
+    pub we10x_accent_color: String,
+    #[serde(default)]
+    pub we10x_colorize_surfaces: bool,
+    #[serde(default = "default_we10x_taskbar_opacity_pct")]
+    pub we10x_taskbar_opacity_pct: u8,
+    #[serde(default)]
+    pub we10x_wallpaper: String,
 }
 
 fn default_surface_noctalia() -> SurfaceProvider {
@@ -506,6 +533,15 @@ fn default_surface_noctalia() -> SurfaceProvider {
 }
 fn default_surface_caelestia() -> SurfaceProvider {
     SurfaceProvider::Caelestia
+}
+fn default_we10x_start_icon() -> String {
+    "we10x".to_string()
+}
+fn default_we10x_accent_color() -> String {
+    "#0078D7".to_string()
+}
+fn default_we10x_taskbar_opacity_pct() -> u8 {
+    95
 }
 
 impl Default for SolarShellConfig {
@@ -517,6 +553,13 @@ impl Default for SolarShellConfig {
             bar_provider: SurfaceProvider::Noctalia,
             notifications_provider: SurfaceProvider::Noctalia,
             osd_provider: SurfaceProvider::Noctalia,
+            we10x_start_icon: default_we10x_start_icon(),
+            we10x_theme_mode: default_theme_mode(),
+            we10x_desktop_icons: true,
+            we10x_accent_color: default_we10x_accent_color(),
+            we10x_colorize_surfaces: false,
+            we10x_taskbar_opacity_pct: default_we10x_taskbar_opacity_pct(),
+            we10x_wallpaper: String::new(),
         }
     }
 }
@@ -668,7 +711,16 @@ mod tests {
             "end4-pc".parse::<ShellEngine>().unwrap(),
             ShellEngine::End4Pc
         );
-        assert!("invalid_engine".parse::<ShellEngine>().is_err());
+        assert_eq!(
+            "we10x".parse::<ShellEngine>().unwrap(),
+            ShellEngine::We10x
+        );
+        assert_eq!(
+            "win10".parse::<ShellEngine>().unwrap(),
+            ShellEngine::We10x
+        );
+        let err = "invalid_engine".parse::<ShellEngine>().unwrap_err();
+        assert!(err.contains("noctalia, caelestia, end4-pc, we10x"));
     }
 
     #[test]
@@ -688,6 +740,10 @@ mod tests {
         assert_eq!(
             "end4-pc".parse::<SurfaceProvider>().unwrap(),
             SurfaceProvider::End4Pc
+        );
+        assert_eq!(
+            "we10x".parse::<SurfaceProvider>().unwrap(),
+            SurfaceProvider::We10x
         );
         assert!("invalid_provider".parse::<SurfaceProvider>().is_err());
     }
@@ -755,5 +811,12 @@ enable_web_search = false
         assert_eq!(cfg.shell.engine, ShellEngine::Caelestia);
         assert!(cfg.omnibar.enabled);
         assert!(!cfg.omnibar.enable_web_search);
+    }
+
+    #[test]
+    fn turkish_locale_and_enum_case_insensitive_parsing() {
+        assert_eq!("NOCTALIA".parse::<ShellEngine>().unwrap(), ShellEngine::Noctalia);
+        assert_eq!("CAELESTIA".parse::<SurfaceProvider>().unwrap(), SurfaceProvider::Caelestia);
+        assert_eq!("ULTRA".parse::<PerformanceProfile>().unwrap(), PerformanceProfile::Ultra);
     }
 }

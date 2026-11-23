@@ -1,15 +1,19 @@
 use crate::engine::ShellEngine;
-use crate::providers::{CaelestiaProvider, End4PcProvider, NoctaliaProvider, ShellProvider};
+use crate::providers::{
+    CaelestiaProvider, End4PcProvider, NoctaliaProvider, ShellProvider, We10xProvider,
+};
 use crate::supervisor::{ActualEngine, SolarShellSupervisor};
 use anyhow::{bail, Context, Result};
 use std::time::Duration;
-use tracing::info;
+use tracing::{info, warn};
 
 pub struct SolarShellSwitcher {
     supervisor: SolarShellSupervisor,
     noctalia: Box<dyn ShellProvider>,
     full_caelestia: Box<dyn ShellProvider>,
     end4_pc: Box<dyn ShellProvider>,
+    we10x: Box<dyn ShellProvider>,
+    profile_sync_enabled: bool,
 }
 
 impl Default for SolarShellSwitcher {
@@ -19,6 +23,8 @@ impl Default for SolarShellSwitcher {
             noctalia: Box::new(NoctaliaProvider::new()),
             full_caelestia: Box::new(CaelestiaProvider::for_full()),
             end4_pc: Box::new(End4PcProvider::new()),
+            we10x: Box::new(We10xProvider::new()),
+            profile_sync_enabled: true,
         }
     }
 }
@@ -37,20 +43,23 @@ impl SolarShellSwitcher {
     }
 
     async fn actual(&self) -> ActualEngine {
-        let (n, c_full, e) = tokio::join!(
+        let (n, c_full, e, w) = tokio::join!(
             self.noctalia.health_check(),
             self.full_caelestia.health_check(),
-            self.end4_pc.health_check()
+            self.end4_pc.health_check(),
+            self.we10x.health_check(),
         );
         match (
             n.unwrap_or(false),
             c_full.unwrap_or(false),
             e.unwrap_or(false),
+            w.unwrap_or(false),
         ) {
-            (true, false, false) => ActualEngine::Noctalia,
-            (false, true, false) => ActualEngine::Caelestia,
-            (false, false, true) => ActualEngine::End4Pc,
-            (false, false, false) => ActualEngine::None,
+            (true, false, false, false) => ActualEngine::Noctalia,
+            (false, true, false, false) => ActualEngine::Caelestia,
+            (false, false, true, false) => ActualEngine::End4Pc,
+            (false, false, false, true) => ActualEngine::We10x,
+            (false, false, false, false) => ActualEngine::None,
             _ => ActualEngine::Conflict,
         }
     }
@@ -123,6 +132,11 @@ impl SolarShellSwitcher {
                 }
                 return Err(err);
             }
+        } else if target == ShellEngine::We10x && self.profile_sync_enabled {
+            // Ensure We10X Niri/GSettings profile stays reconciled even if Quickshell was already alive.
+            if let Err(e) = crate::we10x_profile::enter_we10x_profile().await {
+                warn!("Could not refresh We10X profile: {e}");
+            }
         }
         Ok(())
     }
@@ -132,6 +146,7 @@ impl SolarShellSwitcher {
             ShellEngine::Noctalia => &self.noctalia,
             ShellEngine::Caelestia => &self.full_caelestia,
             ShellEngine::End4Pc => &self.end4_pc,
+            ShellEngine::We10x => &self.we10x,
         };
         anyhow::ensure!(
             provider.is_installed().await,
@@ -174,6 +189,10 @@ impl SolarShellSwitcher {
             ShellEngine::Noctalia => {
                 self.full_caelestia.stop().await?;
                 self.end4_pc.stop().await?;
+                self.we10x.stop().await?;
+                if self.profile_sync_enabled {
+                    let _ = crate::we10x_profile::leave_we10x_profile().await;
+                }
                 self.noctalia.start().await?;
             }
             ShellEngine::Caelestia => {
@@ -182,12 +201,29 @@ impl SolarShellSwitcher {
 
                 self.noctalia.stop().await?;
                 self.end4_pc.stop().await?;
+                self.we10x.stop().await?;
+                if self.profile_sync_enabled {
+                    let _ = crate::we10x_profile::leave_we10x_profile().await;
+                }
                 self.full_caelestia.start().await?;
             }
             ShellEngine::End4Pc => {
                 self.noctalia.stop().await?;
                 self.full_caelestia.stop().await?;
+                self.we10x.stop().await?;
+                if self.profile_sync_enabled {
+                    let _ = crate::we10x_profile::leave_we10x_profile().await;
+                }
                 self.end4_pc.start().await?;
+            }
+            ShellEngine::We10x => {
+                self.noctalia.stop().await?;
+                self.full_caelestia.stop().await?;
+                self.end4_pc.stop().await?;
+                if self.profile_sync_enabled {
+                    crate::we10x_profile::enter_we10x_profile().await?;
+                }
+                self.we10x.start().await?;
             }
         }
         for _ in 0..100 {
@@ -204,6 +240,7 @@ impl SolarShellSwitcher {
             ActualEngine::Noctalia => ShellEngine::Noctalia,
             ActualEngine::Caelestia => ShellEngine::Caelestia,
             ActualEngine::End4Pc => ShellEngine::End4Pc,
+            ActualEngine::We10x => ShellEngine::We10x,
             ActualEngine::Conflict => {
                 bail!("Multiple full shells are active; no safe rollback target")
             }
@@ -258,6 +295,7 @@ mod tests {
         let ns = Arc::new(AtomicBool::new(n));
         let cs = Arc::new(AtomicBool::new(c));
         let es = Arc::new(AtomicBool::new(false));
+        let ws = Arc::new(AtomicBool::new(false));
         SolarShellSwitcher {
             supervisor: SolarShellSupervisor::new(),
             noctalia: Box::new(Fake {
@@ -278,6 +316,13 @@ mod tests {
                 fail_stop: false,
                 lie_about_start: false,
             }),
+            we10x: Box::new(Fake {
+                alive: ws,
+                fail_start: false,
+                fail_stop: false,
+                lie_about_start: false,
+            }),
+            profile_sync_enabled: false,
         }
     }
     #[tokio::test]
@@ -335,5 +380,29 @@ mod tests {
         });
         switcher.transition(ShellEngine::End4Pc).await.unwrap();
         assert_eq!(switcher.actual().await, ActualEngine::End4Pc);
+    }
+
+    #[tokio::test]
+    async fn we10x_transition_and_rollback_preserve_single_shell_ownership() {
+        let mut switcher = fixture(true, false, false, false);
+        switcher.transition(ShellEngine::We10x).await.unwrap();
+        assert_eq!(switcher.actual().await, ActualEngine::We10x);
+
+        // Switching back to Noctalia stops We10x and starts Noctalia
+        switcher.transition(ShellEngine::Noctalia).await.unwrap();
+        assert_eq!(switcher.actual().await, ActualEngine::Noctalia);
+
+        // Failed We10x start rolls back to Noctalia cleanly
+        switcher.we10x = Box::new(Fake {
+            alive: Arc::new(AtomicBool::new(false)),
+            fail_start: true,
+            fail_stop: false,
+            lie_about_start: false,
+        });
+        assert!(switcher
+            .transition_with_rollback(ShellEngine::We10x, &ActualEngine::Noctalia)
+            .await
+            .is_err());
+        assert_eq!(switcher.actual().await, ActualEngine::Noctalia);
     }
 }

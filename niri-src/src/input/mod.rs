@@ -48,7 +48,7 @@ use self::spatial_movement_grab::SpatialMovementGrab;
 #[cfg(feature = "dbus")]
 use crate::dbus::freedesktop_a11y::KbMonBlock;
 use crate::layout::scrolling::ScrollDirection;
-use crate::layout::{ActivateWindow, LayoutElement as _};
+use crate::layout::{ActivateWindow, HitType, LayoutElement as _, TitlebarButton};
 use crate::niri::{CastTarget, PointerVisibility, State};
 use crate::ui::mru::{WindowMru, WindowMruUi};
 use crate::ui::screenshot_ui::ScreenshotUi;
@@ -552,6 +552,33 @@ impl State {
 
                 if let Some(Keysym::space) = raw {
                     this.niri.screenshot_ui.set_space_down(pressed);
+                }
+
+                let is_super_sym = matches!(
+                    modified,
+                    Keysym::Super_L | Keysym::Super_R
+                ) || matches!(raw, Some(Keysym::Super_L | Keysym::Super_R));
+
+                if pressed {
+                    if is_super_sym {
+                        let non_super = modifiers.difference(Modifiers::SUPER);
+                        if non_super.is_empty() && this.niri.super_tap_candidate.is_none() {
+                            this.niri.super_tap_candidate = Some(key_code);
+                        } else {
+                            this.niri.super_tap_candidate = None;
+                        }
+                    } else {
+                        this.niri.super_tap_candidate = None;
+                    }
+                } else if is_super_sym {
+                    if this.niri.super_tap_candidate.take() == Some(key_code)
+                        && !is_inhibiting_shortcuts
+                    {
+                        let cmd = this.niri.config.borrow().super_tap_spawn.clone();
+                        if !cmd.is_empty() {
+                            spawn(cmd, None);
+                        }
+                    }
                 }
 
                 let res = {
@@ -2620,6 +2647,7 @@ impl State {
         self.niri.handle_focus_follows_mouse(&under);
 
         self.niri.pointer_contents.clone_from(&under);
+        self.niri.sync_hovered_titlebar_button();
 
         pointer.motion(
             self,
@@ -2721,6 +2749,7 @@ impl State {
         self.niri.handle_focus_follows_mouse(&under);
 
         self.niri.pointer_contents.clone_from(&under);
+        self.niri.sync_hovered_titlebar_button();
 
         pointer.motion(
             self,
@@ -2798,6 +2827,8 @@ impl State {
         let mod_down = modifiers.contains(mod_key.to_modifiers());
 
         if ButtonState::Pressed == button_state {
+            self.niri.super_tap_candidate = None;
+
             let mut is_mru_open = false;
             if let Some(mru_output) = self.niri.window_mru_ui.output() {
                 is_mru_open = true;
@@ -2918,6 +2949,94 @@ impl State {
 
             if let Some(mapped) = self.niri.window_under_cursor() {
                 let window = mapped.window.clone();
+                let last_tb_click = mapped.last_titlebar_click().get();
+
+                // Check if this click is on our Windows 10 server-side titlebar.
+                if button == Some(MouseButton::Left) && !pointer.is_grabbed() && !is_overview_open && !mod_down {
+                    let location = pointer.current_location();
+                    let under_hit = self
+                        .niri
+                        .contents_under(location)
+                        .window
+                        .and_then(|(w, h)| (w == window).then_some(h));
+                    if let Some(HitType::Titlebar { button: tb_btn }) = under_hit {
+                        self.niri.layout.activate_window(&window);
+                        self.niri.layer_shell_on_demand_focus = None;
+
+                        match tb_btn {
+                            Some(TitlebarButton::Minimize) => {
+                                self.niri.suppressed_buttons.insert(button_code);
+                                if let Some(t) = window.toplevel() {
+                                    let s = t.wl_surface().clone();
+                                    self.niri.minimize_window_by_surface(&s);
+                                }
+                                return;
+                            }
+                            Some(TitlebarButton::Maximize) => {
+                                self.niri.suppressed_buttons.insert(button_code);
+                                self.niri.layout.toggle_maximized(&window);
+                                self.niri.queue_redraw_all();
+                                return;
+                            }
+                            Some(TitlebarButton::Close) => {
+                                self.niri.suppressed_buttons.insert(button_code);
+                                if let Some(t) = window.toplevel() {
+                                    t.send_close();
+                                }
+                                return;
+                            }
+                            None => {
+                                let now = get_monotonic_time();
+                                if let Some(prev) = last_tb_click {
+                                    if now.saturating_sub(prev) <= DOUBLE_CLICK_TIME {
+                                        if let Some((m, _)) = window.toplevel().and_then(|t| {
+                                            self.niri.layout.find_window_and_output(t.wl_surface())
+                                        }) {
+                                            m.last_titlebar_click().set(None);
+                                        }
+                                        self.niri.suppressed_buttons.insert(button_code);
+                                        self.niri.layout.toggle_maximized(&window);
+                                        self.niri.queue_redraw_all();
+                                        return;
+                                    }
+                                }
+                                if let Some((m, _)) = window.toplevel().and_then(|t| {
+                                    self.niri.layout.find_window_and_output(t.wl_surface())
+                                }) {
+                                    m.last_titlebar_click().set(Some(now));
+                                }
+
+                                let start_data = PointerGrabStartData {
+                                    focus: None,
+                                    button: button_code,
+                                    location,
+                                };
+                                let start_data = AnyStartData::Pointer(start_data);
+                                if let Some(grab) = MoveGrab::new(
+                                    self,
+                                    start_data,
+                                    window.clone(),
+                                    false,
+                                    Some(CursorIcon::Default),
+                                ) {
+                                    pointer.set_grab(self, grab, serial, Focus::Clear);
+                                }
+                                self.niri.queue_redraw_all();
+                                pointer.button(
+                                    self,
+                                    &ButtonEvent {
+                                        button: button_code,
+                                        state: button_state,
+                                        serial,
+                                        time: event.time_msec(),
+                                    },
+                                );
+                                pointer.frame(self);
+                                return;
+                            }
+                        }
+                    }
+                }
 
                 // Check if we need to start an interactive move.
                 if button == Some(MouseButton::Left) && !pointer.is_grabbed() {
@@ -3110,6 +3229,7 @@ impl State {
         // We received an event for the regular pointer, so show it now. This is also needed for
         // update_pointer_contents() below to return the real contents, necessary for the pointer
         // axis event to reach the window.
+        self.niri.super_tap_candidate = None;
         self.niri.pointer_visibility = PointerVisibility::Visible;
         self.niri.tablet_cursor_location = None;
 
@@ -3930,6 +4050,7 @@ impl State {
     }
 
     fn on_gesture_swipe_begin<I: InputBackend>(&mut self, event: I::GestureSwipeBeginEvent) {
+        self.niri.super_tap_candidate = None;
         if self.niri.window_mru_ui.is_open() {
             // Don't start swipe gestures while in the MRU.
             return;
@@ -4248,6 +4369,7 @@ impl State {
     }
 
     fn on_touch_down<I: InputBackend>(&mut self, evt: I::TouchDownEvent) {
+        self.niri.super_tap_candidate = None;
         let Some(handle) = self.niri.seat.get_touch() else {
             return;
         };

@@ -47,13 +47,15 @@ class AuditRegressions(unittest.TestCase):
         self.assertIn('spawn-at-startup "/usr/libexec/blazeos-wayland-session-ready"', config)
         self.assertIn('spawn-at-startup "/usr/libexec/blazeos-wayland-session-ready"', skel_config)
         self.assertIn('import-environment WAYLAND_DISPLAY NIRI_SOCKET', helper)
-        self.assertIn('restart xdg-desktop-portal.service', helper)
+        self.assertIn('dbus-update-activation-environment --systemd WAYLAND_DISPLAY NIRI_SOCKET', helper)
+        self.assertIn('stop xdg-desktop-portal.service xdg-desktop-portal-gnome.service xdg-desktop-portal-gtk.service', helper)
+        self.assertNotIn('restart xdg-desktop-portal.service', helper)
 
     def test_installer_choices_run_before_oobe_and_display_manager(self):
         service = (OVERLAY / 'etc/systemd/system/blazeos-apply-install-choices.service').read_text()
-        helper = (OVERLAY / 'usr/local/bin/blazeos-apply-install-choices').read_text()
+        helper = (OVERLAY / 'usr/bin/blazeos-apply-install-choices').read_text()
         provision_service = (OVERLAY / 'etc/systemd/system/blazeos-desktop-provision.service').read_text()
-        provision = (OVERLAY / 'usr/local/bin/blazeos-desktop-provision').read_text()
+        provision = (OVERLAY / 'usr/bin/blazeos-desktop-provision').read_text()
         self.assertIn('Before=display-manager.service sddm.service blazeos-postinstall.service', service)
         self.assertNotIn('environment install', helper)
         self.assertIn('desktop-provision-pending', helper)
@@ -78,8 +80,8 @@ class AuditRegressions(unittest.TestCase):
 
     def test_installer_exposes_profile_and_safe_solarui_removal(self):
         webui = (OVERLAY / 'usr/share/cockpit/anaconda-webui/index.js').read_text()
-        provision = (OVERLAY / 'usr/local/bin/blazeos-desktop-provision').read_text()
-        remover = (OVERLAY / 'usr/local/bin/blazeos-remove-solarui').read_text()
+        provision = (OVERLAY / 'usr/bin/blazeos-desktop-provision').read_text()
+        remover = (OVERLAY / 'usr/bin/blazeos-remove-solarui').read_text()
         self.assertIn('Yalnızca masaüstü ortamı', webui)
         self.assertIn('Tüm masaüstü uygulamaları', webui)
         self.assertIn('SolarUI kaldırılsın mı?', webui)
@@ -89,7 +91,7 @@ class AuditRegressions(unittest.TestCase):
         for profile in ('light', 'daily', 'office', 'gaming', 'standard', 'developer'):
             self.assertIn(f'"{profile}"', webui)
         self.assertNotIn('{id:"hyprland",name:"Hyprland"', webui)
-        self.assertIn('/usr/local/bin/blazeos-remove-solarui', provision)
+        self.assertIn('/usr/bin/blazeos-remove-solarui', provision)
         self.assertIn('Refusing to remove SolarUI without a validated replacement session.', remover)
         self.assertNotIn('/usr/bin/blaze-recovery', remover)
 
@@ -100,7 +102,7 @@ class AuditRegressions(unittest.TestCase):
         self.assertIn('Session={selected_session}', source)
 
     def test_live_boot_exits_before_account_or_gdm_mutations(self):
-        source = (OVERLAY / 'usr/local/bin/blazeos-postinstall').read_text()
+        source = (OVERLAY / 'usr/bin/blazeos-postinstall').read_text()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / 'cmdline').write_text('quiet root=live:CDLABEL=Blaze-SE-5 rd.live.image\n')
@@ -114,7 +116,7 @@ class AuditRegressions(unittest.TestCase):
             self.assertIn('installed-system setup skipped', result.stdout)
 
     def test_missing_nvidia_module_does_not_retire_nouveau(self):
-        source = (OVERLAY / 'usr/local/bin/blazeos-nvidia-setup').read_text()
+        source = (OVERLAY / 'usr/bin/blazeos-nvidia-setup').read_text()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             bindir = root / 'bin'
@@ -141,7 +143,7 @@ class AuditRegressions(unittest.TestCase):
             self.assertFalse((root / 'modprobe/blazeos-nouveau-blacklist.conf').exists())
 
     def test_control_log_is_bounded(self):
-        tree = ast.parse((OVERLAY / 'usr/local/bin/blazeos-control').read_text())
+        tree = ast.parse((OVERLAY / 'usr/bin/blazeos-control').read_text())
         cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'BlazeControlWindow')
         method = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == 'append_log')
         ns = {}
@@ -164,7 +166,7 @@ class AuditRegressions(unittest.TestCase):
         self.assertTrue(obj.log_buffer.text.endswith('sonuç'))
 
     def test_session_sync_replaces_all_session_keys(self):
-        source = (OVERLAY / 'usr/local/bin/blazeos-postinstall').read_text()
+        source = (OVERLAY / 'usr/bin/blazeos-postinstall').read_text()
         block = source.split('# 4. Synchronize', 1)[1].split('# 5.', 1)[0]
         self.assertIn('/etc/blazeos-selected-session', block)
         self.assertIn('s/^Session=.*/Session=${SESSION_NAME}/', block)
@@ -177,7 +179,8 @@ class AuditRegressions(unittest.TestCase):
         dropin = (OVERLAY / 'etc/systemd/system/dnf5-offline-transaction.service.d/10-blazeos-ui.conf').read_text()
         theme = (OVERLAY / 'usr/share/plymouth/themes/blazeos/blazeos.script').read_text()
         self.assertIn('upgrade --offline -y', helper)
-        self.assertIn('offline reboot', helper)
+        self.assertIn('dnf5 -y offline reboot', helper)
+        self.assertIn('dnf5 -y offline clean', helper)
         self.assertNotIn('eval ', helper)
         self.assertNotIn('sh -c', helper)
         self.assertIn('/usr/bin/dnf5 offline _execute', wrapper)
@@ -202,7 +205,7 @@ class AuditRegressions(unittest.TestCase):
             self.assertEqual(hashlib.sha256(payload).hexdigest(), digest)
 
     def test_style_center_is_only_offered_after_gnome_or_kde_selection(self):
-        provision = (OVERLAY / 'usr/local/bin/blazeos-desktop-provision').read_text()
+        provision = (OVERLAY / 'usr/bin/blazeos-desktop-provision').read_text()
         launcher = (OVERLAY / 'usr/libexec/blaze-style-center-first-run').read_text()
         autostart = (OVERLAY / 'etc/xdg/autostart/blaze-style-center-first-run.desktop').read_text()
         source = (OVERLAY / 'usr/bin/blaze-style-center').read_text()
@@ -219,7 +222,7 @@ class AuditRegressions(unittest.TestCase):
         self.assertIn('dash-to-dock@micxgx.gmail.com', source)
 
     def test_appearance_is_integrated_and_dock_uses_session_helper(self):
-        control = (OVERLAY / 'usr/local/bin/blazeos-control').read_text()
+        control = (OVERLAY / 'usr/bin/blazeos-control').read_text()
         style = (OVERLAY / 'usr/bin/blaze-style-center').read_text()
         desktop = (OVERLAY / 'usr/share/applications/blaze-style-center.desktop').read_text()
         license_notice = OVERLAY / 'usr/share/licenses/blazeos-control/PARDUS-GNOME-GREETER-LICENSE'
@@ -233,12 +236,12 @@ class AuditRegressions(unittest.TestCase):
         self.assertIn('def command_line(', style)
         self.assertIn('NoDisplay=true', desktop)
         launcher = (OVERLAY / 'usr/libexec/blaze-style-center-first-run').read_text()
-        self.assertIn('exec /usr/local/bin/blazeos-control', launcher)
+        self.assertIn('exec /usr/bin/blazeos-control', launcher)
         self.assertIn('pardus/pardus-gnome-greeter', license_notice.read_text())
 
     def test_core_image_trim_keeps_profiles_explicit(self):
         build = (ROOT / 'build_f45_final.sh').read_text()
-        provision = (OVERLAY / 'usr/local/bin/blazeos-desktop-provision').read_text()
+        provision = (OVERLAY / 'usr/bin/blazeos-desktop-provision').read_text()
         self.assertIn('Trimming Workstation host payload', build)
         self.assertIn('libreoffice($|-)', build)
         self.assertIn('qemu-guest-agent', build)  # retained by the documented exclusion
@@ -251,7 +254,7 @@ class AuditRegressions(unittest.TestCase):
         self.assertIn('disable avahi-daemon.service', preset)
 
     def test_desktop_provision_and_end4_use_fedora45_abi(self):
-        provision = (OVERLAY / 'usr/local/bin/blazeos-desktop-provision').read_text()
+        provision = (OVERLAY / 'usr/bin/blazeos-desktop-provision').read_text()
         provider = (ROOT / 'solarui/crates/solar-shell/src/providers/end4_pc.rs').read_text()
         final_build = (ROOT / 'build_f45_final.sh').read_text()
         offline_build = (ROOT / 'build_f45_offline.sh').read_text()
@@ -319,8 +322,42 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
         self.assertIn('99-blaze-setup', bere_gui)
         self.assertIn('gen_grub_cfgstub', bere_gui)
         self.assertIn('efibootmgr', bere_gui)
+        self.assertIn('resolve_target_context', bere_gui)
+        self.assertIn('ensure_target_initramfs_has_death_screen', bere_gui)
+        self.assertNotIn('recovery-initramfs.img', bere_gui)
+        self.assertNotIn('"xorriso"', bere_gui)
+        for endpoint in (
+            '"delete_snapshot"',
+            '"disk_mklabel"',
+            '"part_create"',
+            '"part_format"',
+            '"part_delete"',
+            '"part_fsck"',
+            '"switch-to-limine"',
+        ):
+            self.assertIn(endpoint, bere_gui)
 
-        snap_script = (OVERLAY / 'usr/local/bin/blaze-snapshot').read_text()
+        bere_html = (OVERLAY / 'usr/share/berp-recovery/index.html').read_text()
+        bere_js = (OVERLAY / 'usr/share/berp-recovery/app.js').read_text()
+        for html_id in ('btn-disk-mklabel', 'btn-part-create', 'btn-repair-limine', 'btn-boot-status'):
+            self.assertIn(html_id, bere_html)
+            self.assertIn(html_id, bere_js)
+
+        death_screen = OVERLAY / 'usr/bin/blaze-death-screen'
+        self.assertTrue(death_screen.is_file())
+        death_text = death_screen.read_text()
+        self.assertTrue(death_text.startswith('#!/usr/bin/sh'))
+        self.assertIn('CRITICAL SYSTEM FAULT / EMERGENCY RECOVERY', death_text)
+        res_sh = subprocess.run(['sh', '-n', str(death_screen)], capture_output=True, text=True, timeout=10)
+        self.assertEqual(res_sh.returncode, 0, res_sh.stderr)
+
+        dracut_mod = OVERLAY / 'usr/lib/dracut/modules.d/99blaze-bere/module-setup.sh'
+        dracut_conf = OVERLAY / 'etc/dracut.conf.d/99-blaze-bere.conf'
+        self.assertTrue(dracut_mod.is_file())
+        self.assertTrue(dracut_conf.is_file())
+        self.assertIn('blaze-bere', dracut_conf.read_text())
+
+        snap_script = (OVERLAY / 'usr/bin/blaze-snapshot').read_text()
         self.assertIn("sed 's/\\[.*//'", snap_script)
         self.assertIn('ro false', snap_script)
         self.assertIn('dnf-pre', snap_script)
@@ -333,9 +370,10 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
             OVERLAY / 'usr/share/solarui/niri.kdl',
             OVERLAY / 'etc/skel/.config/solarui/niri.kdl',
         ]
+        niri_bin = str(OVERLAY / 'usr/bin/niri') if (OVERLAY / 'usr/bin/niri').is_file() else 'niri'
         for nf in niri_files:
             self.assertTrue(nf.is_file(), f'Missing {nf}')
-            res = subprocess.run(['niri', 'validate', '-c', str(nf)], capture_output=True, text=True, timeout=10)
+            res = subprocess.run([niri_bin, 'validate', '-c', str(nf)], capture_output=True, text=True, timeout=10)
             self.assertEqual(res.returncode, 0, f'niri validate failed for {nf}: {res.stderr}')
 
         # Verify SolarEnginePage.qml consistency and zero 'hybrid' references
@@ -412,18 +450,548 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
         self.assertIn('Session=blaze-oobe.desktop', oobe_sddm)
         self.assertIn('User=blaze-setup', oobe_sddm)
         self.assertIn('MinimumUid=900', oobe_sddm)
+        self.assertIn('RememberLastUser=false', oobe_sddm)
+
+        main_sddm = (OVERLAY / 'etc/sddm.conf').read_text()
+        self.assertIn('HideUsers=blaze-setup,liveuser', main_sddm)
+        self.assertNotIn('\nMinimumUid=1000', main_sddm)
 
         sddm_pam = (OVERLAY / 'etc/pam.d/sddm-autologin').read_text()
         self.assertIn('user in blaze-setup:liveuser', sddm_pam)
+        self.assertIn('pam_selinux.so close', sddm_pam)
+        self.assertIn('pam_selinux.so open', sddm_pam)
+        self.assertNotIn('pam_oo7.so', sddm_pam)
+
+        # Verify SDDM wayland-session splits multi-arg strings (exec $@, NOT exec "$@") and OOBE wrapper exists
+        ws_script = OVERLAY / 'etc/sddm/wayland-session'
+        ws_txt = ws_script.read_text()
+        self.assertNotIn('exec "$@"' , ws_txt)
+        self.assertIn('exec $@', ws_txt)
+        oobe_wrapper = OVERLAY / 'usr/libexec/blaze-oobe-session'
+        self.assertTrue(os.access(oobe_wrapper, os.X_OK), 'Missing executable /usr/libexec/blaze-oobe-session')
+        oobe_desktop = (OVERLAY / 'usr/share/wayland-sessions/blaze-oobe.desktop').read_text()
+        self.assertIn('Exec=/usr/libexec/blaze-oobe-session', oobe_desktop)
+        niri_setup_kdl = (OVERLAY / 'usr/share/blaze-setup/niri-setup.kdl').read_text()
+        self.assertIn('layout "tr,tr,us,de"', niri_setup_kdl)
+        with tempfile.TemporaryDirectory() as tmp:
+            split_res = subprocess.run(
+                ['sh', str(ws_script), 'echo BLAZE_SDDM_SPLIT_OK --flag'],
+                env={'HOME': tmp, 'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'SHELL': '/bin/sh'},
+                cwd=tmp,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            self.assertEqual(split_res.returncode, 0, split_res.stderr)
+            self.assertIn('BLAZE_SDDM_SPLIT_OK --flag', split_res.stdout)
 
         postinstall_svc = (OVERLAY / 'etc/systemd/system/blazeos-postinstall.service').read_text()
         self.assertIn('Before=display-manager.service gdm.service sddm.service', postinstall_svc)
         self.assertIn('After=local-fs.target', postinstall_svc)
         self.assertNotIn('After=NetworkManager.service', postinstall_svc)
 
+        postinstall_sh = (OVERLAY / 'usr/bin/blazeos-postinstall').read_text()
+        self.assertIn('blaze-setup::20726::::::', postinstall_sh)
+        self.assertIn('/var/lib/sddm/state.conf', postinstall_sh)
+
         inst_py = (OVERLAY / 'usr/lib64/python3.15/site-packages/pyanaconda/modules/boss/installation.py').read_text()
         self.assertIn('blazeos-apply-install-choices.service', inst_py)
-        self.assertIn('target_autologin', inst_py)
+        self.assertIn('etc/sddm.conf.d/autologin.conf', inst_py)
+        self.assertIn('_ensure_oobe_account_integrity', inst_py)
+        self.assertIn('_provision_bere_vault', inst_py)
+
+    def test_bere_immutable_vault_and_usb_iso_manager_integrity(self):
+        # 1. Physical BLAZE_REC GPT PartSpec (unencrypted, outside Btrfs/LVM)
+        auto_utils = (
+            OVERLAY / 'usr/lib64/python3.15/site-packages/pyanaconda/modules/storage/partitioning/automatic/utils.py'
+        ).read_text()
+        self.assertIn('mountpoint="/boot/bere-vault"', auto_utils)
+        self.assertIn('Size("2560MiB")', auto_utils)
+        self.assertIn('lv=False', auto_utils)
+        self.assertIn('btr=False', auto_utils)
+        self.assertIn('encrypted=False', auto_utils)
+
+        # 2. Udev desktop hiding rule + vault provisioner GPT RequiredPartition/ReadOnly lock
+        udev_rule = (OVERLAY / 'etc/udev/rules.d/99-blaze-recovery-vault.rules').read_text()
+        self.assertIn('ENV{ID_FS_LABEL}=="BLAZE_REC"', udev_rule)
+        self.assertIn('ENV{UDISKS_IGNORE}="1"', udev_rule)
+
+        prov_sh = (OVERLAY / 'usr/libexec/blazeos-provision-bere-vault').read_text()
+        self.assertIn('e2label "$VAULT_DEV" BLAZE_REC', prov_sh)
+        self.assertIn('RequiredPartition,60', prov_sh)
+
+        # 3. Bootloaders & Crash Screen kexec into BLAZE_REC
+        grub_berp = (OVERLAY / 'etc/grub.d/99_berp').read_text()
+        self.assertIn('blkid -L BLAZE_REC', grub_berp)
+        self.assertIn('vmlinuz-bere', grub_berp)
+
+        death_sh = (OVERLAY / 'usr/bin/blaze-death-screen').read_text()
+        self.assertIn('BLAZE_REC', death_sh)
+        self.assertIn('kexec -l /run/bere_vault/boot/vmlinuz-bere', death_sh)
+
+        # 4. BERE GUI vault lock + USB Explorer + ISO Pull + Multi-Distro + rd.live.ram + kexec
+        bere_py = (OVERLAY / 'usr/bin/berp-recovery-gui').read_text()
+        for sym in (
+            'is_protected_recovery_device',
+            'endpoint == "usb_devices"',
+            'endpoint == "usb_browse"',
+            'endpoint == "iso_targets"',
+            'endpoint == "iso_pull"',
+            'endpoint == "iso_pull_status"',
+            'endpoint == "iso_delete"',
+            'endpoint == "iso_inspect"',
+            'rd.live.ram=1',
+            'copytoram=y',
+            '"engine_used": "kexec"',
+        ):
+            self.assertIn(sym, bere_py)
+
+        bere_html = (OVERLAY / 'usr/share/berp-recovery/index.html').read_text()
+        self.assertIn('id="usb-device-list"', bere_html)
+        self.assertIn('id="btn-pull-iso"', bere_html)
+        self.assertIn('id="iso-copy-to-ram"', bere_html)
+        self.assertIn('id="iso-boot-engine"', bere_html)
+
+    def test_we10x_shell_assets_oobe_and_zero_sddm_integrity(self):
+        # 1. SolarEnginePage.qml 3-copy parity includes we10x
+        qml_txt = (ROOT / 'solarui/vendor/caelestia-shell/modules/nexus/pages/solarui/SolarEnginePage.qml').read_text()
+        self.assertIn('"we10x"', qml_txt)
+
+        # 2. All 5 We10XOS wallpapers, We10X icon theme, and Quickshell QML modules exist with ZERO sddm content
+        for variant in ('dark', 'light', 'black', 'green', 'purple'):
+            wp = OVERLAY / f'usr/share/backgrounds/blazeos/we10x/We10XOS-{variant}.png'
+            self.assertTrue(wp.is_file(), f'Missing We10X wallpaper: {wp}')
+
+        self.assertTrue((OVERLAY / 'usr/share/icons/We10X/index.theme').is_file())
+        for qml_mod in (
+            'shell.qml',
+            'UPSTREAM.md',
+            'LICENSE',
+            'modules/Taskbar.qml',
+            'modules/StartMenu.qml',
+            'modules/ActionCenter.qml',
+            'modules/CalendarFlyout.qml',
+            'modules/DesktopIcons.qml',
+            'modules/AltTabSwitcher.qml',
+            'modules/AeroSnapOverlay.qml',
+        ):
+            self.assertTrue((ROOT / 'solarui/vendor/we10x-shell' / qml_mod).is_file(), f'Missing {qml_mod}')
+            self.assertTrue((OVERLAY / 'usr/share/quickshell/we10x' / qml_mod).is_file(), f'Missing overlay {qml_mod}')
+
+        for tree in (
+            ROOT / 'solarui/vendor/we10x-shell',
+            OVERLAY / 'usr/share/quickshell/we10x',
+            OVERLAY / 'usr/share/icons/We10X',
+            OVERLAY / 'usr/share/backgrounds/blazeos/we10x',
+        ):
+            for child in tree.rglob('*'):
+                self.assertNotIn('sddm', child.name.lower(), f'Forbidden sddm asset in We10X tree: {child}')
+
+        # 3. SOURCES.md documents GPL-3.0 We10XOS-kde upstream
+        sources_md = (ROOT / 'SOURCES.md').read_text()
+        self.assertIn('We10XOS-kde', sources_md)
+        self.assertIn('GPL-3.0', sources_md)
+
+        # 4. OOBE 2x2 card, JS engineLabel mapping, offline/RPM build parity, and CLI provision-user roundtrip
+        oobe_html = (OVERLAY / 'usr/share/blaze-setup/index.html').read_text()
+        self.assertIn('data-engine="we10x"', oobe_html)
+        self.assertIn("WINDOWS'TAN GEÇENLER İÇİN", oobe_html)
+
+        oobe_js = (OVERLAY / 'usr/share/blaze-setup/app.js').read_text()
+        self.assertIn('setupData.layout === "we10x" ? "We10X"', oobe_js)
+
+        oobe_bin = (OVERLAY / 'usr/bin/blaze-setup').read_text()
+        self.assertIn('"we10x-config", "provision-user"', oobe_bin)
+
+        we10x_state_qml = (ROOT / 'solarui/vendor/we10x-shell/modules/We10xState.qml').read_text()
+        self.assertIn('Quickshell.hasThemeIcon(', we10x_state_qml)
+        self.assertNotIn('Quickshell.iconPath(iconName, true)', we10x_state_qml)
+        for qml_shell in (
+            ROOT / 'solarui/vendor/we10x-shell/shell.qml',
+            OVERLAY / 'usr/share/quickshell/we10x/shell.qml',
+        ):
+            qml_src = qml_shell.read_text()
+            self.assertNotIn('sourceComponent:', qml_src)
+            self.assertIn('component: StartMenu {}', qml_src)
+
+        offline_sh = (ROOT / 'build_f45_offline.sh').read_text()
+        self.assertIn('we10x-shell', offline_sh)
+        build_rpm_sh = (ROOT / 'solarui/scripts/build-rpm.sh').read_text()
+        self.assertIn('/usr/share/quickshell/we10x', build_rpm_sh)
+
+        solar_shell = OVERLAY / 'usr/bin/solar-shell'
+        probe = subprocess.run([str(solar_shell), 'switch', '__invalid_probe__'], capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(probe.returncode, 0)
+        self.assertIn('noctalia, caelestia, end4-pc, we10x', probe.stdout + probe.stderr)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_home = Path(tmp) / 'newuser'
+            tmp_home.mkdir()
+            prov = subprocess.run(
+                [str(solar_shell), 'we10x-config', 'provision-user', str(tmp_home), 'dark'],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            self.assertEqual(prov.returncode, 0, prov.stderr)
+            self.assertIn('SOLARUI-WE10X-PROFILE-ACTIVE', (tmp_home / '.config/solarui/niri.kdl').read_text())
+            self.assertTrue((tmp_home / '.local/state/solarui/pre-we10x-snapshot.json').is_file())
+            self.assertIn('#e81123', (tmp_home / '.config/gtk-4.0/gtk.css').read_text())
+            self.assertTrue((tmp_home / '.config/niri/config.kdl').is_symlink())
+
+    def test_wallpaper_firehub_titlebar_and_display_personalization_integrity(self):
+        # 1. Default BlazeOS & We10X Niri configs both enable 30px server-titlebar for FireHub & SSD apps
+        sys_niri = (OVERLAY / 'etc/solarui/niri.kdl').read_text()
+        skel_niri = (OVERLAY / 'etc/skel/.config/solarui/niri.kdl').read_text()
+        self.assertEqual(sys_niri, skel_niri)
+        self.assertIn('server-titlebar {', sys_niri)
+        self.assertIn('allow-minimize false', sys_niri)
+        self.assertIn('match app-id=r#"^(FireHub|firehub)$"#', sys_niri)
+
+        wm_override = (OVERLAY / 'usr/share/glib-2.0/schemas/99_blazeos-wm.gschema.override').read_text()
+        self.assertIn("button-layout='appmenu:maximize,close'", wm_override)
+        self.assertNotIn('minimize', wm_override)
+
+        we10x_rs = (ROOT / 'solarui/crates/solar-shell/src/we10x_profile.rs').read_text()
+        self.assertIn('match app-id=r#"^(FireHub|firehub)$"#', we10x_rs)
+        self.assertIn('build_we10x_niri_kdl_with_options', we10x_rs)
+        self.assertIn('allow-minimize true', we10x_rs)
+        self.assertIn('ShellEngine::We10x', we10x_rs)
+        shell_main_rs = (ROOT / 'solarui/crates/solar-shell/src/main.rs').read_text()
+        self.assertIn('cfg.shell.engine != engine::ShellEngine::We10x', shell_main_rs)
+
+        lf_rs = (ROOT / 'solarui/crates/solar-shell/src/living_flow.rs').read_text()
+        self.assertIn('Button::with_label("□")', lf_rs)
+
+        # 2. SolarUI Settings Display Resolution/Hz + Wallpaper + We10X Red/Custom Hex Personalization
+        settings_rs = (ROOT / 'solarui/crates/solar-shell/src/settings_gui.rs').read_text()
+        for sym in (
+            'build_personalize_tab',
+            'build_we10x_customization_card',
+            'apply_per_output_mode_dynamically',
+            'rewrite_niri_kdl_output_mode',
+            'ColorDialogButton',
+            '"#e81123"',
+            'Yenileme Hızı (Hz):',
+        ):
+            self.assertIn(sym, settings_rs)
+
+        # 3. CLI round-trip for wallpaper list & We10X custom accent color
+        solar_shell = OVERLAY / 'usr/bin/solar-shell'
+        wp_list = subprocess.run([str(solar_shell), 'wallpaper', 'list'], capture_output=True, text=True, timeout=10)
+        self.assertEqual(wp_list.returncode, 0, wp_list.stderr)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {**os.environ, 'HOME': tmp}
+            set_acc = subprocess.run(
+                [str(solar_shell), 'we10x-config', 'set-accent', '#E81123'],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            self.assertEqual(set_acc.returncode, 0, set_acc.stderr)
+            set_col = subprocess.run(
+                [str(solar_shell), 'we10x-config', 'set-colorize', 'true'],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            self.assertEqual(set_col.returncode, 0, set_col.stderr)
+            get_cfg = subprocess.run(
+                [str(solar_shell), 'we10x-config', 'get'],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            self.assertEqual(get_cfg.returncode, 0, get_cfg.stderr)
+            import json as _json
+            parsed = _json.loads(get_cfg.stdout)
+            self.assertEqual(parsed['accent_color'], '#e81123')
+            self.assertTrue(parsed['colorize_surfaces'])
+
+    def test_blazehouse_live_progress_and_offline_status(self):
+        bh_root = Path(os.environ.get('BLAZE_HOUSE_SRC') or (ROOT.parent / 'blaze-house/modern-ui'))
+        if bh_root.is_dir():
+            actions_rs = (bh_root / 'src-tauri/src/commands/system_actions.rs').read_text()
+            lib_rs = (bh_root / 'src-tauri/src/lib.rs').read_text()
+            update_view = (bh_root / 'src/views/SystemUpdateView.tsx').read_text()
+            bridge_ts = (bh_root / 'src/services/tauriBridge.ts').read_text()
+            self.assertIn('offline-update-progress', actions_rs)
+            self.assertIn('get_offline_update_status', actions_rs)
+            self.assertIn('get_offline_update_status', lib_rs)
+            self.assertIn('role="progressbar"', update_view)
+            self.assertIn('subscribeOfflineUpdateProgress', update_view)
+            self.assertIn('getOfflineUpdateStatus', bridge_ts)
+        helper = (OVERLAY / 'usr/libexec/blazeos-update').read_text()
+        self.assertIn('/usr/bin/script', helper)
+        self.assertIn('/usr/bin/dnf5 --refresh upgrade --offline -y', helper)
+
+    def test_bere_and_berp_mandatory_auth_and_optical_media_detection(self):
+        bere_gui = (OVERLAY / 'usr/bin/berp-recovery-gui').read_text()
+        compile(bere_gui, 'berp-recovery-gui', 'exec')
+        app_js = (OVERLAY / 'usr/share/berp-recovery/app.js').read_text()
+        idx_html = (OVERLAY / 'usr/share/berp-recovery/index.html').read_text()
+        death_sh = (OVERLAY / 'usr/bin/blaze-death-screen').read_text()
+        berp_rs = (ROOT / 'solarui/crates/blaze-recovery/src/main.rs').read_text()
+
+        # No optional password labels anywhere in BERE
+        self.assertNotIn('İsteğe Bağlı', app_js)
+        self.assertNotIn('Şifresi (İsteğe Bağlı)', idx_html)
+        self.assertIn('bere-lock-overlay', idx_html)
+        self.assertIn('modal-action-auth', idx_html)
+        self.assertIn('auth_unlock', app_js)
+        self.assertIn('DVD/ISO', app_js)
+        self.assertIn('Kurulum Medyası (DVD/ISO)', bere_gui)
+        self.assertIn('media://', bere_gui)
+        self.assertIn('_require_action_password', bere_gui)
+        self.assertIn('--verify-auth', death_sh)
+        self.assertIn('--verify-auth', berp_rs)
+        self.assertIn('collect_admin_hashes_at', berp_rs)
+
+        # Functional test of offline shadow hash verification (policy A1)
+        ns = {}
+        from importlib.machinery import SourceFileLoader
+        mod = SourceFileLoader('berp_gui_test', str(OVERLAY / 'usr/bin/berp-recovery-gui')).load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            etc = Path(tmp) / 'etc'
+            etc.mkdir()
+            import ctypes
+            libcrypt = ctypes.CDLL('libcrypt.so.2')
+            libcrypt.crypt.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+            libcrypt.crypt.restype = ctypes.c_char_p
+            wh = libcrypt.crypt(b'AdminPass#2026', b'$6$salt1234$').decode()
+            gh = libcrypt.crypt(b'GuestPass#2026', b'$6$salt5678$').decode()
+            (etc / 'group').write_text('root:x:0:\nwheel:x:10:blazeuser\nusers:x:100:\n')
+            (etc / 'passwd').write_text('root:x:0:0:root:/root:/bin/bash\nblazeuser:x:1000:1000:B:/home/blazeuser:/bin/bash\nguest:x:1001:100:G:/home/guest:/bin/bash\n')
+            (etc / 'shadow').write_text(f'root:!:19000:0:99999:7:::\nblazeuser:{wh}:19000:0:99999:7:::\nguest:{gh}:19000:0:99999:7:::\n')
+
+            orig_resolve = mod.resolve_target_context
+            mod.resolve_target_context = lambda auto_mount=True: (tmp, False, '/dev/vda1', 'root', 'ext4', False)
+            try:
+                entries, req, users = mod.get_target_admin_hashes(auto_mount=False)
+                self.assertTrue(req)
+                self.assertEqual(users, ['blazeuser'])
+                self.assertEqual(mod.verify_target_admin_password('AdminPass#2026', entries), 'blazeuser')
+                self.assertEqual(mod.verify_target_admin_password('GuestPass#2026', entries), '')
+                self.assertEqual(mod.verify_target_admin_password('wrong', entries), '')
+                self.assertEqual(mod.verify_target_admin_password('', entries), '')
+            finally:
+                mod.resolve_target_context = orig_resolve
+
+    def test_deep_identity_persistence_and_anaconda_reinstall_integrity(self):
+        id_dir = OVERLAY / 'usr/share/blazeos/identity'
+        for name in ('os-release', 'fedora-release', 'blazeos-release', 'system-release-cpe', 'issue', 'issue.net', 'buildstamp'):
+            self.assertTrue((id_dir / name).is_file(), f'Missing canonical identity file: {name}')
+
+        self.assertEqual((OVERLAY / 'etc/os-release').read_text(), (id_dir / 'os-release').read_text())
+        self.assertEqual((OVERLAY / 'usr/lib/os-release').read_text(), (id_dir / 'os-release').read_text())
+        self.assertEqual((OVERLAY / 'usr/lib/fedora-release').read_text().strip(), 'Blaze SolarEvolution release 5.05 (SolarEvolution)')
+        self.assertIn('GRUB_DISTRIBUTOR="Blaze SolarEvolution"', (OVERLAY / 'etc/default/grub').read_text())
+        self.assertEqual((OVERLAY / 'etc/dnf/vars/releasever').read_text().strip(), '45')
+        self.assertIn('excludepkgs=fedora-release*', (OVERLAY / 'etc/dnf/libdnf5.conf.d/10-blaze-identity.conf').read_text())
+        self.assertIn('profile_id = blazeos-solarevolution', (OVERLAY / 'etc/anaconda/profile.d/blazeos-solarevolution.conf').read_text())
+        self.assertIn('Product=Blaze SolarEvolution', (OVERLAY / '.buildstamp').read_text())
+
+        for link_rel, target in (
+            ('etc/fedora-release', '../usr/lib/fedora-release'),
+            ('etc/redhat-release', 'fedora-release'),
+            ('etc/system-release', 'fedora-release'),
+        ):
+            p = OVERLAY / link_rel
+            self.assertTrue(p.is_symlink(), f'{link_rel} must be a symlink')
+            self.assertEqual(os.readlink(p), target)
+
+        webui_js = (OVERLAY / 'usr/share/cockpit/anaconda-webui/index.js').read_text()
+        self.assertIn('n["os-name"].v.includes("Blaze")', webui_js)
+        self.assertIn('m["os-name"].v.includes("Blaze")', webui_js)
+        self.assertIn('bztBrand(', webui_js)
+
+        sync_bin = OVERLAY / 'usr/bin/blazeos-sync-identity'
+        self.assertTrue(os.access(sync_bin, os.X_OK))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            import shutil as _shutil
+            _shutil.copytree(id_dir, root / 'usr/share/blazeos/identity')
+            for d in ('etc/default', 'etc/dnf/vars', 'etc/dnf/libdnf5.conf.d', 'etc/dnf/protected.d', 'etc/anaconda/profile.d', 'usr/lib', 'boot/loader/entries'):
+                (root / d).mkdir(parents=True, exist_ok=True)
+            (root / 'usr/lib/os-release').write_text('NAME="Fedora Linux"\nVERSION_ID=45\nPRETTY_NAME="Fedora Linux 45 (Workstation Edition)"\n')
+            (root / 'usr/lib/fedora-release').write_text('Fedora release 45 (Forty Five)\n')
+            (root / 'etc/default/grub').write_text('GRUB_TIMEOUT=10\nGRUB_DISTRIBUTOR="$(sed \'s, release .*$,,g\' /etc/system-release)"\nGRUB_ENABLE_BLSCFG=true\n')
+            (root / 'boot/loader/entries/abc-7.3.4-300.fc45.x86_64.conf').write_text(
+                'title Fedora Linux (7.3.4-300.fc45.x86_64) 45 (Workstation Edition)\n'
+                'version 7.3.4-300.fc45.x86_64\n'
+                'linux /vmlinuz-7.3.4-300.fc45.x86_64\n'
+                'grub_class fedora\n'
+            )
+            (root / 'boot/loader/entries/abc-7.2.11-300.fc45.x86_64~debug.conf').write_text(
+                'title Fedora Linux (7.2.11-300.fc45.x86_64) 45 (Workstation Edition) with debugging\n'
+                'version 7.2.11-300.fc45.x86_64~debug\n'
+                'linux /vmlinuz-7.2.11-300.fc45.x86_64\n'
+                'grub_class fedora\n'
+            )
+            (root / 'boot/loader/entries/abc-snapshot.conf').write_text(
+                'title Blaze snapshot 20261123 (kernel 7.2.11-300.fc45.x86_64)\n'
+                'version 7.2.11-300.fc45.x86_64\n'
+            )
+
+            res = subprocess.run([str(sync_bin), f'--sysroot={root}'], capture_output=True, text=True, timeout=15)
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            self.assertIn('PRETTY_NAME="Blaze SolarEvolution 5.05"', (root / 'usr/lib/os-release').read_text())
+            self.assertEqual((root / 'usr/lib/fedora-release').read_text().strip(), 'Blaze SolarEvolution release 5.05 (SolarEvolution)')
+            self.assertIn('GRUB_DISTRIBUTOR="Blaze SolarEvolution"', (root / 'etc/default/grub').read_text())
+            self.assertEqual((root / 'etc/dnf/vars/releasever').read_text().strip(), '45')
+
+            bls1 = (root / 'boot/loader/entries/abc-7.3.4-300.fc45.x86_64.conf').read_text()
+            self.assertIn('title Blaze SolarEvolution (7.3.4-300.fc45.x86_64) 5.05', bls1)
+            self.assertIn('grub_class blazeos', bls1)
+            bls2 = (root / 'boot/loader/entries/abc-7.2.11-300.fc45.x86_64~debug.conf').read_text()
+            self.assertIn('title Blaze SolarEvolution (7.2.11-300.fc45.x86_64) 5.05 with debugging', bls2)
+            snap_bls = (root / 'boot/loader/entries/abc-snapshot.conf').read_text()
+            self.assertIn('title Blaze snapshot 20261123 (kernel 7.2.11-300.fc45.x86_64)', snap_bls)
+
+            res2 = subprocess.run([str(sync_bin), f'--sysroot={root}', '--check'], capture_output=True, text=True, timeout=15)
+            self.assertEqual(res2.returncode, 0, res2.stdout + res2.stderr)
+            self.assertNotIn('Identity sync completed', res2.stdout)
+
+            # Verify major releasever transition preservation (e.g. 45 -> 46)
+            chan_dir = root / 'etc/blazeos'
+            chan_dir.mkdir(parents=True, exist_ok=True)
+            (chan_dir / 'update-channel.conf').write_text(
+                '[channel]\ndistro_family=solar-evolution\ncurrent_releasever=46\n'
+            )
+            res3 = subprocess.run([str(sync_bin), f'--sysroot={root}', '--force'], capture_output=True, text=True, timeout=15)
+            self.assertEqual(res3.returncode, 0, res3.stdout + res3.stderr)
+            self.assertEqual((root / 'etc/dnf/vars/releasever').read_text().strip(), '46')
+
+    def test_github_channel_and_major_release_upgrade_contract(self):
+        for rel in ('etc/blazeos/update-channel.conf', 'usr/share/blazeos/identity/update-channel.conf'):
+            txt = (OVERLAY / rel).read_text(encoding='utf-8')
+            self.assertIn('DarkMorpheus-pc/Blaze-SolarEvolution', txt)
+            self.assertIn('repo/channel.json', txt)
+
+        upd_sh = (OVERLAY / 'usr/libexec/blazeos-update').read_text(encoding='utf-8')
+        self.assertIn('system-upgrade-download', upd_sh)
+        self.assertIn('system-upgrade-reboot', upd_sh)
+        self.assertIn('blaze-snapshot', upd_sh)
+        self.assertNotIn('eval ', upd_sh)
+
+        off_sh = (OVERLAY / 'usr/libexec/blazeos-offline-update').read_text(encoding='utf-8')
+        self.assertIn('pending-system-upgrade-releasever', off_sh)
+        self.assertIn('blazeos-sync-identity', off_sh)
+
+        pub_sh = (ROOT / 'packaging/publish-repo.sh').read_text(encoding='utf-8')
+        self.assertIn('channel.json', pub_sh)
+        self.assertIn('upgrade_target', pub_sh)
+
+        # Ensure Blaze-Galaxy references are completely retired from tracked manifests & docs
+        for p in (
+            ROOT / 'README.md',
+            ROOT / 'SOURCES.md',
+            ROOT / 'packaging/blaze.repo',
+            OVERLAY / 'usr/share/dnf5/repos.d/blaze.repo',
+            OVERLAY / 'etc/os-release',
+        ):
+            self.assertNotIn('Blaze-Galaxy', p.read_text(encoding='utf-8'), f'Stale Blaze-Galaxy URL in {p}')
+
+        bh_root = Path(os.environ.get('BLAZE_HOUSE_SRC') or (ROOT.parent / 'blaze-house/modern-ui'))
+        if bh_root.is_dir():
+            updates_rs = (bh_root / 'src-tauri/src/commands/updates.rs').read_text(encoding='utf-8')
+            actions_rs = (bh_root / 'src-tauri/src/commands/system_actions.rs').read_text(encoding='utf-8')
+            lib_rs = (bh_root / 'src-tauri/src/lib.rs').read_text(encoding='utf-8')
+            view_tsx = (bh_root / 'src/views/SystemUpdateView.tsx').read_text(encoding='utf-8')
+            for sym in ('get_update_channel', 'Blaze-SolarEvolution', 'Blaze-Universe-'):
+                self.assertIn(sym, updates_rs)
+            self.assertIn('prepare_system_upgrade', actions_rs)
+            self.assertIn('reboot_to_system_upgrade', actions_rs)
+            self.assertIn('get_update_channel', lib_rs)
+            self.assertIn('prepare_system_upgrade', lib_rs)
+            self.assertIn('getUpdateChannel', view_tsx)
+
+    def test_optional_unified_bere_vault_and_boot_wipe_immunity(self):
+        webui_js = (OVERLAY / 'usr/share/cockpit/anaconda-webui/index.js').read_text(encoding='utf-8')
+        for marker in ('anaconda_bere_vault_mode', 'vaultFull', 'vaultMinimal', 'vaultNone'):
+            self.assertIn(marker, webui_js)
+
+        auto_utils = (
+            OVERLAY / 'usr/lib64/python3.15/site-packages/pyanaconda/modules/storage/partitioning/automatic/utils.py'
+        ).read_text(encoding='utf-8')
+        self.assertIn('anaconda_bere_vault_mode', auto_utils)
+        self.assertIn('Size("4400MiB")', auto_utils)
+        self.assertIn('Size("2560MiB")', auto_utils)
+
+        prov_sh = (OVERLAY / 'usr/libexec/blazeos-provision-bere-vault').read_text(encoding='utf-8')
+        self.assertIn('/run/initramfs/live/LiveOS/squashfs.img', prov_sh)
+        self.assertIn('full_os_embedded', prov_sh)
+        self.assertIn('--refresh-kernel-only', prov_sh)
+        self.assertIn('blockdev --setro', prov_sh)
+
+        udev_rule = (OVERLAY / 'etc/udev/rules.d/99-blaze-recovery-vault.rules').read_text(encoding='utf-8')
+        self.assertIn('blockdev --setro $devnode', udev_rule)
+
+        cfgstub = (OVERLAY / 'usr/bin/gen_grub_cfgstub').read_text(encoding='utf-8')
+        self.assertIn('BLAZE_RECOVERY_VAULT.json', cfgstub)
+
+        inst_py = (OVERLAY / 'usr/lib64/python3.15/site-packages/pyanaconda/modules/boss/installation.py').read_text(encoding='utf-8')
+        self.assertIn('EFI/BlazeRecovery', inst_py)
+        self.assertIn('BlazeOS Recovery (BERE Vault)', inst_py)
+
+        # Functional test of SHA-256 tamper detection in inspect_blaze_rec_vault
+        from importlib.machinery import SourceFileLoader
+        mod = SourceFileLoader('berp_gui_vault_test', str(OVERLAY / 'usr/bin/berp-recovery-gui')).load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            (t / 'LiveOS').mkdir()
+            (t / 'boot').mkdir()
+            (t / 'LiveOS/squashfs.img').write_bytes(b'squash-payload')
+            (t / 'boot/vmlinuz-bere').write_bytes(b'vmlinuz-payload')
+            (t / 'boot/initrd-bere.img').write_bytes(b'initrd-payload')
+            import hashlib as _hl, json as _json
+            manifest = {
+                'label': 'BLAZE_REC',
+                'mode': 'full',
+                'full_os_embedded': True,
+                'sha256': {
+                    'squashfs': _hl.sha256(b'squash-payload').hexdigest(),
+                    'vmlinuz': _hl.sha256(b'vmlinuz-payload').hexdigest(),
+                    'initrd': _hl.sha256(b'initrd-payload').hexdigest(),
+                },
+            }
+            (t / 'BLAZE_RECOVERY_VAULT.json').write_text(_json.dumps(manifest), encoding='utf-8')
+
+            orig_co = mod.subprocess.check_output
+            orig_exists = mod.os.path.exists
+            try:
+                def fake_co(cmd, *a, **kw):
+                    if cmd[:2] == ['blkid', '-L']:
+                        return '/dev/fakevault\n'
+                    if cmd[:3] == ['blkid', '-s', 'UUID']:
+                        return 'dead-beef\n'
+                    if cmd[:2] == ['findmnt', '-n']:
+                        return f'{t}\n'
+                    return orig_co(cmd, *a, **kw)
+
+                mod.subprocess.check_output = fake_co
+                mod.os.path.exists = lambda p: True if p == '/dev/fakevault' else orig_exists(p)
+
+                ok_info = mod.inspect_blaze_rec_vault(verify_hashes=True)
+                self.assertTrue(ok_info['present'])
+                self.assertTrue(ok_info['full_os_embedded'])
+                self.assertTrue(ok_info['hash_verified'])
+                self.assertIsNone(ok_info['tamper_error'])
+
+                # Tamper squashfs payload -> must detect SHA-256 mismatch
+                (t / 'LiveOS/squashfs.img').write_bytes(b'tampered-payload')
+                bad_info = mod.inspect_blaze_rec_vault(verify_hashes=True)
+                self.assertFalse(bad_info['hash_verified'])
+                self.assertIsNotNone(bad_info['tamper_error'])
+                self.assertIn('SHA-256', bad_info['tamper_error'])
+            finally:
+                mod.subprocess.check_output = orig_co
+                mod.os.path.exists = orig_exists
 
 
 if __name__ == '__main__':

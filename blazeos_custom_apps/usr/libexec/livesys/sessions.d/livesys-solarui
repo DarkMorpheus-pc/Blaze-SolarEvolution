@@ -189,4 +189,13 @@ chmod 666 /tmp/anaconda_remove_solarui 2>/dev/null || :
     done
 ) &
 
+# If booted from BERE with "Dogrudan Kurulum Sihirbazi" (blaze.autoinstaller=1), auto-launch Anaconda!
+if grep -q 'blaze\.autoinstaller=1' /proc/cmdline 2>/dev/null; then
+    mkdir -p ~liveuser/.config/autostart
+    cp -a /usr/share/applications/liveinst.desktop ~liveuser/.config/autostart/ 2>/dev/null || :
+    if [ -f ~liveuser/.config/solarui/niri.kdl ] && ! grep -q '/usr/bin/liveinst' ~liveuser/.config/solarui/niri.kdl; then
+        printf '\nspawn-at-startup "/usr/bin/liveinst"\n' >> ~liveuser/.config/solarui/niri.kdl
+    fi
+fi
+
 chown -R liveuser:liveuser ~liveuser/

@@ -10,8 +10,8 @@ hotkey-overlay {
 input {
     keyboard {
         xkb {
-            layout "tr,tr,us,de,fr"
-            variant ",f,,,"
+            layout "tr,tr,us,de"
+            variant ",f,,"
             options "grp:alt_shift_toggle"
         }
     }

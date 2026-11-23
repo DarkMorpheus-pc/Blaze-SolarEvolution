@@ -40,6 +40,7 @@ mkdir -p %{buildroot}/usr/lib/systemd/user
 mkdir -p %{buildroot}/usr/share/quickshell
 mkdir -p %{buildroot}/usr/share/doc/solarui
 mkdir -p %{buildroot}/usr/share/licenses/solarui/end4-pC
+mkdir -p %{buildroot}/usr/share/licenses/solarui/we10x
 
 install -m 755 %{_topdir}/../../release/solar-core %{buildroot}/usr/bin/solar-core
 install -m 755 %{_topdir}/../../release/solar-shell %{buildroot}/usr/bin/solar-shell
@@ -54,6 +55,10 @@ cp -a %{_topdir}/../../../vendor/end4-pC %{buildroot}/usr/share/quickshell/end4-
 install -m 644 %{_topdir}/../../../vendor/end4-pC/UPSTREAM.md %{buildroot}/usr/share/doc/solarui/end4-pC-UPSTREAM
 install -m 644 %{_topdir}/../../../vendor/end4-pC/BLAZEOS-CHANGES.md %{buildroot}/usr/share/doc/solarui/end4-pC-BLAZEOS-CHANGES
 install -m 644 %{_topdir}/../../../vendor/end4-pC/LICENSE %{buildroot}/usr/share/licenses/solarui/end4-pC/LICENSE
+cp -a %{_topdir}/../../../vendor/we10x-shell %{buildroot}/usr/share/quickshell/we10x
+install -m 644 %{_topdir}/../../../vendor/we10x-shell/UPSTREAM.md %{buildroot}/usr/share/doc/solarui/we10x-UPSTREAM
+install -m 644 %{_topdir}/../../../vendor/we10x-shell/BLAZEOS-CHANGES.md %{buildroot}/usr/share/doc/solarui/we10x-BLAZEOS-CHANGES
+install -m 644 %{_topdir}/../../../vendor/we10x-shell/LICENSE %{buildroot}/usr/share/licenses/solarui/we10x/LICENSE
 
 %files
 /usr/bin/solar-core
@@ -68,6 +73,10 @@ install -m 644 %{_topdir}/../../../vendor/end4-pC/LICENSE %{buildroot}/usr/share
 /usr/share/doc/solarui/end4-pC-UPSTREAM
 /usr/share/doc/solarui/end4-pC-BLAZEOS-CHANGES
 /usr/share/licenses/solarui/end4-pC/LICENSE
+/usr/share/quickshell/we10x
+/usr/share/doc/solarui/we10x-UPSTREAM
+/usr/share/doc/solarui/we10x-BLAZEOS-CHANGES
+/usr/share/licenses/solarui/we10x/LICENSE
 
 %changelog
 * Fri Sep 11 2026 BlazeOS Team <team@blazeos.org> - 0.1.0-1

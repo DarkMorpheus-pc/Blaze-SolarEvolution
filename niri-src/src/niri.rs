@@ -143,7 +143,8 @@ use crate::layer::MappedLayer;
 use crate::layout::tile::TileRenderElement;
 use crate::layout::workspace::{Workspace, WorkspaceId};
 use crate::layout::{
-    HitType, Layout, LayoutElement as _, LayoutElementRenderElement, MonitorRenderElement,
+    ActivateWindow, HitType, Layout, LayoutElement as _, LayoutElementRenderElement,
+    MonitorRenderElement,
 };
 use crate::niri_render_elements;
 use crate::protocols::ext_workspace::{self, ExtWorkspaceManagerState};
@@ -328,6 +329,10 @@ pub struct Niri {
     pub suppressed_keys: HashSet<Keycode>,
     /// Button codes of the mouse buttons to suppress.
     pub suppressed_buttons: HashSet<u32>,
+    /// Lone Super tap candidate scancode for toggling the Start menu on release.
+    pub super_tap_candidate: Option<Keycode>,
+    /// Original workspace IDs of windows parked on the `"background"` workspace.
+    pub minimized_windows: HashMap<crate::window::mapped::MappedId, WorkspaceId>,
     pub bind_cooldown_timers: HashMap<Key, RegistrationToken>,
     pub bind_repeat_timer: Option<RegistrationToken>,
     pub keyboard_focus: KeyboardFocus,
@@ -1099,6 +1104,7 @@ impl State {
         }
 
         self.niri.pointer_contents.clone_from(&under);
+        self.niri.sync_hovered_titlebar_button();
 
         pointer.motion(
             self,
@@ -2584,6 +2590,8 @@ impl Niri {
             popup_grab: None,
             suppressed_keys: HashSet::new(),
             suppressed_buttons: HashSet::new(),
+            super_tap_candidate: None,
+            minimized_windows: HashMap::new(),
             bind_cooldown_timers: HashMap::new(),
             bind_repeat_timer: Option::default(),
             presentation_state,
@@ -2666,6 +2674,155 @@ impl Niri {
         niri
     }
 
+    pub fn is_surface_on_background(&self, wl_surface: &WlSurface) -> bool {
+        self.layout.workspaces().any(|(_, _, ws)| {
+            ws.name()
+                .is_some_and(|n| n.eq_ignore_ascii_case("background"))
+                && ws.find_wl_surface(wl_surface).is_some()
+        })
+    }
+
+    pub fn minimize_window_by_surface(&mut self, wl_surface: &WlSurface) {
+        if !self.config.borrow().layout.server_titlebar.allow_minimize {
+            return;
+        }
+        let mut found = None;
+        for (_, _, ws) in self.layout.workspaces() {
+            if let Some(mapped) = ws.find_wl_surface(wl_surface) {
+                if ws
+                    .name()
+                    .is_some_and(|n| n.eq_ignore_ascii_case("background"))
+                {
+                    return;
+                }
+                found = Some((mapped.id(), mapped.window.clone(), ws.id()));
+                break;
+            }
+        }
+
+        let Some((mapped_id, window, orig_ws_id)) = found else {
+            return;
+        };
+
+        let bg_ref = niri_config::WorkspaceReference::Name(String::from("background"));
+        let Some((bg_output, bg_idx)) = self.find_output_and_workspace_index(bg_ref) else {
+            return;
+        };
+
+        self.minimized_windows.insert(mapped_id, orig_ws_id);
+
+        let same_output = self
+            .layout
+            .find_window_and_output(wl_surface)
+            .and_then(|(_, o)| o.cloned())
+            == bg_output;
+
+        if same_output || bg_output.is_none() {
+            self.layout
+                .move_to_workspace(Some(&window), bg_idx, ActivateWindow::No);
+        } else if let Some(out) = bg_output {
+            self.layout
+                .move_to_output(Some(&window), &out, Some(bg_idx), ActivateWindow::No);
+        }
+
+        self.queue_redraw_all();
+    }
+
+    pub fn unminimize_window_by_surface(&mut self, wl_surface: &WlSurface, activate: bool) {
+        let Some((mapped, cur_out)) = self.layout.find_window_and_output(wl_surface) else {
+            return;
+        };
+        let mapped_id = mapped.id();
+        let window = mapped.window.clone();
+        let cur_out = cur_out.cloned();
+
+        if !self.is_surface_on_background(wl_surface) {
+            self.minimized_windows.remove(&mapped_id);
+            if activate {
+                self.layout.activate_window(&window);
+                self.layer_shell_on_demand_focus = None;
+                self.queue_redraw_all();
+            }
+            return;
+        }
+
+        let saved_ws = self.minimized_windows.remove(&mapped_id);
+        let mut target = saved_ws.and_then(|ws_id| {
+            let r = niri_config::WorkspaceReference::Id(ws_id.get());
+            let (out, idx) = self.find_output_and_workspace_index(r)?;
+            let is_bg = self.layout.workspaces().any(|(_, i, ws)| {
+                i == idx
+                    && ws.id() == ws_id
+                    && ws
+                        .name()
+                        .is_some_and(|n| n.eq_ignore_ascii_case("background"))
+            });
+            (!is_bg).then_some((out, idx))
+        });
+
+        if target.is_none() {
+            if let Some(active_ws) = self.layout.active_workspace() {
+                if !active_ws
+                    .name()
+                    .is_some_and(|n| n.eq_ignore_ascii_case("background"))
+                {
+                    let r = niri_config::WorkspaceReference::Id(active_ws.id().get());
+                    target = self.find_output_and_workspace_index(r);
+                }
+            }
+        }
+        if target.is_none() {
+            let r = niri_config::WorkspaceReference::Index(1);
+            target = self.find_output_and_workspace_index(r);
+        }
+
+        let Some((dest_out, dest_idx)) = target else {
+            return;
+        };
+
+        let act = if activate {
+            ActivateWindow::Yes
+        } else {
+            ActivateWindow::No
+        };
+
+        if dest_out == cur_out || dest_out.is_none() {
+            self.layout
+                .move_to_workspace(Some(&window), dest_idx, act);
+        } else if let Some(out) = dest_out {
+            self.layout
+                .move_to_output(Some(&window), &out, Some(dest_idx), act);
+        }
+
+        if activate {
+            self.layout.activate_window(&window);
+            self.layer_shell_on_demand_focus = None;
+        }
+        self.queue_redraw_all();
+    }
+
+    pub fn sync_hovered_titlebar_button(&mut self) {
+        let target = match &self.pointer_contents.window {
+            Some((win, HitType::Titlebar { button })) => Some((win.clone(), *button)),
+            _ => None,
+        };
+        let mut dirty_outputs = Vec::new();
+        self.layout.with_windows_mut(|mapped, output| {
+            let new_btn = match &target {
+                Some((w, btn)) if w == &mapped.window => *btn,
+                _ => None,
+            };
+            if mapped.set_hovered_titlebar_button(new_btn) {
+                if let Some(out) = output {
+                    dirty_outputs.push(out.clone());
+                }
+            }
+        });
+        for out in dirty_outputs {
+            self.queue_redraw(&out);
+        }
+    }
+
     pub fn insert_client(&mut self, client: NewClient) {
         let NewClient {
             client,
@@ -2676,7 +2833,7 @@ impl Niri {
         let config = self.config.borrow();
         let data = Arc::new(ClientState {
             compositor_state: Default::default(),
-            can_view_decoration_globals: config.prefer_no_csd,
+            can_view_decoration_globals: config.prefer_no_csd || config.layout.server_titlebar.on,
             primary_selection_disabled: config.clipboard.disable_primary,
             restricted,
             credentials_unknown,

@@ -1,4 +1,4 @@
-# Blaze SolarEvolution 5.05 (Blaze-Galaxy)
+# Blaze SolarEvolution 5.05
 
 [**Upgrade to BlazeOS (ISO)**](https://archive.org/details/blaze-solar-evolution-5-test)
 
@@ -16,23 +16,26 @@
 
 ## Surum Notlari (Release Notes) — Blaze SolarEvolution 5.05
 
-Bu surum (`5.05`), SolarEvolution ekosistemine FireHub 1.8.1 BCDL Kinetic Glass ve GPL-3.0 lisans uyumunu, saglamlastirilmis Anaconda OOBE / SDDM ilk acilis mimarisini, arindirilmis ve modernlestirilmis SolarUI Masaustu Rehberini, optimize edilmis BlazeHouse kontrol merkezini, guncel stok Noctalia arama motorunu, coklu masaustu provizyonunu ve dayanikli kurtarma (BERP/BERE) katmanini kazandirir:
+Bu surum (`5.05`), SolarEvolution ekosistemine FireHub 1.9.0 BCDL Kinetic Glass ve GPL-3.0 lisans uyumunu, saglamlastirilmis Anaconda OOBE / SDDM ilk acilis mimarisini, arindirilmis ve modernlestirilmis SolarUI Masaustu Rehberini, optimize edilmis BlazeHouse kontrol merkezini, guncel stok Noctalia arama motorunu, coklu masaustu provizyonunu ve dayanikli kurtarma (BERP/BERE) katmanini kazandirir:
 
-### 1. FireHub 1.8.1 & Acik Kaynak GPL-3.0 Uyumu
+### 1. FireHub 1.9.0 & Acik Kaynak GPL-3.0 Uyumu
 - **GPL-3.0 Lisans Hizalanmasi:** FireHub Hakkinda ve Lisans bolumu resmi GNU General Public License Version 3 (GPL-3.0) metnine ve resmi kaynak deposuna (`https://github.com/DarkMorpheus-pc/Blaze-Fire-Hub`) baglandi.
 - **BCDL Kinetic Glass Tasarim Dili:** Akrilik cam yuzeyler, dinamik bulaniklik ve modern sekme arayuzu ile akici magazacilik deneyimi.
 - **Blaze Vault Kriptografik Zirh:** 3-parcali Shamir/XOR bayt parcalama, bellek temizleme (`Uint8Array.fill(0)`), AST kod karartma ve runtime anti-debug kilitleri ile guvenli API altyapisi.
 - **Guncelleme Merkezi (Updates Hub):** Canli Flatpak ve sistem guncelleme takibi, surum karsilastirmasi ve tek tikla toplu guncelleme.
 - **Yerlesik Cevrimdisi Ikon Paketi:** 90+ populer uygulamanin 128x128 ikonlari dogrudan paket icine gomulerek harici CDN bagimliligi ve ag gecikmesi sifirlandi.
 
-### 2. SolarUI Masaustu Rehberi ve Living Flow Sadelestirmesi
-- **Arindirilmis Baslik ve Statu:** Masaustu rehberindeki logo ve sag ustteki statu etiketi kaldirilarak saf, profesyonel ve modern bir karsilama deneyimi olusturuldu.
+### 2. SolarUI Masaustu Rehberi, Kisisellestirme ve Ekran Yonetimi
+- **Arindirilmis Baslik ve Tam Pencere Kontrolleri:** Masaustu rehberi ve SolarUI / Electron / SSD uygulamalarinda (FireHub, ucbirimler vb.) 30px baslik cubugu uzerinde arka plana kucultme, tam ekran/buyutme ve kapatma kontrolleri tam uyumlu hale getirildi (`99_blazeos-wm.gschema.override` ve Niri `server-titlebar`).
+- **Evrensel Duvar Kagidi Koprusu:** SolarUI Ayarlari (`Duvar Kagidi ve Tema`) ve Dosya Gezgini (`Nautilus`) uzerinden secilen duvar kagitlari Noctalia, We10X, Caelestia ve end4-pC kabuklarina canli olarak senkronize edilir.
+- **Manuel Cozunurluk ve Yenileme Hizi (Hz) Secici:** Bagli her ekran icin donanim EDID cozunurlukleri, tazeleme hizlari (60 Hz, 75 Hz, 120 Hz, 144 Hz, 240 Hz vb.), bagimsiz DPI olcegi ve ozel cozunurluk/Hz tanimlama araci SolarUI Ayarlarina eklendi.
+- **We10X (Tanidik Klasik Duzen) Kisisellestirme Paketi:** Koyu, acik ve tam siyah (OLED) gorunum modlari; kirmizi, mavi, koyu antrasit, zumrut yesili, mor, kehribar hazir renkleri; sinirsiz RGB/Hex ozel renk secici ve gorev cubugu/Baslat menusu/baslik cubugu renklendirme destegi eklendi.
 - **Dinamik Kisayol Haritasi:** Mod + Space (Omnibar), Mod + G (GameZone), Mod + I (Ayarlar), Mod + S (Kontrol Merkezi) ve elastik pencere fizigi kisayollari aninda erisilebilir hale getirildi.
 - **Cift Terminal ve Fastfetch:** Kitty GPU hizlandirmali ucbirim ile Alacritty destegi, ozel SolarUI ASCII sanati ve donanim telemetrisi ile entegre edildi.
 
 ### 3. Anaconda Kurulum Sonrasi OOBE ve SDDM Otomatik Giris Guvenligi
-- **Ilk Acilis Parola Kilitlemesi Giderildi:** Kurulum sonrasi SDDM oturum yoneticisinin `blaze-setup` kullanicisinda takilmasina yol acan PAM ve autologin zinciri guclendirildi (`00-blaze-oobe.conf` ve `sddm-autologin`).
-- **Kesintisiz Profil Olusturma:** Kurulum bittikten sonra OOBE sihirbazi guvenle acilarak kullanici adi, parola, masaustu tercihi ve sistem ayarlari adim adim tamamlanir.
+- **Ilk Acilis Parola Kilitlemesi Giderildi:** Kurulum sonrasi SDDM oturum yoneticisinin `blaze-setup` kullanicisinda parola sormasina yol acan `/etc/shadow`, `MinimumUid` ve PAM autologin zinciri guclendirildi (`00-blaze-oobe.conf` ve `sddm-autologin`).
+- **Kesintisiz Profil Olusturma:** Kurulum bittikten sonra tam ekran OOBE sihirbazi parola sormadan dogrudan acilarak kullanici adi, parola, kabuk tercihi ve sistem ayarlari adim adim tamamlanir.
 - **Atomik Hijyen:** Kurulum sihirbazi tamamlandiginda gecici servisler, autologin kayitlari ve gecici yapilandirmalar otomatik olarak sistemden temizlenir; SDDM dogrudan olusturulan kullanici hesabini karsilar.
 
 ### 4. BlazeHouse Sistem Kontrol Merkezi ve Donanim Telemetrisi
@@ -50,14 +53,14 @@ Bu surum (`5.05`), SolarEvolution ekosistemine FireHub 1.8.1 BCDL Kinetic Glass 
 - **Yerel Qt Ceviri Motoru:** C++ `CaelestiaQTranslator` ile calisma aninda O(1) bellek erisimiyle Turkce dizeler cozulur.
 - **Nexus Ayarlarinda Canli Dil Secici:** Dil ve Bolge sayfasinda Sistem Dili, Turkce ve English secenekleri arasinda oturumu yeniden baslatmadan aninda gecis yapilabilir.
 
-### 7. BERP ve BERE Dayanikli Kurtarma Mimarisi
-- **BERP (Blaze Emergency Recovery Platform):** Kok dosya sistemi veya grafik oturum zarar gorse dahi bagimsiz initramfs/ramdisk uzerinden calisan TUI ve acil durum onarim merkezi.
-- **BERE (Blaze Emergency Recovery Environment):** Grafiksel Btrfs anlik goruntu (snapshot) geri yukleme, sistem geri alma, SELinux politikasi sifirlama ve cekirdek secim araci.
-- **Blaze Sentinel:** Arka planda donanim sagligini, SELinux butunlugunu, ag konfigurasyonunu ve sistem baglantilarini periyodik denetleyen guvenlik nobetcisi.
+### 7. BERP, Zirhli BLAZE_REC Kurtarma Bolumu ve BERE USB ISO Yoneticisi
+- **Fiziksel Zirhli Kurtarma Bolumu (`BLAZE_REC`):** Anaconda otomatik bolumlemesi sirasinda kok dosya sisteminden bagimsiz 2.5 GiB salt-okunur fiziksel GPT kurtarma bolumu (`RequiredPartition` + `ReadOnly bit 60`, `UDISKS_IGNORE=1`) olusturulur; kok sistem tamamen silinse dahi tam grafiksel Wayland BERE ayakta kalir.
+- **BERE USB Gezgini ve Coklu Motorlu ISO Baslatici:** Takili USB belleklerdeki (`FAT32`, `exFAT`, `NTFS`, `ext4`, `Btrfs`) ISO kalip dosyalari salt-okunur taranip dahili diske (`/home/.blaze-isos/`) cekilebilir ve `kexec` aninda gecis veya GRUB2 uzerinden `RAM'e Yukle` (`rd.live.ram=1` / `toram` / `copytoram=y`) secenegiyle baslatilabilir.
+- **BERP (Blaze Emergency Recovery Platform) & Blaze Sentinel:** Bagimsiz ramdisk konsol onarim araci (TUI), Btrfs Zaman Makinesi ve arka plan SELinux/donanim guvenlik nobetcisi birlikte calisir.
 
 ### 8. Ag, Guvenlik ve Sistem Optimizasyonlari
 - **Telemetri ve Gecikme Onleme:** NetworkManager captive portal sorgusu devreden cikarildi; sistem loglarini ve disk G/C'sini yoran gereksiz arka plan servisleri (`auditd`, `sssd`, `stratisd`, `mcelog`) arindirildi.
-- **ZRAM ve CachyOS Kernel Yapilandirmasi:** Yuksek sikistirma algoritmali ZRAM takas alani ve dusuk gecikmeli islemci zamanlayici ayarlari uygulandi.
+- **ZRAM ve Dusuk Gecikme Sistem Yapilandirmasi:** Yuksek sikistirma algoritmali ZRAM takas alani ve dusuk gecikmeli `sysctl` / zamanlayici iyilestirmeleri uygulandi.
 
 ---
 
@@ -97,8 +100,8 @@ The system ships **SolarUI (Niri Wayland + Noctalia + Caelestia)** as its offlin
   - **Sway:** An i3-compatible, keyboard-driven tiling environment
 - **Limine & GRUB2 Bootloader Support:** GRUB2 remains the Secure Boot compatible default. UEFI installations can select the bundled official Limine release without third-party repository dependencies.
 - **BlazeHouse & System Control:** Modern BCDL Kinetic Glass control center featuring real-time hardware telemetry with tabular numerals, instant cached navigation, and ZRAM tuning.
-- **FireHub 1.8.1 Software Center:** BCDL Kinetic Glass interface, Updates Hub for Flatpak & system packages, and cryptographic Blaze Vault armor under GPL-3.0.
-- **Low Latency & ZRAM Improvements:** DNF5 configurations for faster downloads, default ZRAM optimizations, and CachyOS kernel/animation tuning settings.
+- **FireHub 1.9.0 Software Center:** BCDL Kinetic Glass interface, Updates Hub for Flatpak & system packages, and cryptographic Blaze Vault armor under GPL-3.0.
+- **Low Latency & ZRAM Improvements:** DNF5 configurations for faster downloads, default ZRAM optimizations, and low-latency `sysctl` tuning settings.
 - **Online & Offline ISO Architecture:** Build support for a lightweight 3.5 GB Online ISO and a fully bundled 10 GB+ Offline ISO.
 
 ---
@@ -106,7 +109,7 @@ The system ships **SolarUI (Niri Wayland + Noctalia + Caelestia)** as its offlin
 ## Architecture (Sistem Yapisi)
 
 ```text
-Blaze-Galaxy / Blaze SolarEvolution 5.05
+Blaze-SolarEvolution 5.05
 |-- build_f45_final.sh          # Online ISO build script (Squashfs + xorriso + SELinux)
 |-- build_f45_offline.sh        # Offline ISO build script
 |-- blazeos_custom_apps/        # Custom-developed system tools and desktop configurations
@@ -155,8 +158,8 @@ To build the ISO image locally, the following packages and tools must be install
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/DarkMorpheus-pc/Blaze-Galaxy.git
-cd Blaze-Galaxy
+git clone https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution.git
+cd Blaze-SolarEvolution
 ```
 
 ### 2. Prepare the Base ISO Image
@@ -180,7 +183,7 @@ Once the build is complete, your ISO image will be available in the repository r
 
 Official Checksum (SHA-256):
 ```text
-ccbfd34f59cfb6ecb10a060a119b60f437f0e48e0a7557c98aa9ff49dabee7b4  Blaze-SolarEvolution-5-x86_64.iso
+6a21b9d197e60d076bbaa9b694d7a733f91951810866d8b51f7fa347f5ada0dd  Blaze-SolarEvolution-5-x86_64.iso
 ```
 
 ---
@@ -212,6 +215,7 @@ SolarUI ve Blaze SolarEvolution asagidaki acik kaynak projelerin calismalarindan
 - [Noctalia](https://github.com/noctalia-dev/noctalia)
 - [Caelestia Shell](https://github.com/caelestia-dots/shell)
 - [end4-pC](https://github.com/pctrade/end4-pC)
+- [We10XOS-kde](https://github.com/yeyushengfan258/We10XOS-kde) & [We10X-icon-theme](https://github.com/yeyushengfan258/We10X-icon-theme) — GPL-3.0 klasik masaustu gorsel varliklari, duvar kagitlari ve ikon temasi
 - [illogical-impulse / dots-hyprland](https://github.com/end-4/dots-hyprland)
 - [Pardus GNOME Greeter](https://github.com/pardus/pardus-gnome-greeter) — LGPL-3.0 gorunum ve ilk oturum deneyimi ilhami
 

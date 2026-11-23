@@ -3,7 +3,7 @@
 # container, with gpgcheck and repo_gpgcheck enabled, and smoke-test them.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FEDORA_IMAGE="${FEDORA_IMAGE:-registry.fedoraproject.org/fedora:44}"
+FEDORA_IMAGE="${FEDORA_IMAGE:-registry.fedoraproject.org/fedora:45}"
 
 podman run --rm -v "$HERE/out/repo:/repo:ro,Z" "$FEDORA_IMAGE" bash -euo pipefail -c '
   cat > /etc/yum.repos.d/blaze-test.repo <<REPO
@@ -15,13 +15,20 @@ gpgcheck=1
 repo_gpgcheck=1
 gpgkey=file:///repo/RPM-GPG-KEY-blaze
 REPO
-  dnf -y -q install blaze-release blaze-sentinel blaze-tools blaze-recovery blaze-continuum 2>&1 | tail -5
+  dnf -y -q install blaze-release blaze-sentinel blaze-tools blaze-recovery blaze-continuum blaze-house solarui blaze-oobe 2>&1 | tail -5
   echo "--- installed:"
-  rpm -q blaze-release blaze-sentinel blaze-tools blaze-recovery blaze-continuum
+  rpm -q blaze-release blaze-sentinel blaze-tools blaze-recovery blaze-continuum blaze-house solarui blaze-oobe
   echo "--- sentinel smoke test:"
   blaze-sentinel status | head -6
   echo "--- blaze.repo shipped by blaze-release:"
-  cat /etc/yum.repos.d/blaze.repo
+  cat /usr/share/dnf5/repos.d/blaze.repo
+  echo "--- identity persistence & releasever=45 checks:"
+  grep -qxF "PRETTY_NAME=\"Blaze SolarEvolution 5.05\"" /etc/os-release
+  grep -qxF "Blaze SolarEvolution release 5.05 (SolarEvolution)" /etc/redhat-release
+  grep -qx "45" /etc/dnf/vars/releasever
+  dnf5 --dump-variables | grep -qx "releasever = 45" || { dnf5 --dump-variables | grep -E "^releasever"; exit 1; }
+  grep -qF "excludepkgs=fedora-release*" /etc/dnf/libdnf5.conf.d/10-blaze-identity.conf
+  dnf5 check --dependencies
   echo "--- tamper test (must be detected):"
   cp /repo/blaze-sentinel-*.rpm /tmp/x.rpm
   sz=$(stat -c %s /tmp/x.rpm)

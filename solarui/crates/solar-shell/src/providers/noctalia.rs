@@ -59,23 +59,7 @@ impl NoctaliaProvider {
     }
 
     async fn get_pids(&self) -> Vec<i32> {
-        let out = tokio::process::Command::new("pgrep")
-            .args(["-u", &solar_common::current_uid().to_string()])
-            .arg("-x")
-            .arg("noctalia")
-            .output_timeout()
-            .await;
-
-        if let Ok(output) = out {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                return stdout
-                    .lines()
-                    .filter_map(|l| l.trim().parse::<i32>().ok())
-                    .collect();
-            }
-        }
-        Vec::new()
+        super::find_uid_process_pids(|comm, text| comm == "noctalia" && !text.contains(" msg "))
     }
 
     fn cmd(&self) -> tokio::process::Command {
@@ -213,6 +197,10 @@ impl ShellProvider for NoctaliaProvider {
         } else {
             bail!("Noctalia v5 surecleri sonlandirilamadi!");
         }
+    }
+
+    async fn process_alive(&self) -> bool {
+        !self.get_pids().await.is_empty()
     }
 
     async fn health_check(&self) -> Result<bool> {

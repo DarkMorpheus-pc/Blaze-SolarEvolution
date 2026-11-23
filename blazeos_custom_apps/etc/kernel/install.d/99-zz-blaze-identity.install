@@ -1,0 +1,5 @@
+#!/usr/bin/bash
+# Verify and enforce Blaze SolarEvolution 5.05 BLS title and class after kernel install.
+[ -x /usr/bin/blazeos-sync-identity ] || exit 0
+/usr/bin/blazeos-sync-identity --bls-only --quiet || :
+exit 0

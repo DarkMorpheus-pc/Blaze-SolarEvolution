@@ -680,6 +680,90 @@ pub struct TabIndicatorRule {
     pub urgent_gradient: Option<Gradient>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ServerTitlebar {
+    pub on: bool,
+    pub height: f64,
+    pub active_color: Color,
+    pub inactive_color: Color,
+    pub active_text_color: Color,
+    pub inactive_text_color: Color,
+    pub aero_snap: bool,
+    pub allow_minimize: bool,
+}
+
+impl Default for ServerTitlebar {
+    fn default() -> Self {
+        Self {
+            on: false,
+            height: 30.,
+            active_color: Color::from_rgba8_unpremul(0x1f, 0x1f, 0x1f, 0xff),
+            inactive_color: Color::from_rgba8_unpremul(0x2b, 0x2b, 0x2b, 0xff),
+            active_text_color: Color::from_rgba8_unpremul(0xff, 0xff, 0xff, 0xff),
+            inactive_text_color: Color::from_rgba8_unpremul(0x99, 0x99, 0x99, 0xff),
+            aero_snap: true,
+            allow_minimize: false,
+        }
+    }
+}
+
+#[derive(knuffel::Decode, Debug, Default, Clone, Copy, PartialEq)]
+pub struct ServerTitlebarRule {
+    #[knuffel(child)]
+    pub off: bool,
+    #[knuffel(child)]
+    pub on: bool,
+    #[knuffel(child, unwrap(argument))]
+    pub height: Option<FloatOrInt<16, 128>>,
+    #[knuffel(child)]
+    pub active_color: Option<Color>,
+    #[knuffel(child)]
+    pub inactive_color: Option<Color>,
+    #[knuffel(child)]
+    pub active_text_color: Option<Color>,
+    #[knuffel(child)]
+    pub inactive_text_color: Option<Color>,
+    #[knuffel(child, unwrap(argument))]
+    pub aero_snap: Option<bool>,
+    #[knuffel(child, unwrap(argument))]
+    pub allow_minimize: Option<bool>,
+}
+
+impl MergeWith<ServerTitlebarRule> for ServerTitlebar {
+    fn merge_with(&mut self, part: &ServerTitlebarRule) {
+        self.on |= part.on;
+        if part.off {
+            self.on = false;
+        }
+        merge!((self, part), height);
+        merge_clone!(
+            (self, part),
+            active_color,
+            inactive_color,
+            active_text_color,
+            inactive_text_color,
+            aero_snap,
+            allow_minimize,
+        );
+    }
+}
+
+impl MergeWith<Self> for ServerTitlebarRule {
+    fn merge_with(&mut self, part: &Self) {
+        merge_on_off!((self, part));
+        merge_clone_opt!(
+            (self, part),
+            height,
+            active_color,
+            inactive_color,
+            active_text_color,
+            inactive_text_color,
+            aero_snap,
+            allow_minimize,
+        );
+    }
+}
+
 impl MergeWith<Self> for BorderRule {
     fn merge_with(&mut self, part: &Self) {
         merge_on_off!((self, part));

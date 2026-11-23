@@ -1,12 +1,27 @@
 #!/usr/bin/sh -e
-# Blaze Emergency Recovery Protocol (BERP) watchdog hook
+# Blaze Emergency Recovery Protocol (BERP) watchdog & alert hook
 
 cat << 'BERPEOF'
 # GRUB keystatus is unreliable on some UEFI/USB keyboards and can report a
 # phantom Shift press, booting recovery forever. Recovery remains available
-# from the visible menu and its Space/B hotkeys.
-if [ "${blaze_recovery}" = "alert" ]; then
+# from the visible menu and its Space/B hotkeys, or automatically after 3
+# consecutive failed boot attempts (reset by blaze-boot-success.service).
+if [ "${blaze_recovery}" = "alert" -o "${blaze_recovery}" = "1" ]; then
   set default="BlazeOS Recovery Environment (BERE - Powered by BERP)"
   set timeout=0
+elif [ -n "${boot_counter}" ]; then
+  if [ "${boot_counter}" -ge 3 ]; then
+    set default="BlazeOS Recovery Environment (BERE - Powered by BERP)"
+    set timeout=2
+  else
+    if [ "${boot_counter}" = "0" ]; then
+      set boot_counter=1
+    elif [ "${boot_counter}" = "1" ]; then
+      set boot_counter=2
+    elif [ "${boot_counter}" = "2" ]; then
+      set boot_counter=3
+    fi
+    save_env boot_counter
+  fi
 fi
 BERPEOF

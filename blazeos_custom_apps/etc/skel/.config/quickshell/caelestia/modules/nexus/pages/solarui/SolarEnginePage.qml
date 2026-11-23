@@ -82,6 +82,16 @@ PageBase {
                     engineStatus.running = true;
                 }
             }
+            RowButton {
+                text: qsTr("We10X (Tanıdık Klasik Düzen)")
+                subtext: qsTr("Familiar classic Windows 10 taskbar, Start menu, desktop icons, and Aero Snap.")
+                icon: "grid_view"
+                trailingIcon: root.currentEngine === "we10x" ? "check_circle" : ""
+                onClicked: {
+                    Quickshell.execDetached(["solar-shell", "switch", "we10x"]);
+                    engineStatus.running = true;
+                }
+            }
         }
         
         ColumnLayout {

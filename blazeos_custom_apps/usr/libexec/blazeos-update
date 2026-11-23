@@ -1,5 +1,5 @@
 #!/bin/bash
-# Fixed-command privilege boundary used by Blaze House.
+# Fixed-command privilege boundary used by Blaze House for offline updates & system upgrades.
 set -euo pipefail
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -7,18 +7,63 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 77
 fi
 
+UPGRADE_STATE_DIR="/var/lib/blazeos"
+UPGRADE_TARGET_FILE="${UPGRADE_STATE_DIR}/pending-system-upgrade-releasever"
+
+run_streamed() {
+    if [ -x /usr/bin/script ]; then
+        exec /usr/bin/script -qefc "$*" /dev/null
+    elif [ -x /usr/bin/stdbuf ]; then
+        exec /usr/bin/stdbuf -oL -eL "$@"
+    else
+        exec "$@"
+    fi
+}
+
 case "${1:-}" in
     prepare)
-        exec /usr/bin/dnf5 --refresh upgrade --offline -y
+        rm -f "$UPGRADE_TARGET_FILE" 2>/dev/null || :
+        if [ -x /usr/bin/script ]; then
+            exec /usr/bin/script -qefc "env TERM=xterm-256color COLUMNS=120 /usr/bin/dnf5 --refresh upgrade --offline -y" /dev/null
+        elif [ -x /usr/bin/stdbuf ]; then
+            exec /usr/bin/stdbuf -oL -eL /usr/bin/dnf5 --refresh upgrade --offline -y
+        else
+            exec /usr/bin/dnf5 --refresh upgrade --offline -y
+        fi
+        ;;
+    system-upgrade-download)
+        target_ver="${2:-}"
+        if ! [[ "$target_ver" =~ ^[0-9]{2}$ ]]; then
+            echo "Geçersiz hedef Fedora sürüm numarası: '$target_ver'" >&2
+            exit 64
+        fi
+        if [ -x /usr/bin/blaze-snapshot ]; then
+            echo "[BLAZE-UPGRADE] Yükseltme öncesi Btrfs kurtarma anlık görüntüsü alınıyor..."
+            /usr/bin/blaze-snapshot create --reason pre-upgrade "pre-upgrade-fc${target_ver}" || :
+        fi
+        mkdir -p "$UPGRADE_STATE_DIR"
+        printf '%s\n' "$target_ver" > "$UPGRADE_TARGET_FILE"
+        chmod 0644 "$UPGRADE_TARGET_FILE"
+        if [ -x /usr/bin/script ]; then
+            exec /usr/bin/script -qefc "env TERM=xterm-256color COLUMNS=120 /usr/bin/dnf5 system-upgrade download --releasever=${target_ver} --offline -y --allowerasing" /dev/null
+        elif [ -x /usr/bin/stdbuf ]; then
+            exec /usr/bin/stdbuf -oL -eL /usr/bin/dnf5 system-upgrade download --releasever="$target_ver" --offline -y --allowerasing
+        else
+            exec /usr/bin/dnf5 system-upgrade download --releasever="$target_ver" --offline -y --allowerasing
+        fi
         ;;
     reboot)
-        exec /usr/bin/dnf5 offline reboot
+        exec /usr/bin/dnf5 -y offline reboot
+        ;;
+    system-upgrade-reboot)
+        exec /usr/bin/dnf5 -y system-upgrade reboot
         ;;
     cancel)
-        exec /usr/bin/dnf5 offline clean
+        rm -f "$UPGRADE_TARGET_FILE" 2>/dev/null || :
+        exec /usr/bin/dnf5 -y offline clean
         ;;
     *)
-        echo "Kullanım: blazeos-update {prepare|reboot|cancel}" >&2
+        echo "Kullanım: blazeos-update {prepare|system-upgrade-download <ver>|reboot|system-upgrade-reboot|cancel}" >&2
         exit 64
         ;;
 esac

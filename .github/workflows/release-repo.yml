@@ -1,0 +1,113 @@
+name: Build & Publish Blaze SolarEvolution RPM Repository
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "packaging/**"
+      - "blazeos_custom_apps/**"
+      - "solarui/**"
+  workflow_dispatch:
+    inputs:
+      target_releasever:
+        description: "Target Fedora container releasever (e.g. 45 or 46)"
+        required: false
+        default: "45"
+      publish_gh_pages:
+        description: "Publish signed RPM repo to gh-pages (requires BLAZE_GPG_PRIVATE_KEY secret)"
+        required: false
+        default: "true"
+
+permissions:
+  contents: write
+  pages: write
+
+jobs:
+  build-rpms:
+    runs-on: ubuntu-latest
+    container:
+      image: registry.fedoraproject.org/fedora:${{ github.event.inputs.target_releasever || '45' }}
+      options: --privileged
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Host Build Dependencies
+        run: dnf -y -q install rpm-build rpm-sign createrepo_c gnupg2 rpmlint python3 tar
+
+      - name: Import Release GPG Key or Ephemeral CI Check Key
+        env:
+          BLAZE_GPG_PRIVATE_KEY: ${{ secrets.BLAZE_GPG_PRIVATE_KEY }}
+          BLAZE_GPG_PASSPHRASE: ${{ secrets.BLAZE_GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ci-gnupg packaging/out/repo
+          chmod 700 /tmp/ci-gnupg
+          export GNUPGHOME=/tmp/ci-gnupg
+          if [ -n "$BLAZE_GPG_PRIVATE_KEY" ]; then
+            printf '%s\n' "$BLAZE_GPG_PRIVATE_KEY" | gpg --batch --import
+            KEYID="$(gpg --list-secret-keys --with-colons | awk -F: '/^sec/{print $5; exit}')"
+            echo "CAN_PUBLISH=true" >> "$GITHUB_ENV"
+          else
+            gpg --batch --passphrase '' --quick-generate-key "Blaze CI Verification <ci@blazeos.com.tr>" ed25519 sign 0
+            KEYID="$(gpg --list-secret-keys --with-colons | awk -F: '/^sec/{print $5; exit}')"
+            gpg --armor --export "$KEYID" > packaging/keys/RPM-GPG-KEY-blaze
+            echo "CAN_PUBLISH=false" >> "$GITHUB_ENV"
+          fi
+          echo "BLAZE_KEY_ID=$KEYID" >> "$GITHUB_ENV"
+
+      - name: Build & Sign RPM Packages
+        env:
+          BLAZE_GPG_PASSPHRASE: ${{ secrets.BLAZE_GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          export GNUPGHOME=/tmp/ci-gnupg
+          mkdir -p /tmp/rpmbuild/{BUILD,RPMS,SRPMS,SOURCES} packaging/out/repo
+          python3 - <<'PY'
+          import json, os, tarfile
+          with open("packaging/packages.json", encoding="utf-8") as f:
+              pkgs = json.load(f)
+          for p in pkgs:
+              name, ver = p["name"], p["ver"]
+              if name == "blaze-release":
+                  tar_path = f"/tmp/rpmbuild/SOURCES/{name}-{ver}.tar"
+                  with tarfile.open(tar_path, "w") as tf:
+                      for rel in p["files"]:
+                          src = "blazeos_custom_apps/" + rel.lstrip("/")
+                          tf.add(src, arcname=rel.lstrip("/"))
+          PY
+          for tar_dir_pkg in blaze-sentinel blaze-continuum blaze-recovery blaze-house blaze-tools solarui blaze-oobe; do
+            python3 - <<'PY' "$tar_dir_pkg"
+          import json, os, sys, tarfile
+          target = sys.argv[1]
+          with open("packaging/packages.json", encoding="utf-8") as f:
+              pkgs = {p["name"]: p for p in json.load(f)}
+          p = pkgs[target]
+          with tarfile.open(f"/tmp/rpmbuild/SOURCES/{p['name']}-{p['ver']}.tar", "w") as tf:
+              for rel in p["files"]:
+                  src = "blazeos_custom_apps/" + rel.lstrip("/")
+                  if os.path.exists(src):
+                      tf.add(src, arcname=rel.lstrip("/"))
+              if p.get("icons"):
+                  for sz in ("48x48", "scalable"):
+                      ip = f"blazeos_custom_apps/usr/share/icons/hicolor/{sz}/apps/{target}.svg"
+                      ip2 = f"blazeos_custom_apps/usr/share/icons/hicolor/{sz}/apps/{target}.png"
+                      for cand in (ip, ip2):
+                          if os.path.exists(cand):
+                              tf.add(cand, arcname=cand.removeprefix("blazeos_custom_apps/"))
+          PY
+          done
+          cp -f packaging/blaze.repo packaging/keys/RPM-GPG-KEY-blaze /tmp/rpmbuild/SOURCES/
+          printf '%s\n' "%dist .blaze" "%_topdir /tmp/rpmbuild" "%_sourcedir /tmp/rpmbuild/SOURCES" "%_gpg_name $BLAZE_KEY_ID" "%_gpg_path /tmp/ci-gnupg" > ~/.rpmmacros
+          for spec in packaging/specs/*.spec; do rpmbuild -bb "$spec"; done
+          find /tmp/rpmbuild/RPMS -name "*.rpm" -exec cp {} packaging/out/repo/ \;
+          rpmsign --addsign packaging/out/repo/*.rpm
+          createrepo_c -q packaging/out/repo
+          gpg --batch --yes --pinentry-mode loopback -u "$BLAZE_KEY_ID" --detach-sign --armor packaging/out/repo/repodata/repomd.xml
+          cp -f packaging/keys/RPM-GPG-KEY-blaze packaging/out/repo/RPM-GPG-KEY-blaze
+
+      - name: Publish to gh-pages if Release Secret Present
+        if: env.CAN_PUBLISH == 'true' && (github.event.inputs.publish_gh_pages != 'false')
+        run: |
+          BLAZE_REMOTE="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            bash packaging/publish-repo.sh

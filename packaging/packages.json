@@ -1,7 +1,7 @@
 [
  {
   "name": "blaze-sentinel",
-  "ver": "0.3.0",
+  "ver": "0.3.1",
   "sum": "Blaze Sentinel security posture inspector",
   "desc": "Reports SELinux/AppArmor state, Secure Boot, kernel lockdown, firewall and kernel hardening sysctls; supports --json and verify exit codes.",
   "lic": "MIT or GPL-3.0-or-later",
@@ -37,7 +37,11 @@
    "/usr/bin/berp-recovery-gui",
    "/usr/bin/blaze-recovery-gui-launcher",
    "/usr/bin/blaze-death-screen",
-   "/usr/share/berp-recovery"
+   "/usr/libexec/blazeos-provision-bere-vault",
+   "/usr/share/berp-recovery",
+   "/usr/lib/dracut/modules.d/99blaze-bere",
+   "/etc/dracut.conf.d/99-blaze-bere.conf",
+   "/etc/udev/rules.d/99-blaze-recovery-vault.rules"
   ],
   "req": [
    "python3"
@@ -45,7 +49,7 @@
  },
  {
   "name": "blaze-house",
-  "ver": "2.0.0",
+  "ver": "2.1.0",
   "sum": "BlazeHouse system control center",
   "desc": "Iced based system control center (displays, storage, optimization, ZRAM, battery, network, bluetooth, sound, security, users, accessibility, language).",
   "lic": "GPL-3.0-or-later",
@@ -64,24 +68,83 @@
   "lic": "GPL-3.0-or-later",
   "noarch": true,
   "files": [
-   "/usr/local/bin/blaze-bootloader",
-   "/usr/local/bin/blaze-optimize",
-   "/usr/local/bin/blazeos-apply-install-choices",
-   "/usr/local/bin/blazeos-control",
-   "/usr/local/bin/blazeos-desktop-provision",
-   "/usr/local/bin/blazeos-limine-install",
-   "/usr/local/bin/blazeos-nvidia-setup",
-   "/usr/local/bin/blazeos-postinstall",
-   "/usr/local/bin/blazeos-remove-solarui",
-   "/usr/local/bin/blazeos-session-diagnose",
-   "/usr/local/bin/blazeos-waydroid-setup",
-   "/usr/local/bin/blazeos-welcome",
-   "/usr/local/bin/solar-torture",
-   "/usr/local/bin/blaze-snapshot"
+   "/usr/bin/blaze-bootloader",
+   "/usr/bin/blaze-optimize",
+   "/usr/bin/blazeos-apply-install-choices",
+   "/usr/bin/blazeos-control",
+   "/usr/bin/blazeos-desktop-provision",
+   "/usr/bin/blazeos-limine-install",
+   "/usr/bin/blazeos-nvidia-setup",
+   "/usr/bin/blazeos-postinstall",
+   "/usr/bin/blazeos-remove-solarui",
+   "/usr/bin/blazeos-session-diagnose",
+   "/usr/bin/blazeos-waydroid-setup",
+   "/usr/bin/blazeos-welcome",
+   "/usr/bin/solar-torture",
+   "/usr/bin/blaze-snapshot"
   ],
   "req": [
    "bash",
    "python3"
   ]
+ },
+ {
+  "name": "solarui",
+  "ver": "5.05",
+  "sum": "SolarUI desktop shell manager, session and settings",
+  "desc": "Niri-based Wayland session manager, multi-shell switcher (Noctalia/Caelestia/end4-pC/We10X), omnibar and settings GUI.",
+  "lic": "GPL-3.0-or-later",
+  "files": [
+   "/usr/bin/solar-shell",
+   "/usr/bin/solar-session",
+   "/usr/bin/solar-core",
+   "/usr/bin/solar-settings",
+   "/usr/share/quickshell/we10x",
+   "/usr/share/icons/We10X",
+   "/usr/share/backgrounds/blazeos/we10x"
+  ],
+  "req": [
+   "gtk4"
+  ]
+ },
+ {
+  "name": "blaze-oobe",
+  "ver": "5.05",
+  "sum": "BlazeOS Out-Of-Box Experience first-boot wizard",
+  "desc": "Token-authenticated first-boot setup assistant, SDDM OOBE session configuration and post-OOBE hygiene helper.",
+  "lic": "GPL-3.0-or-later",
+  "noarch": true,
+  "files": [
+   "/usr/bin/blaze-setup",
+   "/usr/share/blaze-setup",
+   "/usr/libexec/blaze-oobe-session",
+   "/usr/libexec/blazeos-oobe-hygiene"
+  ],
+  "req": [
+   "python3"
+  ]
+ },
+ {
+  "name": "blaze-release",
+  "ver": "5.05",
+  "sum": "Blaze repository definition, GPG key and OS identity guard",
+  "desc": "Installs Blaze repo/GPG key, DNF5 releasever=45 pinning, excludepkgs protections, kernel-install hooks, and Blaze SolarEvolution 5.05 identity guard.",
+  "lic": "GPL-3.0-or-later",
+  "noarch": true,
+  "files": [
+   "/usr/share/blazeos/identity",
+   "/usr/bin/blazeos-sync-identity",
+   "/etc/dnf/vars/releasever",
+   "/usr/share/dnf5/vars.d/releasever",
+   "/etc/dnf/libdnf5.conf.d/10-blaze-identity.conf",
+   "/etc/dnf/protected.d/blaze-release.conf",
+   "/etc/dnf/libdnf5-plugins/actions.d/blaze-identity.actions",
+   "/etc/kernel/install.d/05-blaze-identity.install",
+   "/etc/kernel/install.d/99-zz-blaze-identity.install",
+   "/etc/systemd/system/blazeos-identity-guard.service",
+   "/etc/anaconda/profile.d/blazeos-solarevolution.conf",
+   "/etc/blazeos/update-channel.conf"
+  ],
+  "req": []
  }
 ]

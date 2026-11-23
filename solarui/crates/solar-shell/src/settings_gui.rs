@@ -37,6 +37,10 @@ fn create_logo_image(size: i32) -> Image {
 }
 
 pub fn launch_settings_window() {
+    launch_settings_window_with_tab(None);
+}
+
+pub fn launch_settings_window_with_tab(initial_tab: Option<&str>) {
     glib::set_prgname(Some("solar-settings"));
     glib::set_application_name("SolarUI Settings");
 
@@ -46,7 +50,7 @@ pub fn launch_settings_window() {
     }
 
     let main_loop = glib::MainLoop::new(None, false);
-    build_settings_ui(main_loop.clone());
+    build_settings_ui(main_loop.clone(), initial_tab);
     main_loop.run();
 }
 
@@ -66,7 +70,7 @@ fn restart_taskbar_if_enabled() {
     }
 }
 
-fn build_settings_ui(main_loop: glib::MainLoop) {
+fn build_settings_ui(main_loop: glib::MainLoop, initial_tab: Option<&str>) {
     let extra_css = r#"
         .settings-stage {
             padding: 18px 22px;
@@ -91,6 +95,27 @@ fn build_settings_ui(main_loop: glib::MainLoop) {
             letter-spacing: 1.1px;
             margin: 10px 10px 4px 10px;
         }
+
+        .wp-card {
+            background-color: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.09);
+            border-radius: 14px;
+            padding: 8px;
+            transition: all 160ms ease;
+        }
+
+        .wp-card:hover {
+            background-color: rgba(255, 255, 255, 0.09);
+            border-color: rgba(255, 255, 255, 0.24);
+        }
+
+        .swatch-red     { background-color: #e81123; color: #ffffff; border-radius: 10px; padding: 6px 12px; font-weight: 700; border: 1px solid rgba(255,255,255,0.22); }
+        .swatch-blue    { background-color: #0078d7; color: #ffffff; border-radius: 10px; padding: 6px 12px; font-weight: 700; border: 1px solid rgba(255,255,255,0.22); }
+        .swatch-dark    { background-color: #2d2d30; color: #ffffff; border-radius: 10px; padding: 6px 12px; font-weight: 700; border: 1px solid rgba(255,255,255,0.22); }
+        .swatch-green   { background-color: #107c10; color: #ffffff; border-radius: 10px; padding: 6px 12px; font-weight: 700; border: 1px solid rgba(255,255,255,0.22); }
+        .swatch-purple  { background-color: #881798; color: #ffffff; border-radius: 10px; padding: 6px 12px; font-weight: 700; border: 1px solid rgba(255,255,255,0.22); }
+        .swatch-amber   { background-color: #ff6a00; color: #ffffff; border-radius: 10px; padding: 6px 12px; font-weight: 700; border: 1px solid rgba(255,255,255,0.22); }
+        .swatch-teal    { background-color: #008272; color: #ffffff; border-radius: 10px; padding: 6px 12px; font-weight: 700; border: 1px solid rgba(255,255,255,0.22); }
     "#;
     apply_living_flow_theme(extra_css);
 
@@ -167,6 +192,7 @@ fn build_settings_ui(main_loop: glib::MainLoop) {
     stack.add_css_class("settings-stage");
 
     // ── BUILD ALL PAGES ───────────────────────────────────────────────────────
+    let personalize_tab = build_personalize_tab();
     let clock_tab = build_pixel_clock_tab();
     let taskbar_tab = build_taskbar_tab();
     let display_tab = build_display_tab();
@@ -320,10 +346,25 @@ fn build_settings_ui(main_loop: glib::MainLoop) {
     about_tab.append(&a_sec);
 
     // Register pages and build ColorOS 17 Two-Pane Squircle Navigation Rows (Zero Unicode Tofu!)
+    let default_page = match initial_tab.map(|t| t.trim().to_ascii_lowercase()) {
+        Some(ref t) if t == "display" || t == "resolution" || t == "ekran" => "display",
+        Some(ref t) if t == "personalize" || t == "wallpaper" || t == "theme" || t == "we10x" => "personalize",
+        Some(ref t) if t == "shell" => "shell",
+        Some(ref t) if t == "taskbar" => "taskbar",
+        Some(ref t) if t == "clock" => "clock",
+        Some(ref t) if t == "perf" => "perf",
+        Some(ref t) if t == "health" => "health",
+        Some(ref t) if t == "omnibar" => "omnibar",
+        Some(ref t) if t == "hud" => "hud",
+        Some(ref t) if t == "about" => "about",
+        _ => "personalize",
+    };
+
     let pages: Vec<(&str, &str, &[u8], &str, GtkBox)> = vec![
-        ("GÖRÜNÜM & KİŞİSELLEŞTİRME", "clock", NAV_CLOCK_PNG, "Pixel Saat & Widget", clock_tab),
+        ("GÖRÜNÜM & KİŞİSELLEŞTİRME", "personalize", NAV_CAELESTIA_PNG, "Duvar Kağıdı & Tema", personalize_tab),
+        ("", "display", NAV_DISPLAY_PNG, "Ekran, Çözünürlük & Hz", display_tab),
+        ("", "clock", NAV_CLOCK_PNG, "Pixel Saat & Widget", clock_tab),
         ("", "taskbar", NAV_TASKBAR_PNG, "Görev Çubuğu", taskbar_tab),
-        ("", "display", NAV_DISPLAY_PNG, "Ekran & DPI Ölçeği", display_tab),
         ("KABUK MOTORLARI", "shell", NAV_SHELL_PNG, "Kabuk Motoru & Yüzeyler", shell_tab),
         ("", "caelestia", NAV_CAELESTIA_PNG, "Caelestia Düzeni", caelestia_tab),
         ("", "noctalia", NAV_NOCTALIA_PNG, "Noctalia Bar", noctalia_tab),
@@ -359,7 +400,7 @@ fn build_settings_ui(main_loop: glib::MainLoop) {
         row_box.append(&b_lbl);
         btn.set_child(Some(&row_box));
 
-        if page_id == "clock" {
+        if page_id == default_page {
             btn.add_css_class("active");
         }
         nav_list.append(&btn);
@@ -386,7 +427,7 @@ fn build_settings_ui(main_loop: glib::MainLoop) {
         });
     }
 
-    stack.set_visible_child_name("clock");
+    stack.set_visible_child_name(default_page);
     sidebar_scroll.set_child(Some(&nav_list));
     stage_scroll.set_child(Some(&stack));
 
@@ -566,17 +607,36 @@ pub fn apply_oom_shield_live(enabled: bool) {
     }
 }
 
+fn parse_sentinel_posture_counts(val: &serde_json::Value) -> (u64, u64) {
+    let passed = val
+        .get("passed")
+        .or_else(|| val.get("passed_count"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let total = val
+        .get("total")
+        .or_else(|| val.get("total_count"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(7);
+    (passed, total)
+}
+
 fn probe_live_health_components() -> Vec<(&'static str, String, &'static str)> {
     // 1. SolarCore / Daemon check
-    let xdg_runtime = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/run/user/1000".to_string());
+    let xdg_runtime = std::env::var("XDG_RUNTIME_DIR")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| format!("/run/user/{}", solar_common::current_uid()));
+    let canonical_sock = solar_common::get_solar_core_socket_path();
     let sock_paths = [
-        format!("{}/solar.sock", xdg_runtime),
-        format!("{}/solar-core.sock", xdg_runtime),
-        "/tmp/solar-core.sock".to_string(),
+        canonical_sock,
+        PathBuf::from(format!("{}/solar.sock", xdg_runtime)),
+        PathBuf::from(format!("{}/solar-core.sock", xdg_runtime)),
+        PathBuf::from("/tmp/solar-core.sock"),
     ];
-    let has_sock = sock_paths.iter().any(|p| std::path::Path::new(p).exists());
+    let has_sock = sock_paths.iter().any(|p| p.exists());
     let has_core_proc = Command::new("pgrep")
-        .args(["-f", "solar-core|solar-daemon|solar-shell"])
+        .args(["-f", "solar-core|solar-daemon"])
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false);
@@ -612,8 +672,7 @@ fn probe_live_health_components() -> Vec<(&'static str, String, &'static str)> {
     let sentinel_status = if let Ok(out) = Command::new("blaze-sentinel").args(["status", "--json"]).output() {
         if let Ok(txt) = String::from_utf8(out.stdout) {
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(&txt) {
-                let passed = val.get("passed_count").and_then(|v| v.as_u64()).unwrap_or(0);
-                let total = val.get("total_count").and_then(|v| v.as_u64()).unwrap_or(7);
+                let (passed, total) = parse_sentinel_posture_counts(&val);
                 (
                     format!("Tam Kalkan ({}/{} Güvenlik Kontrolü Aktif)", passed, total),
                     if passed == total { "status-badge-ok" } else { "status-badge-info" },
@@ -1251,7 +1310,7 @@ fn build_shell_tab() -> GtkBox {
     sec.append(&title);
 
     let desc = Label::new(Some(
-        "Noctalia, Caelestia ve end4-pC tam kabuk motorları arasında güvenli biçimde geçiş yapabilirsiniz. Her motor kendi bar, bildirim, OSD ve sistem tepsisini tek başına yönetir.",
+        "Noctalia, Caelestia, end4-pC ve We10X (Tanıdık Klasik Düzen / Windows 10 Modu) kabuk motorları arasında güvenli biçimde geçiş yapabilirsiniz. Her motor kendi bar, bildirim, OSD ve sistem tepsisini tek başına yönetir.",
     ));
     desc.add_css_class("setting-subtext");
     desc.set_wrap(true);
@@ -1272,6 +1331,7 @@ fn build_shell_tab() -> GtkBox {
         "Noctalia v5 (C++23 Native)",
         "Caelestia Shell (Quickshell QML)",
         "end4-pC (Material 3 Expressive)",
+        "We10X (Tanıdık Klasik Düzen)",
     ];
     let engine_model = StringList::new(&engines);
     let engine_dd = DropDown::new(Some(engine_model), None::<gtk4::Expression>);
@@ -1279,6 +1339,7 @@ fn build_shell_tab() -> GtkBox {
         ShellEngine::Noctalia => 0,
         ShellEngine::Caelestia => 1,
         ShellEngine::End4Pc => 2,
+        ShellEngine::We10x => 3,
     };
     engine_dd.set_selected(active_idx);
     row1.append(&engine_dd);
@@ -1303,12 +1364,14 @@ fn build_shell_tab() -> GtkBox {
         let target_engine = match engine_dd_clone.selected() {
             0 => ShellEngine::Noctalia,
             1 => ShellEngine::Caelestia,
-            _ => ShellEngine::End4Pc,
+            2 => ShellEngine::End4Pc,
+            _ => ShellEngine::We10x,
         };
         let target_provider = match target_engine {
             ShellEngine::Noctalia => SurfaceProvider::Noctalia,
             ShellEngine::Caelestia => SurfaceProvider::Caelestia,
             ShellEngine::End4Pc => SurfaceProvider::End4Pc,
+            ShellEngine::We10x => SurfaceProvider::We10x,
         };
 
         // Do NOT overwrite cfg.shell.engine before running `solar-shell switch <engine>`
@@ -1370,6 +1433,418 @@ fn build_shell_tab() -> GtkBox {
     sec.append(&btn_box);
     sec.append(&shell_status_lbl);
     tab.append(&sec);
+
+    // 3. We10X (Tanıdık Klasik Düzen) Customization Card
+    tab.append(&build_we10x_customization_card());
+
+    tab
+}
+
+fn build_we10x_customization_card() -> GtkBox {
+    let cfg = SolarConfig::load();
+    let we10x_sec = GtkBox::new(Orientation::Vertical, 12);
+    we10x_sec.add_css_class("section-box");
+
+    let we10x_title = Label::new(Some(
+        "We10X (Windows 10 Modu) Tema, Renk ve Masaüstü Özelleştirmeleri",
+    ));
+    we10x_title.add_css_class("section-title");
+    we10x_title.set_halign(gtk4::Align::Start);
+    we10x_sec.append(&we10x_title);
+
+    let we10x_desc = Label::new(Some(
+        "Windows 10 kabuk modunun koyu/açık/tam siyah temasını, görev çubuğu ve Başlat menüsü vurgu rengini (kırmızı, mavi, koyu veya dilediğiniz özel RGB/Hex renk), görev çubuğu şeffaflığını ve masaüstü simgelerini özelleştirin.",
+    ));
+    we10x_desc.add_css_class("setting-subtext");
+    we10x_desc.set_wrap(true);
+    we10x_desc.set_xalign(0.0);
+    we10x_desc.set_halign(gtk4::Align::Start);
+    we10x_sec.append(&we10x_desc);
+
+    let status_lbl = Label::new(Some(""));
+    status_lbl.add_css_class("setting-subtext");
+    status_lbl.set_halign(gtk4::Align::Start);
+
+    // 1. Theme Mode: Dark / Light / Pure Black OLED
+    let theme_row = GtkBox::new(Orientation::Horizontal, 12);
+    let theme_lbl = Label::new(Some("Görev Çubuğu ve Pencere Teması:"));
+    theme_lbl.add_css_class("setting-label");
+    theme_lbl.set_hexpand(true);
+    theme_lbl.set_halign(gtk4::Align::Start);
+    theme_row.append(&theme_lbl);
+
+    let we10x_themes = [
+        "Koyu (Windows 10 Dark)",
+        "Açık (Windows 10 Light)",
+        "Tam Siyah (OLED Kontrast)",
+    ];
+    let we10x_theme_dd = DropDown::new(Some(StringList::new(&we10x_themes)), None::<gtk4::Expression>);
+    let init_theme_idx = if cfg.shell.we10x_theme_mode.eq_ignore_ascii_case("light") {
+        1
+    } else if cfg.shell.we10x_theme_mode.eq_ignore_ascii_case("oled")
+        || cfg.shell.we10x_theme_mode.eq_ignore_ascii_case("black")
+    {
+        2
+    } else {
+        0
+    };
+    we10x_theme_dd.set_selected(init_theme_idx);
+    let st_theme = status_lbl.clone();
+    we10x_theme_dd.connect_selected_notify(move |dd| {
+        let mode = match dd.selected() {
+            1 => "light",
+            2 => "oled",
+            _ => "dark",
+        };
+        st_theme.set_text(&format!("[OK] We10X tema modu '{}' olarak uygulandı.", mode));
+        std::thread::spawn(move || {
+            let _ = Command::new("solar-shell")
+                .args(["we10x-config", "set-theme", mode])
+                .status();
+        });
+    });
+    theme_row.append(&we10x_theme_dd);
+    we10x_sec.append(&theme_row);
+
+    // 2. Preset Color Swatches (Red, Blue, Dark Charcoal, Green, Purple, Amber, Teal)
+    let swatch_hdr = Label::new(Some("Hızlı Tema ve Vurgu Rengi Paleti:"));
+    swatch_hdr.add_css_class("setting-label");
+    swatch_hdr.set_halign(gtk4::Align::Start);
+    we10x_sec.append(&swatch_hdr);
+
+    let swatch_row = GtkBox::new(Orientation::Horizontal, 8);
+    let hex_entry = gtk4::Entry::builder()
+        .text(&crate::we10x_profile::normalize_hex_color(
+            &cfg.shell.we10x_accent_color,
+        ))
+        .max_length(7)
+        .width_chars(9)
+        .placeholder_text("#E81123")
+        .build();
+
+    let color_dialog = gtk4::ColorDialog::builder()
+        .title("We10X Özel Tema Rengi Seçin")
+        .with_alpha(false)
+        .modal(true)
+        .build();
+    let mut init_rgba = gdk::RGBA::new(0.0, 0.47, 0.84, 1.0);
+    if let Ok(parsed_rgba) = gdk::RGBA::parse(&cfg.shell.we10x_accent_color) {
+        init_rgba = parsed_rgba;
+    }
+    let color_btn = gtk4::ColorDialogButton::new(Some(color_dialog));
+    color_btn.set_rgba(&init_rgba);
+    color_btn.set_tooltip_text(Some("Renk Tekerleğinden Özel Renk Seçin"));
+
+    let presets: [(&str, &str, &str); 7] = [
+        ("Kırmızı", "#e81123", "swatch-red"),
+        ("Mavi", "#0078d7", "swatch-blue"),
+        ("Koyu", "#2d2d30", "swatch-dark"),
+        ("Yeşil", "#107c10", "swatch-green"),
+        ("Mor", "#881798", "swatch-purple"),
+        ("Kehribar", "#ff6a00", "swatch-amber"),
+        ("Turkuaz", "#008272", "swatch-teal"),
+    ];
+
+    for (label_txt, hex_code, css_cls) in presets {
+        let b = Button::with_label(label_txt);
+        b.add_css_class(css_cls);
+        let hex_owned = hex_code.to_string();
+        let entry_ref = hex_entry.clone();
+        let cbtn_ref = color_btn.clone();
+        let st_sw = status_lbl.clone();
+        b.connect_clicked(move |_| {
+            entry_ref.set_text(&hex_owned);
+            if let Ok(rgba) = gdk::RGBA::parse(&hex_owned) {
+                cbtn_ref.set_rgba(&rgba);
+            }
+            st_sw.set_text(&format!(
+                "[OK] We10X tema rengi {} ({}) olarak ayarlandı.",
+                label_txt, hex_owned
+            ));
+            let hx = hex_owned.clone();
+            std::thread::spawn(move || {
+                let _ = Command::new("solar-shell")
+                    .args(["we10x-config", "set-accent", &hx])
+                    .status();
+            });
+        });
+        swatch_row.append(&b);
+    }
+    we10x_sec.append(&swatch_row);
+
+    // 3. Arbitrary Custom RGB / Hex Color Picker Row
+    let custom_color_row = GtkBox::new(Orientation::Horizontal, 10);
+    let custom_lbl = Label::new(Some("Özel Renk Seçici (İstediğiniz Renk / Hex):"));
+    custom_lbl.add_css_class("setting-label");
+    custom_lbl.set_hexpand(true);
+    custom_lbl.set_halign(gtk4::Align::Start);
+    custom_color_row.append(&custom_lbl);
+
+    let entry_from_dialog = hex_entry.clone();
+    let st_dialog = status_lbl.clone();
+    color_btn.connect_rgba_notify(move |btn| {
+        let c = btn.rgba();
+        let r = (c.red().clamp(0.0, 1.0) * 255.0).round() as u8;
+        let g = (c.green().clamp(0.0, 1.0) * 255.0).round() as u8;
+        let b = (c.blue().clamp(0.0, 1.0) * 255.0).round() as u8;
+        let hex = format!("#{:02x}{:02x}{:02x}", r, g, b);
+        if entry_from_dialog.text().as_str().to_ascii_lowercase() != hex {
+            entry_from_dialog.set_text(&hex);
+        }
+        st_dialog.set_text(&format!("[OK] Özel tema rengi {} uygulandı.", hex));
+        std::thread::spawn(move || {
+            let _ = Command::new("solar-shell")
+                .args(["we10x-config", "set-accent", &hex])
+                .status();
+        });
+    });
+    custom_color_row.append(&color_btn);
+    custom_color_row.append(&hex_entry);
+
+    let apply_hex_btn = Button::with_label("Hex Rengi Uygula");
+    apply_hex_btn.add_css_class("secondary-btn");
+    let entry_for_btn = hex_entry.clone();
+    let cbtn_for_btn = color_btn.clone();
+    let st_hex = status_lbl.clone();
+    apply_hex_btn.connect_clicked(move |_| {
+        let norm = crate::we10x_profile::normalize_hex_color(entry_for_btn.text().as_str());
+        entry_for_btn.set_text(&norm);
+        if let Ok(rgba) = gdk::RGBA::parse(&norm) {
+            cbtn_for_btn.set_rgba(&rgba);
+        }
+        st_hex.set_text(&format!("[OK] Özel Hex rengi {} uygulandı.", norm));
+        std::thread::spawn(move || {
+            let _ = Command::new("solar-shell")
+                .args(["we10x-config", "set-accent", &norm])
+                .status();
+        });
+    });
+    custom_color_row.append(&apply_hex_btn);
+    we10x_sec.append(&custom_color_row);
+
+    // 4. Colorize Taskbar, Start Menu & Titlebars Toggle
+    let colorize_chk = CheckButton::with_label(
+        "Görev çubuğu, Başlat menüsü, İşlem Merkezi ve pencere başlık çubuklarını seçilen tema rengiyle boya",
+    );
+    colorize_chk.set_active(cfg.shell.we10x_colorize_surfaces);
+    let st_col = status_lbl.clone();
+    colorize_chk.connect_toggled(move |chk| {
+        let val = if chk.is_active() { "true" } else { "false" };
+        st_col.set_text("[OK] Görev çubuğu ve başlık renklendirme tercihi güncellendi.");
+        std::thread::spawn(move || {
+            let _ = Command::new("solar-shell")
+                .args(["we10x-config", "set-colorize", val])
+                .status();
+        });
+    });
+    we10x_sec.append(&colorize_chk);
+
+    // 5. Taskbar Opacity
+    let op_row = GtkBox::new(Orientation::Horizontal, 12);
+    let op_lbl = Label::new(Some("We10X Görev Çubuğu Şeffaflığı:"));
+    op_lbl.add_css_class("setting-label");
+    op_lbl.set_hexpand(true);
+    op_lbl.set_halign(gtk4::Align::Start);
+    op_row.append(&op_lbl);
+
+    let op_choices = [
+        "%65 — Şeffaf Cam",
+        "%85 — Yarı Saydam Akrilik",
+        "%95 — Klasik Windows 10 Koyu Cam (Varsayılan)",
+        "%100 — Tam Mat / Opak",
+    ];
+    let op_vals: [u8; 4] = [65, 85, 95, 100];
+    let op_dd = DropDown::new(Some(StringList::new(&op_choices)), None::<gtk4::Expression>);
+    let cur_op = cfg.shell.we10x_taskbar_opacity_pct;
+    let init_op_idx = if cur_op <= 72 {
+        0
+    } else if cur_op <= 90 {
+        1
+    } else if cur_op < 99 {
+        2
+    } else {
+        3
+    };
+    op_dd.set_selected(init_op_idx);
+    op_dd.connect_selected_notify(move |dd| {
+        let pct = op_vals.get(dd.selected() as usize).copied().unwrap_or(95);
+        let pct_s = pct.to_string();
+        std::thread::spawn(move || {
+            let _ = Command::new("solar-shell")
+                .args(["we10x-config", "set-opacity", &pct_s])
+                .status();
+        });
+    });
+    op_row.append(&op_dd);
+    we10x_sec.append(&op_row);
+
+    // 6. Start Icon & Desktop Icons
+    let icon_row = GtkBox::new(Orientation::Horizontal, 12);
+    let icon_lbl = Label::new(Some("Başlat Düğmesi İkonu:"));
+    icon_lbl.add_css_class("setting-label");
+    icon_lbl.set_hexpand(true);
+    icon_lbl.set_halign(gtk4::Align::Start);
+    icon_row.append(&icon_lbl);
+
+    let start_icons = [
+        "We10X 4-Bölmeli Perspektif İkonu (GPL-3.0)",
+        "BlazeOS Alev İkonu",
+    ];
+    let start_icon_dd = DropDown::new(Some(StringList::new(&start_icons)), None::<gtk4::Expression>);
+    start_icon_dd.set_selected(if cfg.shell.we10x_start_icon.eq_ignore_ascii_case("blaze") {
+        1
+    } else {
+        0
+    });
+    start_icon_dd.connect_selected_notify(|dd| {
+        let icon = if dd.selected() == 1 { "blaze" } else { "we10x" };
+        std::thread::spawn(move || {
+            let _ = Command::new("solar-shell")
+                .args(["we10x-config", "set-start-icon", icon])
+                .status();
+        });
+    });
+    icon_row.append(&start_icon_dd);
+    we10x_sec.append(&icon_row);
+
+    let desk_chk = CheckButton::with_label(
+        "Masaüstü simgelerini göster (Bu Bilgisayar, Geri Dönüşüm Kutusu, FireHub Mağaza)",
+    );
+    desk_chk.set_active(cfg.shell.we10x_desktop_icons);
+    desk_chk.connect_toggled(|chk| {
+        let val = if chk.is_active() { "true" } else { "false" };
+        std::thread::spawn(move || {
+            let _ = Command::new("solar-shell")
+                .args(["we10x-config", "set-desktop-icons", val])
+                .status();
+        });
+    });
+    we10x_sec.append(&desk_chk);
+    we10x_sec.append(&status_lbl);
+
+    we10x_sec
+}
+
+fn build_personalize_tab() -> GtkBox {
+    let tab = GtkBox::new(Orientation::Vertical, 14);
+    tab.set_margin_top(10);
+    tab.set_margin_bottom(10);
+
+    // Section 1: Universal Wallpaper Gallery & Custom File Picker (Works in Noctalia, We10X, Caelestia, end4-pC)
+    let wp_sec = GtkBox::new(Orientation::Vertical, 12);
+    wp_sec.add_css_class("section-box");
+
+    let wp_title = Label::new(Some("Masaüstü Duvar Kağıdı Yönetimi (Tüm Kabuklar)"));
+    wp_title.add_css_class("section-title");
+    wp_title.set_halign(gtk4::Align::Start);
+    wp_sec.append(&wp_title);
+
+    let wp_desc = Label::new(Some(
+        "Seçtiğiniz duvar kağıdı aktif kabuk hangisi olursa olsun (BlazeOS Noctalia, Windows 10 Modu We10X, Caelestia, end4-pC) anında uygulanır ve Dosya Gezgini (Nautilus) ile senkronize kalır.",
+    ));
+    wp_desc.add_css_class("setting-subtext");
+    wp_desc.set_wrap(true);
+    wp_desc.set_xalign(0.0);
+    wp_desc.set_halign(gtk4::Align::Start);
+    wp_sec.append(&wp_desc);
+
+    let active_wp_lbl = Label::new(Some(&format!(
+        "Aktif Duvar Kağıdı: {}",
+        crate::wallpaper::current_effective_wallpaper()
+    )));
+    active_wp_lbl.add_css_class("setting-subtext");
+    active_wp_lbl.set_ellipsize(gtk4::pango::EllipsizeMode::Middle);
+    active_wp_lbl.set_halign(gtk4::Align::Start);
+    wp_sec.append(&active_wp_lbl);
+
+    let action_row = GtkBox::new(Orientation::Horizontal, 10);
+    let pick_btn = Button::with_label("Bilgisayardan Duvar Kağıdı Seç...");
+    pick_btn.add_css_class("action-btn");
+    let lbl_after_pick = active_wp_lbl.clone();
+    pick_btn.connect_clicked(move |btn| {
+        let win = btn.root().and_then(|r| r.downcast::<gtk4::Window>().ok());
+        let dialog = gtk4::FileDialog::builder()
+            .title("Duvar Kağıdı Görseli Seçin")
+            .modal(true)
+            .build();
+        let filter = gtk4::FileFilter::new();
+        filter.set_name(Some("Görseller (PNG, JPG, JPEG, WEBP)"));
+        filter.add_mime_type("image/png");
+        filter.add_mime_type("image/jpeg");
+        filter.add_mime_type("image/webp");
+        let filters = gtk4::gio::ListStore::new::<gtk4::FileFilter>();
+        filters.append(&filter);
+        dialog.set_filters(Some(&filters));
+        let lbl_cb = lbl_after_pick.clone();
+        dialog.open(win.as_ref(), None::<&gtk4::gio::Cancellable>, move |res| {
+            if let Ok(file) = res {
+                if let Some(path) = file.path() {
+                    let path_str = path.to_string_lossy().to_string();
+                    lbl_cb.set_text(&format!("[OK] Aktif Duvar Kağıdı: {}", path_str));
+                    std::thread::spawn(move || {
+                        let _ = crate::wallpaper::apply_wallpaper_everywhere(&path_str, true);
+                    });
+                }
+            }
+        });
+    });
+    action_row.append(&pick_btn);
+
+    let open_dir_btn = Button::with_label("Duvar Kağıdı Klasörünü Aç");
+    open_dir_btn.add_css_class("secondary-btn");
+    open_dir_btn.connect_clicked(|_| {
+        let _ = Command::new("nautilus")
+            .arg("/usr/share/backgrounds/blazeos")
+            .spawn();
+    });
+    action_row.append(&open_dir_btn);
+    wp_sec.append(&action_row);
+
+    let gallery = gtk4::FlowBox::builder()
+        .selection_mode(gtk4::SelectionMode::None)
+        .max_children_per_line(3)
+        .min_children_per_line(2)
+        .column_spacing(10)
+        .row_spacing(10)
+        .homogeneous(true)
+        .build();
+
+    for (title_txt, img_path) in crate::wallpaper::discover_available_wallpapers() {
+        let card = GtkBox::new(Orientation::Vertical, 6);
+        card.add_css_class("wp-card");
+
+        let pic = gtk4::Picture::for_filename(&img_path);
+        pic.set_can_shrink(true);
+        pic.set_content_fit(gtk4::ContentFit::Cover);
+        pic.set_size_request(176, 98);
+        card.append(&pic);
+
+        let name_l = Label::new(Some(&title_txt));
+        name_l.add_css_class("setting-subtext");
+        name_l.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        name_l.set_max_width_chars(24);
+        name_l.set_halign(gtk4::Align::Start);
+        card.append(&name_l);
+
+        let use_btn = Button::with_label("Duvar Kağıdı Yap");
+        use_btn.add_css_class("secondary-btn");
+        let p_owned = img_path.clone();
+        let lbl_card = active_wp_lbl.clone();
+        use_btn.connect_clicked(move |_| {
+            lbl_card.set_text(&format!("[OK] Aktif Duvar Kağıdı: {}", p_owned));
+            let target = p_owned.clone();
+            std::thread::spawn(move || {
+                let _ = crate::wallpaper::apply_wallpaper_everywhere(&target, true);
+            });
+        });
+        card.append(&use_btn);
+        gallery.insert(&card, -1);
+    }
+    wp_sec.append(&gallery);
+    tab.append(&wp_sec);
+
+    // Section 2: Rich We10X Theme Mode, Accent Color & Taskbar Customization
+    tab.append(&build_we10x_customization_card());
 
     tab
 }
@@ -1513,35 +1988,10 @@ fn build_display_tab() -> GtkBox {
     tab.set_margin_start(16);
     tab.set_margin_end(16);
 
-    let sec = GtkBox::new(Orientation::Vertical, 12);
-    sec.add_css_class("section-box");
-
-    let title = Label::new(Some("Genel Masaüstü ve Arayüz Ölçeği"));
-    title.add_css_class("section-title");
-    title.set_halign(gtk4::Align::Start);
-    sec.append(&title);
-
-    let desc = Label::new(Some(
-        "Ekranınızdaki pencere ve simgelerin genel boyutunu donanımınıza ve ekran çözünürlüğünüze göre ayarlayın. Küçük veya sanal makine ekranlarında (1280x800 vb.) %85 veya %75 kompakt ölçek önerilir. Çoklu monitör kurulumlarında her monitör için aşağıdan bağımsız ölçek atayabilirsiniz.",
-    ));
-    desc.add_css_class("setting-subtext");
-    desc.set_wrap(true);
-    desc.set_halign(gtk4::Align::Start);
-    sec.append(&desc);
-
     let cfg = SolarConfig::load();
-
-    // Row: Scale factor selection
-    let row_scale = GtkBox::new(Orientation::Horizontal, 12);
-    let lbl_scale = Label::new(Some("Genel Sistem Ölçeği:"));
-    lbl_scale.add_css_class("setting-label");
-    lbl_scale.set_hexpand(true);
-    lbl_scale.set_halign(gtk4::Align::Start);
-    row_scale.append(&lbl_scale);
-
     let scale_presets = [
         "0.75x — Kompakt (%75)",
-        "0.85x — Küçük (%85 - 1280x800 ve sanal makine için önerilen)",
+        "0.85x — Küçük (%85 - 1280x800 için önerilen)",
         "1.00x — Standart (%100 - Varsayılan)",
         "1.25x — Büyük (%125)",
         "1.50x — Geniş (%150 - 2K Ekranlar)",
@@ -1550,12 +2000,390 @@ fn build_display_tab() -> GtkBox {
     ];
     let scale_values = [0.75, 0.85, 1.00, 1.25, 1.50, 1.75, 2.00];
 
+    // SECTION 1: Per-Monitor Manual Resolution, Refresh Rate (Hz) & Independent DPI Scaling
+    let sec_mon = GtkBox::new(Orientation::Vertical, 14);
+    sec_mon.add_css_class("section-box");
+
+    let title_mon = Label::new(Some(
+        "Monitör Çözünürlüğü, Yenileme Hızı (Hz) ve Bağımsız Ölçekleme",
+    ));
+    title_mon.add_css_class("section-title");
+    title_mon.set_halign(gtk4::Align::Start);
+    sec_mon.append(&title_mon);
+
+    let desc_mon = Label::new(Some(
+        "Bağlı her ekran için çözünürlüğü (ör. 1920x1080, 2560x1440, 1366x768), yenileme hızını (60 Hz, 75 Hz, 120 Hz, 144 Hz, 240 Hz vb.) ve bağımsız DPI ölçeğini doğrudan seçin veya özel çözünürlük/Hz girin.",
+    ));
+    desc_mon.add_css_class("setting-subtext");
+    desc_mon.set_wrap(true);
+    desc_mon.set_xalign(0.0);
+    desc_mon.set_halign(gtk4::Align::Start);
+    sec_mon.append(&desc_mon);
+
+    let common_resolutions: [(u32, u32); 11] = [
+        (3840, 2160),
+        (2560, 1440),
+        (1920, 1200),
+        (1920, 1080),
+        (1680, 1050),
+        (1600, 900),
+        (1440, 900),
+        (1366, 768),
+        (1280, 800),
+        (1280, 720),
+        (1024, 768),
+    ];
+    let common_hz: [u32; 7] = [60_000, 75_000, 90_000, 120_000, 144_000, 165_000, 240_000];
+
+    let detected_outputs = get_detected_outputs();
+    for out in detected_outputs {
+        let mon_card = GtkBox::new(Orientation::Vertical, 10);
+        mon_card.add_css_class("wp-card");
+
+        let mon_header = GtkBox::new(Orientation::Horizontal, 10);
+        let mon_icon = Image::from_icon_name("video-display");
+        mon_icon.set_pixel_size(24);
+        mon_header.append(&mon_icon);
+
+        let info_box = GtkBox::new(Orientation::Vertical, 2);
+        info_box.set_hexpand(true);
+
+        let name_lbl = Label::new(Some(&format!("{} — {}", out.name, out.description)));
+        name_lbl.add_css_class("setting-label");
+        name_lbl.set_halign(gtk4::Align::Start);
+        info_box.append(&name_lbl);
+
+        let res_lbl = Label::new(Some(&format!(
+            "Aktif Mod: {} | Ölçek: {:.2}x",
+            out.resolution, out.scale
+        )));
+        res_lbl.add_css_class("setting-subtext");
+        res_lbl.set_halign(gtk4::Align::Start);
+        info_box.append(&res_lbl);
+        mon_header.append(&info_box);
+        mon_card.append(&mon_header);
+
+        // Build unique resolution list: EDID hardware resolutions first, then common fallback/custom resolutions
+        let mut res_items: Vec<(u32, u32, bool)> = Vec::new();
+        for m in &out.modes {
+            if !res_items.iter().any(|(w, h, _)| *w == m.width && *h == m.height) {
+                res_items.push((m.width, m.height, true));
+            }
+        }
+        if !res_items
+            .iter()
+            .any(|(w, h, _)| *w == out.current_width && *h == out.current_height)
+        {
+            res_items.push((out.current_width, out.current_height, true));
+        }
+        for (cw, ch) in common_resolutions {
+            if !res_items.iter().any(|(w, h, _)| *w == cw && *h == ch) {
+                res_items.push((cw, ch, false));
+            }
+        }
+        res_items.sort_by(|a, b| (b.0 as u64 * b.1 as u64).cmp(&(a.0 as u64 * a.1 as u64)));
+
+        let res_labels: Vec<String> = res_items
+            .iter()
+            .map(|(w, h, is_hw)| {
+                if *is_hw {
+                    format!("{} × {} (Donanım)", w, h)
+                } else {
+                    format!("{} × {} (Özel Mod)", w, h)
+                }
+            })
+            .collect();
+        let res_label_refs: Vec<&str> = res_labels.iter().map(|s| s.as_str()).collect();
+        let res_dd = DropDown::new(Some(StringList::new(&res_label_refs)), None::<gtk4::Expression>);
+
+        let init_res_idx = res_items
+            .iter()
+            .position(|(w, h, _)| *w == out.current_width && *h == out.current_height)
+            .unwrap_or(0);
+        res_dd.set_selected(init_res_idx as u32);
+
+        // Helper closure to compute available refresh rates `(refresh_mhz, is_hw)` for a selected `(w, h)`
+        let hw_modes = out.modes.clone();
+        let build_hz_options = move |w: u32, h: u32| -> Vec<(u32, bool)> {
+            let mut list: Vec<(u32, bool)> = Vec::new();
+            for m in &hw_modes {
+                if m.width == w
+                    && m.height == h
+                    && !list.iter().any(|(r, _)| (*r as i64 - m.refresh_mhz as i64).abs() < 50)
+                {
+                    list.push((m.refresh_mhz, true));
+                }
+            }
+            for chz in common_hz {
+                if !list.iter().any(|(r, _)| (*r as i64 - chz as i64).abs() < 600) {
+                    list.push((chz, false));
+                }
+            }
+            list.sort_by(|a, b| b.0.cmp(&a.0));
+            list
+        };
+
+        let init_pair = res_items.get(init_res_idx).copied().unwrap_or((1920, 1080, true));
+        let init_hz_opts = build_hz_options(init_pair.0, init_pair.1);
+        let hz_state: Rc<std::cell::RefCell<Vec<(u32, bool)>>> =
+            Rc::new(std::cell::RefCell::new(init_hz_opts.clone()));
+
+        let hz_labels_init: Vec<String> = init_hz_opts
+            .iter()
+            .map(|(mhz, is_hw)| {
+                if *is_hw {
+                    format!("{:.2} Hz (Donanım)", *mhz as f64 / 1000.0)
+                } else {
+                    format!("{:.2} Hz (Özel)", *mhz as f64 / 1000.0)
+                }
+            })
+            .collect();
+        let hz_refs_init: Vec<&str> = hz_labels_init.iter().map(|s| s.as_str()).collect();
+        let hz_dd = DropDown::new(Some(StringList::new(&hz_refs_init)), None::<gtk4::Expression>);
+
+        let init_hz_idx = init_hz_opts
+            .iter()
+            .position(|(mhz, _)| (*mhz as i64 - out.current_refresh_mhz as i64).abs() < 600)
+            .unwrap_or(0);
+        hz_dd.set_selected(init_hz_idx as u32);
+
+        // Refresh Hz dropdown dynamically whenever resolution dropdown changes
+        let res_items_rc = Rc::new(res_items);
+        let res_for_hz = res_items_rc.clone();
+        let hz_dd_ref = hz_dd.clone();
+        let hz_state_ref = hz_state.clone();
+        let build_hz_cb = build_hz_options.clone();
+        let pref_mhz = out.current_refresh_mhz;
+        res_dd.connect_selected_notify(move |dd| {
+            let idx = dd.selected() as usize;
+            let (w, h, _) = res_for_hz.get(idx).copied().unwrap_or((1920, 1080, true));
+            let next_opts = build_hz_cb(w, h);
+            let labels: Vec<String> = next_opts
+                .iter()
+                .map(|(mhz, is_hw)| {
+                    if *is_hw {
+                        format!("{:.2} Hz (Donanım)", *mhz as f64 / 1000.0)
+                    } else {
+                        format!("{:.2} Hz (Özel)", *mhz as f64 / 1000.0)
+                    }
+                })
+                .collect();
+            let refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
+            hz_dd_ref.set_model(Some(&StringList::new(&refs)));
+            let best_idx = next_opts
+                .iter()
+                .position(|(mhz, _)| (*mhz as i64 - pref_mhz as i64).abs() < 600)
+                .unwrap_or(0);
+            *hz_state_ref.borrow_mut() = next_opts;
+            hz_dd_ref.set_selected(best_idx as u32);
+        });
+
+        // Scale dropdown for this monitor
+        let mon_scale_dd =
+            DropDown::new(Some(StringList::new(&scale_presets)), None::<gtk4::Expression>);
+        let mut mon_sel_idx = 2;
+        for (i, &val) in scale_values.iter().enumerate() {
+            if (out.scale - val).abs() < 0.04 {
+                mon_sel_idx = i as u32;
+                break;
+            }
+        }
+        mon_scale_dd.set_selected(mon_sel_idx);
+
+        // Controls row 1: Resolution + Refresh Rate (Hz)
+        let row_mode_sel = GtkBox::new(Orientation::Horizontal, 10);
+        let l_res = Label::new(Some("Çözünürlük:"));
+        l_res.add_css_class("setting-label");
+        row_mode_sel.append(&l_res);
+        row_mode_sel.append(&res_dd);
+
+        let l_hz = Label::new(Some("Yenileme Hızı (Hz):"));
+        l_hz.add_css_class("setting-label");
+        l_hz.set_margin_start(8);
+        row_mode_sel.append(&l_hz);
+        row_mode_sel.append(&hz_dd);
+        mon_card.append(&row_mode_sel);
+
+        // Controls row 2: DPI Scale + Apply Button
+        let row_scale_sel = GtkBox::new(Orientation::Horizontal, 10);
+        let l_sc = Label::new(Some("Monitör Ölçeği:"));
+        l_sc.add_css_class("setting-label");
+        row_scale_sel.append(&l_sc);
+        row_scale_sel.append(&mon_scale_dd);
+
+        let mon_apply = Button::with_label("Çözünürlük, Hz ve Ölçeği Uygula");
+        mon_apply.add_css_class("action-btn");
+
+        let mon_status = Label::new(Some(""));
+        mon_status.add_css_class("setting-subtext");
+        mon_status.set_halign(gtk4::Align::Start);
+
+        let out_name = out.name.clone();
+        let res_dd_apply = res_dd.clone();
+        let hz_dd_apply = hz_dd.clone();
+        let sc_dd_apply = mon_scale_dd.clone();
+        let res_items_apply = res_items_rc.clone();
+        let hz_state_apply = hz_state.clone();
+        let mon_status_apply = mon_status.clone();
+        let res_lbl_apply = res_lbl.clone();
+
+        mon_apply.connect_clicked(move |_| {
+            let r_idx = res_dd_apply.selected() as usize;
+            let (w, h, is_hw_res) = res_items_apply
+                .get(r_idx)
+                .copied()
+                .unwrap_or((1920, 1080, true));
+            let h_idx = hz_dd_apply.selected() as usize;
+            let (mhz, is_hw_hz) = hz_state_apply
+                .borrow()
+                .get(h_idx)
+                .copied()
+                .unwrap_or((60_000, false));
+            let sc_idx = sc_dd_apply.selected() as usize;
+            let sc_val = scale_values.get(sc_idx).copied().unwrap_or(1.00);
+
+            let mode_spec = format!("{}x{}@{:.3}", w, h, mhz as f64 / 1000.0);
+            let is_custom = !(is_hw_res && is_hw_hz);
+
+            match apply_per_output_mode_dynamically(&out_name, &mode_spec, is_custom) {
+                Ok(()) => {
+                    apply_per_output_scale_dynamically(&out_name, sc_val);
+                    res_lbl_apply.set_text(&format!(
+                        "Aktif Mod: {}x{} @ {:.2}Hz | Ölçek: {:.2}x",
+                        w,
+                        h,
+                        mhz as f64 / 1000.0,
+                        sc_val
+                    ));
+                    mon_status_apply.set_text(&format!(
+                        "[OK] {} için {} ({:.2}x ölçek) başarıyla uygulandı ve kaydedildi.",
+                        out_name, mode_spec, sc_val
+                    ));
+                }
+                Err(err) => {
+                    mon_status_apply.set_text(&format!(
+                        "[UYARI] {} modu uygulanamadı: {}",
+                        mode_spec, err
+                    ));
+                }
+            }
+        });
+        row_scale_sel.append(&mon_apply);
+        mon_card.append(&row_scale_sel);
+
+        // Controls row 3: Custom W x H @ Hz Manual Entry
+        let custom_row = GtkBox::new(Orientation::Horizontal, 8);
+        let c_lbl = Label::new(Some("Manuel Özel Mod:"));
+        c_lbl.add_css_class("setting-subtext");
+        custom_row.append(&c_lbl);
+
+        let w_entry = gtk4::Entry::builder()
+            .text(out.current_width.to_string())
+            .width_chars(6)
+            .placeholder_text("1920")
+            .build();
+        let x_lbl = Label::new(Some("×"));
+        let h_entry = gtk4::Entry::builder()
+            .text(out.current_height.to_string())
+            .width_chars(6)
+            .placeholder_text("1080")
+            .build();
+        let at_lbl = Label::new(Some("@"));
+        let hz_entry = gtk4::Entry::builder()
+            .text(format!("{:.0}", out.current_refresh_mhz as f64 / 1000.0))
+            .width_chars(5)
+            .placeholder_text("60")
+            .build();
+        let hz_u_lbl = Label::new(Some("Hz"));
+
+        let custom_btn = Button::with_label("Özel Modu Uygula");
+        custom_btn.add_css_class("secondary-btn");
+        let out_custom = out.name.clone();
+        let st_custom = mon_status.clone();
+        let rl_custom = res_lbl.clone();
+        let w_ent_c = w_entry.clone();
+        let h_ent_c = h_entry.clone();
+        let hz_ent_c = hz_entry.clone();
+        let cur_sc = out.scale;
+        custom_btn.connect_clicked(move |_| {
+            let w_ok = w_ent_c.text().trim().parse::<u32>().unwrap_or(0);
+            let h_ok = h_ent_c.text().trim().parse::<u32>().unwrap_or(0);
+            let hz_ok = hz_ent_c
+                .text()
+                .trim()
+                .replace(',', ".")
+                .parse::<f64>()
+                .unwrap_or(0.0);
+            if !(640..=7680).contains(&w_ok)
+                || !(480..=4320).contains(&h_ok)
+                || !(24.0..=500.0).contains(&hz_ok)
+            {
+                st_custom.set_text(
+                    "[HATA] Geçerli bir çözünürlük (640..7680 × 480..4320) ve Hz (24..500) girin.",
+                );
+                return;
+            }
+            let spec = format!("{}x{}@{:.3}", w_ok, h_ok, hz_ok);
+            match apply_per_output_mode_dynamically(&out_custom, &spec, true) {
+                Ok(()) => {
+                    rl_custom.set_text(&format!(
+                        "Aktif Mod: {}x{} @ {:.2}Hz | Ölçek: {:.2}x",
+                        w_ok, h_ok, hz_ok, cur_sc
+                    ));
+                    st_custom.set_text(&format!(
+                        "[OK] Özel mod {} başarıyla uygulandı ve kaydedildi.",
+                        spec
+                    ));
+                }
+                Err(e) => {
+                    st_custom.set_text(&format!("[UYARI] Özel mod uygulanamadı: {}", e));
+                }
+            }
+        });
+
+        custom_row.append(&w_entry);
+        custom_row.append(&x_lbl);
+        custom_row.append(&h_entry);
+        custom_row.append(&at_lbl);
+        custom_row.append(&hz_entry);
+        custom_row.append(&hz_u_lbl);
+        custom_row.append(&custom_btn);
+        mon_card.append(&custom_row);
+        mon_card.append(&mon_status);
+
+        sec_mon.append(&mon_card);
+    }
+    tab.append(&sec_mon);
+
+    // SECTION 2: Global DPI Scaling Across All Displays
+    let sec = GtkBox::new(Orientation::Vertical, 12);
+    sec.add_css_class("section-box");
+
+    let title = Label::new(Some("Genel Masaüstü ve Arayüz Ölçeği (Tüm Ekranlar)"));
+    title.add_css_class("section-title");
+    title.set_halign(gtk4::Align::Start);
+    sec.append(&title);
+
+    let desc = Label::new(Some(
+        "Tüm ekranlarınızdaki pencere ve yazı boyutunu tek seferde ölçeklendirin.",
+    ));
+    desc.add_css_class("setting-subtext");
+    desc.set_wrap(true);
+    desc.set_halign(gtk4::Align::Start);
+    sec.append(&desc);
+
+    let row_scale = GtkBox::new(Orientation::Horizontal, 12);
+    let lbl_scale = Label::new(Some("Genel Sistem Ölçeği:"));
+    lbl_scale.add_css_class("setting-label");
+    lbl_scale.set_hexpand(true);
+    lbl_scale.set_halign(gtk4::Align::Start);
+    row_scale.append(&lbl_scale);
+
     let scale_model = StringList::new(&scale_presets);
     let scale_dd = DropDown::new(Some(scale_model), None::<gtk4::Expression>);
 
-    // Select matching index based on current config
     let cur_scale = cfg.display.scale;
-    let mut selected_idx = 2; // Default to 1.00x (index 2)
+    let mut selected_idx = 2;
     for (i, &val) in scale_values.iter().enumerate() {
         if (cur_scale - val).abs() < 0.04 {
             selected_idx = i as u32;
@@ -1566,12 +2394,10 @@ fn build_display_tab() -> GtkBox {
     row_scale.append(&scale_dd);
     sec.append(&row_scale);
 
-    // Row: Status label for feedback
     let status_lbl = Label::new(Some(""));
     status_lbl.add_css_class("setting-subtext");
     status_lbl.set_halign(gtk4::Align::Start);
 
-    // Row: Apply buttons
     let btn_box = GtkBox::new(Orientation::Horizontal, 10);
     btn_box.set_margin_top(8);
 
@@ -1589,16 +2415,13 @@ fn build_display_tab() -> GtkBox {
             1.00
         };
 
-        // 1. Save in SolarConfig
         let mut c = SolarConfig::load();
         c.display.scale = chosen_scale;
         c.display.text_scale = chosen_scale;
         let _ = c.save();
 
-        // 2. Apply dynamically via Niri IPC
         apply_display_scale_dynamically(chosen_scale);
 
-        // 3. Update status label
         status_clone.set_text(&format!(
             "[OK] Genel ölçek {:.2}x başarıyla uygulandı ve kaydedildi.",
             chosen_scale
@@ -1606,7 +2429,6 @@ fn build_display_tab() -> GtkBox {
     });
     btn_box.append(&apply_btn);
 
-    // Reset button
     let reset_btn = Button::with_label("Varsayılana Sıfırla (1.00x)");
     reset_btn.add_css_class("secondary-btn");
     let scale_dd_reset = scale_dd.clone();
@@ -1626,92 +2448,6 @@ fn build_display_tab() -> GtkBox {
     sec.append(&status_lbl);
     tab.append(&sec);
 
-    // SECTION 2: Multi-Monitor Independent DPI Scaling
-    let sec_mon = GtkBox::new(Orientation::Vertical, 12);
-    sec_mon.add_css_class("section-box");
-
-    let title_mon = Label::new(Some("Bağlı Monitörler ve Bağımsız DPI Ölçekleme"));
-    title_mon.add_css_class("section-title");
-    title_mon.set_halign(gtk4::Align::Start);
-    sec_mon.append(&title_mon);
-
-    let desc_mon = Label::new(Some(
-        "Her bir monitörün donanımsal çözünürlüğüne ve panel boyutuna göre bağımsız ölçek belirleyin. Örneğin dizüstü dahili ekranınız %125 iken harici monitörünüz %100 veya %150 olarak çalışabilir.",
-    ));
-    desc_mon.add_css_class("setting-subtext");
-    desc_mon.set_wrap(true);
-    desc_mon.set_halign(gtk4::Align::Start);
-    sec_mon.append(&desc_mon);
-
-    let detected_outputs = get_detected_outputs();
-    for out in detected_outputs {
-        let mon_box = GtkBox::new(Orientation::Vertical, 8);
-        mon_box.set_margin_top(4);
-        mon_box.set_margin_bottom(6);
-
-        let mon_header = GtkBox::new(Orientation::Horizontal, 10);
-        let mon_icon = Image::from_icon_name("video-display");
-        mon_icon.set_pixel_size(24);
-        mon_header.append(&mon_icon);
-
-        let info_box = GtkBox::new(Orientation::Vertical, 2);
-        info_box.set_hexpand(true);
-
-        let name_lbl = Label::new(Some(&format!("{} — {}", out.name, out.description)));
-        name_lbl.add_css_class("setting-label");
-        name_lbl.set_halign(gtk4::Align::Start);
-        info_box.append(&name_lbl);
-
-        let res_lbl = Label::new(Some(&format!("Çözünürlük: {}", out.resolution)));
-        res_lbl.add_css_class("setting-subtext");
-        res_lbl.set_halign(gtk4::Align::Start);
-        info_box.append(&res_lbl);
-        mon_header.append(&info_box);
-
-        // DropDown for this monitor
-        let mon_dd = DropDown::new(Some(StringList::new(&scale_presets)), None::<gtk4::Expression>);
-        let mut mon_sel_idx = 2;
-        for (i, &val) in scale_values.iter().enumerate() {
-            if (out.scale - val).abs() < 0.04 {
-                mon_sel_idx = i as u32;
-                break;
-            }
-        }
-        mon_dd.set_selected(mon_sel_idx);
-        mon_header.append(&mon_dd);
-
-        // Apply button for this monitor
-        let mon_apply = Button::with_label("Uygula");
-        mon_apply.add_css_class("action-btn");
-
-        let out_name = out.name.clone();
-        let mon_dd_clone = mon_dd.clone();
-        let mon_status = Label::new(Some(""));
-        mon_status.add_css_class("setting-subtext");
-        mon_status.set_halign(gtk4::Align::Start);
-        let mon_status_clone = mon_status.clone();
-
-        mon_apply.connect_clicked(move |_| {
-            let idx = mon_dd_clone.selected() as usize;
-            let val = if idx < scale_values.len() {
-                scale_values[idx]
-            } else {
-                1.00
-            };
-            apply_per_output_scale_dynamically(&out_name, val);
-            mon_status_clone.set_text(&format!(
-                "[OK] {} ekranı için {:.2}x bağımsız ölçek uygulandı.",
-                out_name, val
-            ));
-        });
-        mon_header.append(&mon_apply);
-
-        mon_box.append(&mon_header);
-        mon_box.append(&mon_status);
-        sec_mon.append(&mon_box);
-    }
-
-    tab.append(&sec_mon);
     tab
 }
 
@@ -1844,11 +2580,23 @@ pub fn sync_caelestia_scale(_scale: f64) {
 }
 
 #[derive(Clone, Debug)]
+pub struct OutputModeEntry {
+    pub width: u32,
+    pub height: u32,
+    pub refresh_mhz: u32,
+    pub is_preferred: bool,
+}
+
+#[derive(Clone, Debug)]
 pub struct OutputDetails {
     pub name: String,
     pub description: String,
     pub resolution: String,
     pub scale: f64,
+    pub current_width: u32,
+    pub current_height: u32,
+    pub current_refresh_mhz: u32,
+    pub modes: Vec<OutputModeEntry>,
 }
 
 pub fn get_detected_outputs() -> Vec<OutputDetails> {
@@ -1868,19 +2616,62 @@ pub fn get_detected_outputs() -> Vec<OutputDetails> {
                             "Dahili / Harici Ekran".to_string()
                         };
 
-                        let mut res_str = "1920x1080 @ 60Hz".to_string();
+                        let mut parsed_modes = Vec::new();
+                        let mut cur_w: u32 = 1920;
+                        let mut cur_h: u32 = 1080;
+                        let mut cur_mhz: u32 = 60_000;
+                        let mut res_str = "1920x1080 @ 60.00Hz".to_string();
+
                         if let Some(modes) = data.get("modes").and_then(|v| v.as_array()) {
-                            let cur_idx = data.get("current_mode").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                            for m in modes {
+                                let w = m.get("width").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                                let h = m.get("height").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                                let rr =
+                                    m.get("refresh_rate").and_then(|v| v.as_u64()).unwrap_or(60_000)
+                                        as u32;
+                                let pref = m
+                                    .get("is_preferred")
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(false);
+                                if w > 0 && h > 0 {
+                                    parsed_modes.push(OutputModeEntry {
+                                        width: w,
+                                        height: h,
+                                        refresh_mhz: rr,
+                                        is_preferred: pref,
+                                    });
+                                }
+                            }
+                            let cur_idx = data
+                                .get("current_mode")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0) as usize;
                             if let Some(m) = modes.get(cur_idx).or_else(|| modes.first()) {
-                                let w = m.get("width").and_then(|v| v.as_u64()).unwrap_or(1920);
-                                let h = m.get("height").and_then(|v| v.as_u64()).unwrap_or(1080);
-                                let rr = m.get("refresh_rate").and_then(|v| v.as_u64()).unwrap_or(60000) / 1000;
-                                res_str = format!("{}x{} @ {}Hz", w, h, rr);
+                                cur_w = m.get("width").and_then(|v| v.as_u64()).unwrap_or(1920) as u32;
+                                cur_h = m.get("height").and_then(|v| v.as_u64()).unwrap_or(1080) as u32;
+                                cur_mhz = m
+                                    .get("refresh_rate")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(60_000) as u32;
+                                res_str = format!(
+                                    "{}x{} @ {:.2}Hz",
+                                    cur_w,
+                                    cur_h,
+                                    cur_mhz as f64 / 1000.0
+                                );
                             }
                         }
 
-                        let saved_scale = cfg.display.outputs.iter().find(|o| o.name == *name).map(|o| o.scale);
-                        let logical_scale = data.get("logical").and_then(|l| l.get("scale")).and_then(|v| v.as_f64());
+                        let saved_scale = cfg
+                            .display
+                            .outputs
+                            .iter()
+                            .find(|o| o.name == *name)
+                            .map(|o| o.scale);
+                        let logical_scale = data
+                            .get("logical")
+                            .and_then(|l| l.get("scale"))
+                            .and_then(|v| v.as_f64());
                         let cur_scale = saved_scale.or(logical_scale).unwrap_or(cfg.display.scale);
 
                         outputs.push(OutputDetails {
@@ -1888,6 +2679,10 @@ pub fn get_detected_outputs() -> Vec<OutputDetails> {
                             description: desc,
                             resolution: res_str,
                             scale: cur_scale,
+                            current_width: cur_w,
+                            current_height: cur_h,
+                            current_refresh_mhz: cur_mhz,
+                            modes: parsed_modes,
                         });
                     }
                 }
@@ -1899,52 +2694,230 @@ pub fn get_detected_outputs() -> Vec<OutputDetails> {
         outputs.push(OutputDetails {
             name: "Virtual-1".to_string(),
             description: "Sanal / Varsayılan Ekran".to_string(),
-            resolution: "1920x1080 @ 60Hz".to_string(),
+            resolution: "1920x1080 @ 60.00Hz".to_string(),
             scale: cfg.display.scale,
+            current_width: 1920,
+            current_height: 1080,
+            current_refresh_mhz: 60_000,
+            modes: vec![OutputModeEntry {
+                width: 1920,
+                height: 1080,
+                refresh_mhz: 60_000,
+                is_preferred: true,
+            }],
         });
     }
 
     outputs
 }
 
+fn strip_kdl_line_comment(line: &str) -> &str {
+    let bytes = line.as_bytes();
+    let mut in_quotes = false;
+    let mut escaped = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if escaped {
+            escaped = false;
+            i += 1;
+            continue;
+        }
+        if b == b'\\' && in_quotes {
+            escaped = true;
+            i += 1;
+            continue;
+        }
+        if b == b'"' {
+            in_quotes = !in_quotes;
+        } else if !in_quotes && b == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+            return &line[..i];
+        }
+        i += 1;
+    }
+    line
+}
+
+fn count_kdl_braces(code: &str) -> (usize, usize) {
+    let mut opens = 0usize;
+    let mut closes = 0usize;
+    let mut in_quotes = false;
+    let mut escaped = false;
+    for b in code.bytes() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if b == b'\\' && in_quotes {
+            escaped = true;
+            continue;
+        }
+        if b == b'"' {
+            in_quotes = !in_quotes;
+        } else if !in_quotes {
+            if b == b'{' {
+                opens += 1;
+            } else if b == b'}' {
+                closes += 1;
+            }
+        }
+    }
+    (opens, closes)
+}
+
 fn rewrite_niri_kdl_output_scale(content: &str, output_name: &str, scale_str: &str) -> String {
     let mut new_lines = Vec::new();
     let mut in_target_output = false;
+    let mut brace_depth: usize = 0;
     let mut replaced_in_existing = false;
+    let mut target_header_line = String::new();
     let mut preserved_inner_lines: Vec<String> = Vec::new();
     let target_header = format!("output \"{}\"", output_name);
 
     for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with(&target_header) && trimmed.ends_with('{') {
-            in_target_output = true;
-            preserved_inner_lines.clear();
+        let code = strip_kdl_line_comment(line).trim();
+        if !in_target_output {
+            if let Some(rest) = code.strip_prefix(&target_header) {
+                let rest_trimmed = rest.trim();
+                let header_boundary = rest.is_empty()
+                    || rest.starts_with(char::is_whitespace)
+                    || rest.starts_with('{');
+                if header_boundary && rest_trimmed == "{" {
+                    in_target_output = true;
+                    brace_depth = 1;
+                    target_header_line = line.to_string();
+                    preserved_inner_lines.clear();
+                    continue;
+                }
+            }
+            new_lines.push(line.to_string());
             continue;
         }
-        if in_target_output {
-            if trimmed == "}" {
-                in_target_output = false;
-                if !replaced_in_existing {
-                    new_lines.push(format!("output \"{}\" {{", output_name));
-                    for inner in &preserved_inner_lines {
-                        new_lines.push(inner.clone());
-                    }
-                    new_lines.push(format!("    scale {}", scale_str));
-                    new_lines.push("}".to_string());
-                    replaced_in_existing = true;
+
+        let (opens, closes) = count_kdl_braces(code);
+        let depth_before = brace_depth;
+        brace_depth = brace_depth.saturating_add(opens).saturating_sub(closes);
+
+        if brace_depth == 0 {
+            in_target_output = false;
+            if !replaced_in_existing {
+                new_lines.push(target_header_line.clone());
+                for inner in &preserved_inner_lines {
+                    new_lines.push(inner.clone());
                 }
-            } else if !trimmed.starts_with("scale ") {
+                new_lines.push(format!("    scale {}", scale_str));
+                new_lines.push(line.to_string());
+                replaced_in_existing = true;
+            }
+        } else {
+            let is_top_level_scale = depth_before == 1
+                && opens == 0
+                && closes == 0
+                && (code == "scale" || code.starts_with("scale ") || code.starts_with("scale\t"));
+            if !is_top_level_scale {
                 preserved_inner_lines.push(line.to_string());
             }
-            continue;
         }
-        new_lines.push(line.to_string());
+    }
+
+    if in_target_output && !replaced_in_existing {
+        new_lines.push(target_header_line);
+        for inner in &preserved_inner_lines {
+            new_lines.push(inner.clone());
+        }
+        new_lines.push(format!("    scale {}", scale_str));
+        new_lines.push("}".to_string());
+        replaced_in_existing = true;
     }
 
     if !replaced_in_existing {
         new_lines.push(format!(
             "\noutput \"{}\" {{\n    scale {}\n}}",
             output_name, scale_str
+        ));
+    }
+    new_lines.join("\n") + "\n"
+}
+
+fn rewrite_niri_kdl_output_mode(
+    content: &str,
+    output_name: &str,
+    mode_str: &str,
+    is_custom: bool,
+) -> String {
+    let mode_line = if is_custom {
+        format!("    mode \"{}\" custom=true", mode_str)
+    } else {
+        format!("    mode \"{}\"", mode_str)
+    };
+    let mut new_lines = Vec::new();
+    let mut in_target_output = false;
+    let mut brace_depth: usize = 0;
+    let mut replaced_in_existing = false;
+    let mut target_header_line = String::new();
+    let mut preserved_inner_lines: Vec<String> = Vec::new();
+    let target_header = format!("output \"{}\"", output_name);
+
+    for line in content.lines() {
+        let code = strip_kdl_line_comment(line).trim();
+        if !in_target_output {
+            if let Some(rest) = code.strip_prefix(&target_header) {
+                let rest_trimmed = rest.trim();
+                let header_boundary = rest.is_empty()
+                    || rest.starts_with(char::is_whitespace)
+                    || rest.starts_with('{');
+                if header_boundary && rest_trimmed == "{" {
+                    in_target_output = true;
+                    brace_depth = 1;
+                    target_header_line = line.to_string();
+                    preserved_inner_lines.clear();
+                    continue;
+                }
+            }
+            new_lines.push(line.to_string());
+            continue;
+        }
+
+        let (opens, closes) = count_kdl_braces(code);
+        let depth_before = brace_depth;
+        brace_depth = brace_depth.saturating_add(opens).saturating_sub(closes);
+
+        if brace_depth == 0 {
+            in_target_output = false;
+            if !replaced_in_existing {
+                new_lines.push(target_header_line.clone());
+                new_lines.push(mode_line.clone());
+                for inner in &preserved_inner_lines {
+                    new_lines.push(inner.clone());
+                }
+                new_lines.push(line.to_string());
+                replaced_in_existing = true;
+            }
+        } else {
+            let is_top_level_mode = depth_before == 1
+                && opens == 0
+                && closes == 0
+                && (code == "mode" || code.starts_with("mode ") || code.starts_with("mode\t"));
+            if !is_top_level_mode {
+                preserved_inner_lines.push(line.to_string());
+            }
+        }
+    }
+
+    if in_target_output && !replaced_in_existing {
+        new_lines.push(target_header_line);
+        new_lines.push(mode_line.clone());
+        for inner in &preserved_inner_lines {
+            new_lines.push(inner.clone());
+        }
+        new_lines.push("}".to_string());
+        replaced_in_existing = true;
+    }
+
+    if !replaced_in_existing {
+        new_lines.push(format!(
+            "\noutput \"{}\" {{\n{}\n}}",
+            output_name, mode_line
         ));
     }
     new_lines.join("\n") + "\n"
@@ -1970,7 +2943,83 @@ fn write_niri_kdl_both_paths(transform: impl Fn(&str) -> String) {
             let updated = transform(&content);
             let _ = std::fs::write(&niri_kdl, &updated);
         }
+
+        // Also sync We10X pre-snapshot niri_kdl if present so display mode/scale persists across shell switches!
+        let snap_file = home_pb.join(".local/state/solarui/pre-we10x-snapshot.json");
+        if snap_file.is_file() {
+            if let Ok(bytes) = std::fs::read(&snap_file) {
+                if let Ok(mut snap) =
+                    serde_json::from_slice::<crate::we10x_profile::PreWe10xSnapshot>(&bytes)
+                {
+                    if !snap.niri_kdl.trim().is_empty() {
+                        snap.niri_kdl = transform(&snap.niri_kdl);
+                        if let Ok(out_bytes) = serde_json::to_vec_pretty(&snap) {
+                            let _ = solar_common::persistence::atomic_write(&snap_file, &out_bytes);
+                        }
+                    }
+                }
+            }
+        }
     }
+}
+
+pub fn apply_per_output_mode_dynamically(
+    output_name: &str,
+    mode_str: &str,
+    is_custom: bool,
+) -> anyhow::Result<()> {
+    let primary_sub = if is_custom { "custom-mode" } else { "mode" };
+    let out = Command::new("niri")
+        .args(["msg", "output", output_name, primary_sub, mode_str])
+        .output();
+
+    let mut applied_custom = is_custom;
+    match out {
+        Ok(res) if res.status.success() => {}
+        _ if is_custom => {
+            // Fallback to standard `mode` in case the DRM/KMS driver lists the mode natively
+            let retry = Command::new("niri")
+                .args(["msg", "output", output_name, "mode", mode_str])
+                .output()?;
+            if !retry.status.success() {
+                anyhow::bail!(
+                    "{}",
+                    String::from_utf8_lossy(&retry.stderr).trim().to_string()
+                );
+            }
+            applied_custom = false;
+        }
+        Ok(res) => {
+            anyhow::bail!(
+                "{}",
+                String::from_utf8_lossy(&res.stderr).trim().to_string()
+            );
+        }
+        Err(e) => {
+            anyhow::bail!("{}", e);
+        }
+    }
+
+    let out_owned = output_name.to_string();
+    let mode_owned = mode_str.to_string();
+    write_niri_kdl_both_paths(|content| {
+        rewrite_niri_kdl_output_mode(content, &out_owned, &mode_owned, applied_custom)
+    });
+
+    let mut cfg = SolarConfig::load();
+    if let Some(pos) = cfg.display.outputs.iter().position(|o| o.name == output_name) {
+        cfg.display.outputs[pos].mode = Some(mode_str.to_string());
+        cfg.display.outputs[pos].custom_mode = applied_custom;
+    } else {
+        cfg.display.outputs.push(solar_common::MonitorOutputConfig {
+            name: output_name.to_string(),
+            scale: cfg.display.scale,
+            mode: Some(mode_str.to_string()),
+            custom_mode: applied_custom,
+        });
+    }
+    let _ = cfg.save();
+    Ok(())
 }
 
 pub fn apply_per_output_scale_dynamically(output_name: &str, scale: f64) {
@@ -1995,6 +3044,7 @@ pub fn apply_per_output_scale_dynamically(output_name: &str, scale: f64) {
             name: output_name.to_string(),
             scale,
             mode: None,
+            custom_mode: false,
         });
     }
     let _ = cfg.save();
@@ -2077,6 +3127,7 @@ pub fn apply_display_scale_dynamically(scale: f64) {
                 name: op.clone(),
                 scale,
                 mode: None,
+                custom_mode: false,
             });
         }
     }
@@ -2222,6 +3273,41 @@ mod tests {
         assert!(updated.contains("transform \"normal\""));
         assert!(updated.contains("scale 1.25"));
         assert!(!updated.contains("scale 1.0"));
+    }
+
+    #[test]
+    fn sentinel_report_uses_passed_and_total_keys() {
+        let json = r#"{"passed":6,"total":7,"verified":true,"integrity_ok":true}"#;
+        let val: serde_json::Value = serde_json::from_str(json).unwrap();
+        assert_eq!(parse_sentinel_posture_counts(&val), (6, 7));
+
+        let legacy = r#"{"passed_count":5,"total_count":7}"#;
+        let legacy_val: serde_json::Value = serde_json::from_str(legacy).unwrap();
+        assert_eq!(parse_sentinel_posture_counts(&legacy_val), (5, 7));
+    }
+
+    #[test]
+    fn rewrite_niri_kdl_handles_nested_braces_and_inline_comment() {
+        let sample = "output \"eDP-1\" { // primary\n    hot-corners {\n        off\n    }\n    scale 1.0\n}\n";
+        let updated = rewrite_niri_kdl_output_scale(sample, "eDP-1", "1.25");
+        assert_eq!(updated.matches("output \"eDP-1\"").count(), 1);
+        assert!(updated.contains("hot-corners {"));
+        assert!(updated.contains("scale 1.25"));
+        assert!(!updated.contains("scale 1.0"));
+    }
+
+    #[test]
+    fn rewrite_niri_kdl_output_mode_preserves_scale_and_supports_custom_flag() {
+        let sample = "output \"Virtual-1\" {\n    scale 1.00\n}\n";
+        let hw = rewrite_niri_kdl_output_mode(sample, "Virtual-1", "1920x1080@60.000", false);
+        assert!(hw.contains("mode \"1920x1080@60.000\""));
+        assert!(!hw.contains("custom=true"));
+        assert!(hw.contains("scale 1.00"));
+
+        let custom = rewrite_niri_kdl_output_mode(&hw, "Virtual-1", "1600x900@75.000", true);
+        assert!(custom.contains("mode \"1600x900@75.000\" custom=true"));
+        assert!(!custom.contains("1920x1080@60.000"));
+        assert!(custom.contains("scale 1.00"));
     }
 }
 

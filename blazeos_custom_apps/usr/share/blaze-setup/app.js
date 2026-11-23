@@ -75,9 +75,11 @@ document.addEventListener("DOMContentLoaded", () => {
             slide3_subtitle: "BlazeOS masaüstü deneyiminizi ve sistem renk temasını seçin.",
             shell_section_label: "Masaüstü Kabuğu:",
             badge_recommended: "ÖNERİLEN",
+            badge_win_switchers: "WINDOWS'TAN GEÇENLER İÇİN",
             shell_noctalia_desc: "Hafif, ultra akıcı ve modern stok Wayland masaüstü deneyimi. Kararlı performans ve düşük bellek tüketimi.",
             shell_caelestia_desc: "Zengin animasyonlar, widget'lar ve derin özelleştirilebilir QML arayüz bileşenleri.",
             shell_end4_desc: "Material 3 Expressive tasarımı, güçlü kenar panelleri ve üretkenlik araçlarıyla kapsamlı bir Niri deneyimi.",
+            shell_we10x_desc: "Görev çubuğu, Başlat menüsü, masaüstü simgeleri ve Aero Snap ile sıfır yabancılık sunan klasik düzen.",
             color_mode_label: "Renk Modu:",
             mode_light: "Açık",
             mode_dark: "Koyu",
@@ -163,9 +165,11 @@ document.addEventListener("DOMContentLoaded", () => {
             slide3_subtitle: "Select your BlazeOS desktop experience and system color palette.",
             shell_section_label: "Desktop Shell:",
             badge_recommended: "RECOMMENDED",
+            badge_win_switchers: "FOR WINDOWS SWITCHERS",
             shell_noctalia_desc: "Lightweight, ultra-smooth modern stock Wayland shell. Stable performance and low memory consumption.",
             shell_caelestia_desc: "Rich animations, interactive widgets, and deep customizable QML interface components.",
             shell_end4_desc: "A complete Niri experience with Material 3 Expressive design, powerful sidebars, and productivity tools.",
+            shell_we10x_desc: "Familiar classic layout with bottom taskbar, 3-column Start menu, desktop icons, and Aero Snap.",
             color_mode_label: "Color Mode:",
             mode_light: "Light",
             mode_dark: "Dark",
@@ -251,9 +255,11 @@ document.addEventListener("DOMContentLoaded", () => {
             slide3_subtitle: "Wählen Sie Desktop-Erlebnis und Farbdesign.",
             shell_section_label: "Desktop-Oberfläche:",
             badge_recommended: "EMPFOHLEN",
+            badge_win_switchers: "FÜR WINDOWS-UMSTEIGER",
             shell_noctalia_desc: "Leichte, extrem flüssige moderne Wayland-Oberfläche.",
             shell_caelestia_desc: "Reichhaltige Animationen und QML-Komponenten.",
             shell_end4_desc: "Ein vollständiges Niri-Erlebnis mit Material 3 Expressive, leistungsfähigen Seitenleisten und Produktivitätswerkzeugen.",
+            shell_we10x_desc: "Vertrautes klassisches Layout mit Taskleiste, Startmenü, Desktop-Symbolen und Aero Snap.",
             color_mode_label: "Farbmodus:",
             mode_light: "Hell",
             mode_dark: "Dunkel",
@@ -339,9 +345,11 @@ document.addEventListener("DOMContentLoaded", () => {
             slide3_subtitle: "Sélectionnez votre environnement de bureau et thème.",
             shell_section_label: "Environnement :",
             badge_recommended: "RECOMMANDÉ",
+            badge_win_switchers: "POUR UTILISATEURS WINDOWS",
             shell_noctalia_desc: "Léger, ultra fluide et moderne sous Wayland.",
             shell_caelestia_desc: "Animations riches, widgets et composants QML personnalisables.",
             shell_end4_desc: "Une expérience Niri complète avec Material 3 Expressive, des panneaux puissants et des outils de productivité.",
+            shell_we10x_desc: "Disposition classique familière avec barre des tâches, menu Démarrer, icônes du bureau et Aero Snap.",
             color_mode_label: "Mode Couleur :",
             mode_light: "Clair",
             mode_dark: "Sombre",
@@ -365,12 +373,33 @@ document.addEventListener("DOMContentLoaded", () => {
             btn_launch_desktop: "Lancer le Bureau",
             alert_invalid_user: "Veuillez entrer un nom de compte valide.",
             alert_pass_mismatch: "Les mots de passe ne correspondent pas."
+        },
+        es: {
+            badge_recommended: "RECOMENDADO",
+            badge_win_switchers: "PARA USUARIOS DE WINDOWS",
+            shell_we10x_desc: "Diseño clásico familiar con barra de tareas, menú Inicio, iconos de escritorio y Aero Snap."
+        },
+        it: {
+            badge_recommended: "CONSIGLIATO",
+            badge_win_switchers: "PER CHI VIENE DA WINDOWS",
+            shell_we10x_desc: "Layout classico familiare con barra delle applicazioni, menu Start, icone sul desktop e Aero Snap."
+        },
+        ru: {
+            badge_recommended: "РЕКОМЕНДУЕТСЯ",
+            badge_win_switchers: "ДЛЯ ПОЛЬЗОВАТЕЛЕЙ WINDOWS",
+            shell_we10x_desc: "Привычный классический рабочий стол с панелью задач, меню Пуск, значками и Aero Snap."
+        },
+        ar: {
+            badge_recommended: "موصى به",
+            badge_win_switchers: "للقادمين من ويندوز",
+            shell_we10x_desc: "تصميم كلاسيكي مألوف مع شريط مهام وقائمة ابدأ وأيقونات سطح المكتب وميزة Aero Snap."
         }
     };
 
     function applyLanguage(lang) {
         currentLang = OOBE_I18N[lang] ? lang : "en";
-        const dict = OOBE_I18N[currentLang] || OOBE_I18N["en"];
+        const dict = Object.assign({}, OOBE_I18N["en"], OOBE_I18N[currentLang] || {});
+        document.documentElement.dir = currentLang === "ar" ? "rtl" : "ltr";
 
         document.querySelectorAll("[data-i18n]").forEach((el) => {
             const key = el.getAttribute("data-i18n");
@@ -1036,10 +1065,12 @@ document.addEventListener("DOMContentLoaded", () => {
             setTaskStatus("task-user", "done", `${setupData.username} [OK]`);
             await new Promise((r) => setTimeout(r, 400));
 
-            // 4. Task: Appearance & Desktop Config (Engine: Noctalia or Caelestia)
+            // 4. Task: Appearance & Desktop Config (Engine: Noctalia, Caelestia, end4-pC, or We10X)
             const engineLabel = setupData.layout === "caelestia"
                 ? "Caelestia"
-                : (setupData.layout === "end4-pc" ? "end4-pC" : "Noctalia");
+                : (setupData.layout === "end4-pc"
+                    ? "end4-pC"
+                    : (setupData.layout === "we10x" ? "We10X" : "Noctalia"));
             setTaskStatus("task-appearance", "active", dict.task_appearance ? `${dict.task_appearance}...` : "Masaüstü kabuğu yapılandırılıyor...");
             setTaskStatus("task-system", "active", dict.task_appearance ? `${dict.task_appearance}...` : "Masaüstü kabuğu yapılandırılıyor...");
             const appearanceRes = await callBackend("save_desktop_config", {

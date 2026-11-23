@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Publish packaging/out/repo to the gh-pages branch (served by GitHub Pages at
-# https://darkmorpheus-pc.github.io/Blaze-Galaxy/repo/).
+# https://darkmorpheus-pc.github.io/Blaze-SolarEvolution/repo/).
 # The branch holds only the latest repo snapshot (orphan commit, force push) so
 # binary history does not accumulate in the repository.
 set -euo pipefail
@@ -10,11 +10,56 @@ REPO_DIR="$HERE/out/repo"
 REMOTE="${BLAZE_REMOTE:-$(git -C "$ROOT" remote get-url origin)}"
 
 [ -f "$REPO_DIR/repodata/repomd.xml.asc" ] || { echo "run build-rpms.sh first (signed repomd missing)" >&2; exit 1; }
+shopt -s nullglob
+rpms=("$REPO_DIR"/*.rpm)
+[ "${#rpms[@]}" -gt 0 ] || { echo "no RPM packages found in $REPO_DIR" >&2; exit 1; }
+for rpm_file in "${rpms[@]}"; do
+  sig="$(rpm -qp --qf '%{OPENPGP:pgpsig}|%{SIGPGP:pgpsig}|%{RSAHEADER:pgpsig}|%{DSAHEADER:pgpsig}' "$rpm_file" 2>/dev/null || echo '(none)|(none)|(none)|(none)')"
+  if [ "$sig" = "(none)|(none)|(none)|(none)" ] || [ -z "$sig" ]; then
+    echo "FATAL: refusing to publish unsigned RPM: $rpm_file" >&2
+    exit 1
+  fi
+done
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/repo"
 cp -a "$REPO_DIR/." "$TMP/repo/"
+python3 - <<'PY' "$TMP/repo"
+import json, os, subprocess, sys
+repo_dir = sys.argv[1]
+pkgs = {}
+for fn in sorted(os.listdir(repo_dir)):
+    if not fn.endswith(".rpm"):
+        continue
+    out = subprocess.check_output(
+        ["rpm", "-qp", "--qf", "%{NAME}\t%{VERSION}-%{RELEASE}", os.path.join(repo_dir, fn)],
+        text=True,
+        stderr=subprocess.DEVNULL,
+    ).strip()
+    if "\t" in out:
+        name, vr = out.split("\t", 1)
+        pkgs[name] = vr
+manifest = {
+    "product": "Blaze SolarEvolution",
+    "series": "5.05",
+    "base_fedora": "45",
+    "repo_url": "https://darkmorpheus-pc.github.io/Blaze-SolarEvolution/repo/",
+    "github_repo": "DarkMorpheus-pc/Blaze-SolarEvolution",
+    "packages": pkgs,
+    "upgrade_target": None,
+}
+if os.environ.get("BLAZE_UPGRADE_TARGET_VER"):
+    manifest["upgrade_target"] = {
+        "series": os.environ.get("BLAZE_UPGRADE_SERIES", "6.0"),
+        "target_releasever": os.environ["BLAZE_UPGRADE_TARGET_VER"],
+        "ready": os.environ.get("BLAZE_UPGRADE_READY", "false").lower() == "true",
+        "min_blaze_release": pkgs.get("blaze-release", "5.05-3.blaze"),
+        "notes": os.environ.get("BLAZE_UPGRADE_NOTES", "Yeni Blaze SolarEvolution ana surum yukseltmesi hazir."),
+    }
+with open(os.path.join(repo_dir, "channel.json"), "w", encoding="utf-8") as f:
+    json.dump(manifest, f, indent=2, ensure_ascii=False)
+PY
 touch "$TMP/.nojekyll"
 cat > "$TMP/index.html" <<'HTML'
 <!doctype html><meta charset="utf-8"><title>Blaze SolarEvolution package repository</title>

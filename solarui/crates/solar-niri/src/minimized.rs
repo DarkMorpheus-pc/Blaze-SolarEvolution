@@ -27,22 +27,21 @@ async fn minimize_with_store(
     id: u64,
     store: &mut MinimizedTransaction,
 ) -> Result<()> {
-    if store.get(id).is_none() {
-        let window = client
-            .get_windows()
-            .await?
-            .into_iter()
-            .find(|w| w.id == id)
-            .context("Window no longer exists")?;
-        let Response::Workspaces(workspaces) = client.send_request(Request::Workspaces).await?
-        else {
-            anyhow::bail!("Invalid workspace response");
-        };
-        let parked_workspace_id = workspaces
-            .iter()
-            .find(|ws| ws.name.as_deref() == Some("background"))
-            .map(|ws| ws.id)
-            .context("The background workspace is not configured")?;
+    let window = client
+        .get_windows()
+        .await?
+        .into_iter()
+        .find(|w| w.id == id)
+        .context("Window no longer exists")?;
+    let Response::Workspaces(workspaces) = client.send_request(Request::Workspaces).await? else {
+        anyhow::bail!("Invalid workspace response");
+    };
+    let parked_workspace_id = workspaces
+        .iter()
+        .find(|ws| ws.name.as_deref() == Some("background"))
+        .map(|ws| ws.id)
+        .context("The background workspace is not configured")?;
+    if window.workspace_id != Some(parked_workspace_id) {
         store.insert(
             id,
             MinimizedWindowRecord {

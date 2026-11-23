@@ -108,7 +108,14 @@ if [ -n "$NIRI_BIN" ]; then
     done
     if [ "$GUI_READY" -eq 1 ]; then
         log "Niri hazir ($WAYLAND_DISPLAY). berp-recovery-gui bekleniyor..."
-        if ! pgrep -f berp-recovery-gui >/dev/null 2>&1; then
+        for _ in $(seq 1 25); do
+            if pgrep -f "/usr/bin/berp-recovery-gui" >/dev/null 2>&1; then
+                break
+            fi
+            sleep 0.1
+        done
+        if ! pgrep -f "/usr/bin/berp-recovery-gui" >/dev/null 2>&1; then
+            log "niri spawn-at-startup baslatmadi; yedek baslatici devreye giriyor..."
             /usr/bin/berp-recovery-gui >>"$BERE_LOG" 2>>"$BERE_LOG" &
         fi
         wait "$NIRI_PID" 2>>"$BERE_LOG" || true

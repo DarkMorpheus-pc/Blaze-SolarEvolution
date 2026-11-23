@@ -25,13 +25,15 @@ use super::{ResolvedWindowRules, WindowRef};
 use crate::handlers::KdeDecorationsModeState;
 use crate::layout::{
     ConfigureIntent, InteractiveResizeData, LayoutElement, LayoutElementRenderElement,
-    LayoutElementRenderSnapshot, SizingMode,
+    LayoutElementRenderSnapshot, SizingMode, TitlebarButton,
 };
 use crate::niri_render_elements;
 use crate::render_helpers::background_effect::BackgroundEffectElement;
 use crate::render_helpers::border::BorderRenderElement;
 use crate::render_helpers::offscreen::OffscreenData;
+use crate::render_helpers::primary_gpu_texture::PrimaryGpuTextureRenderElement;
 use crate::render_helpers::renderer::NiriRenderer;
+use crate::render_helpers::server_titlebar::ServerTitlebarCache;
 use crate::render_helpers::snapshot::RenderSnapshot;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::surface::{
@@ -193,6 +195,15 @@ pub struct Mapped {
 
     /// Most recent monotonic time when the window had the focus.
     focus_timestamp: Option<Duration>,
+
+    /// Cached Cairo/GLES texture for the Windows 10 server-side titlebar.
+    titlebar_cache: ServerTitlebarCache,
+
+    /// Currently hovered server-side titlebar caption button.
+    hovered_titlebar_button: Cell<Option<TitlebarButton>>,
+
+    /// Last left-click timestamp on the server-side titlebar drag region (for double-click maximize).
+    last_titlebar_click: Cell<Option<Duration>>,
 }
 
 niri_render_elements! {
@@ -308,12 +319,24 @@ impl Mapped {
             is_pending_maximized: false,
             uncommitted_maximized: Vec::new(),
             focus_timestamp: None,
+            titlebar_cache: ServerTitlebarCache::default(),
+            hovered_titlebar_button: Cell::new(None),
+            last_titlebar_click: Cell::new(None),
         };
 
         rv.is_maximized = rv.sizing_mode().is_maximized();
         rv.is_pending_maximized = rv.pending_sizing_mode().is_maximized();
 
         rv
+    }
+
+    pub fn set_hovered_titlebar_button(&self, btn: Option<TitlebarButton>) -> bool {
+        let prev = self.hovered_titlebar_button.replace(btn);
+        prev != btn
+    }
+
+    pub fn last_titlebar_click(&self) -> &Cell<Option<Duration>> {
+        &self.last_titlebar_click
     }
 
     pub fn toplevel(&self) -> &ToplevelSurface {
@@ -765,6 +788,34 @@ impl LayoutElement for Mapped {
             xray_pos,
             push,
         );
+    }
+
+    fn render_server_titlebar<R: NiriRenderer>(
+        &self,
+        renderer: &mut R,
+        location: Point<f64, Logical>,
+        size: Size<f64, Logical>,
+        scale: f64,
+        alpha: f32,
+        is_active: bool,
+        is_maximized: bool,
+        cfg: &niri_config::ServerTitlebar,
+    ) -> Option<PrimaryGpuTextureRenderElement> {
+        let title = with_toplevel_role(self.toplevel(), |role| {
+            role.title.clone().or_else(|| role.app_id.clone()).unwrap_or_default()
+        });
+        self.titlebar_cache.render(
+            renderer,
+            location,
+            size,
+            scale,
+            alpha,
+            is_active,
+            is_maximized,
+            self.hovered_titlebar_button.get(),
+            &title,
+            cfg,
+        )
     }
 
     fn request_size(

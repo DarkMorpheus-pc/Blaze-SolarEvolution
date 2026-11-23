@@ -1,99 +1,268 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-BlazeOS Screen of Death / Kernel Emergency Guard
-Terminal-based emergency interface for critical system failures.
-Direct hotkey transfer to BERE GUI recovery.
-Zero emojis, maximum reliability.
-"""
+#!/usr/bin/sh
+# ==============================================================================
+# BlazeOS Screen of Death / Kernel & Initramfs Emergency Guard
+# Pure POSIX shell emergency interface (zero Python dependency; runs in both
+# bare dracut initramfs after Hard Reset / rootfs wipe AND real-rootfs rescue).
+# Zero emojis, maximum reliability.
+# ==============================================================================
 
-import os
-import sys
-import tty
-import termios
-import subprocess
+export PATH="/usr/sbin:/usr/bin:/sbin:/bin"
+export TERM="${TERM:-linux}"
+export HOME="${HOME:-/}"
 
-def clear_screen():
-    sys.stdout.write("\033[2J\033[H")
-    sys.stdout.flush()
+# Ensure Plymouth splash exits cleanly and kernel fbcon/drm master returns to KD_TEXT on tty1
+if command -v plymouth >/dev/null 2>&1; then
+    plymouth --wait quit 2>/dev/null || plymouth quit 2>/dev/null || plymouth --hide-splash 2>/dev/null || :
+fi
+for _p in /proc/[0-9]*; do
+    if [ "$(cat "$_p/comm" 2>/dev/null)" = "plymouthd" ]; then
+        kill -TERM "${_p#/proc/}" 2>/dev/null || :
+    fi
+done
+sleep 0.25 2>/dev/null || :
+for _p in /proc/[0-9]*; do
+    if [ "$(cat "$_p/comm" 2>/dev/null)" = "plymouthd" ]; then
+        kill -KILL "${_p#/proc/}" 2>/dev/null || :
+    fi
+done
 
-def get_char():
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
-    try:
-        tty.setraw(fd)
-        ch = sys.stdin.read(1)
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-    return ch
+for _berp_kd in /usr/bin/blaze-recovery /boot/bere/blaze-recovery; do
+    if [ -x "$_berp_kd" ]; then
+        "$_berp_kd" --kd-text 2>/dev/null || :
+        break
+    fi
+done
 
-def render_screen():
-    clear_screen()
-    # ANSI Color Escapes
-    RED_BG = "\033[41;37;1m"
-    ORANGE = "\033[38;5;208;1m"
-    CYAN = "\033[36;1m"
-    WHITE = "\033[37;1m"
-    DIM = "\033[37;2m"
-    RESET = "\033[0m"
+if command -v chvt >/dev/null 2>&1; then
+    chvt 2 2>/dev/null || :
+    chvt 1 2>/dev/null || :
+fi
 
-    banner = f"""
-{RED_BG}                                                                                {RESET}
-{RED_BG}                   BLAZEOS ACIL DURUM PROTOKOLU (BERE / BERP)                   {RESET}
-{RED_BG}                     CRITICAL SYSTEM FAULT / EMERGENCY RECOVERY                 {RESET}
-{RED_BG}                                                                                {RESET}
+if [ -c /dev/tty1 ] && [ ! -t 0 ]; then
+    exec </dev/tty1 >/dev/tty1 2>&1
+fi
 
-{WHITE}  [TR] Isletim sistemi baslatilamadi veya kritik bir sistem hatasi olustu.
-  Donaniminiz saglamdir; BERE Kurtarma Ortami ile sistemi onarabilir,
-  yedekten geri yukleyebilir veya dogrudan kurulum yapabilirsiniz.
+detect_fault_reason() {
+    if [ -f /etc/initrd-release ]; then
+        if [ ! -e /sysroot/sbin/init ] && [ ! -e /sysroot/usr/lib/systemd/systemd ]; then
+            printf '%s' "CRITICAL_ROOTFS_WIPED (/sysroot/sbin/init eksik - Hard Reset veya agir kok hasari)"
+        elif [ ! -e /sysroot/etc/os-release ]; then
+            printf '%s' "INITRD_SYSROOT_INVALID (/sysroot/etc/os-release okunamadi)"
+        else
+            printf '%s' "INITRD_BOOT_EMERGENCY (switch-root / fstab baglama hatasi)"
+        fi
+    else
+        printf '%s' "SYSTEMD_EMERGENCY_GUARD (Kritik sistem servisi veya dosya sistemi hatasi)"
+    fi
+}
 
-  [EN] The operating system failed to start or a critical error occurred.
-  Your hardware is intact. You can repair, restore, or reinstall
-  using the BERE Recovery Environment.
-{RESET}
-{DIM}  ----------------------------------------------------------------------------{RESET}
-{ORANGE}    [ ENTER ]  : BlazeOS Recovery Environment (BERE - GUI Kurtarma Ortami){RESET}
-{CYAN}    [ R ]      : Sistemi Yeniden Baslat / Reboot System{RESET}
-{WHITE}    [ S ]      : Acil Durum Konsolu / Emergency Root Shell{RESET}
-{DIM}  ----------------------------------------------------------------------------{RESET}
+read_single_key() {
+    old_tty="$(stty -g 2>/dev/null || true)"
+    stty -echo -icanon min 1 time 0 2>/dev/null || true
+    key="$(dd bs=1 count=1 2>/dev/null || true)"
+    if [ -n "$old_tty" ]; then
+        stty "$old_tty" 2>/dev/null || true
+    else
+        stty sane 2>/dev/null || true
+    fi
+    printf '%s' "$key"
+}
 
-  Lutfen bir secim yapin [ENTER / R / S]: """
+do_force_reboot() {
+    printf '\033[2J\033[H\033[36;1m[BERE] Sistem yeniden baslatiliyor...\033[0m\n'
+    sync 2>/dev/null || :
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl reboot --force 2>/dev/null && exit 0
+        systemctl reboot 2>/dev/null && exit 0
+    fi
+    if [ -w /proc/sys/kernel/sysrq ] && [ -w /proc/sysrq-trigger ]; then
+        echo 1 > /proc/sys/kernel/sysrq 2>/dev/null || :
+        echo b > /proc/sysrq-trigger 2>/dev/null || :
+    fi
+    reboot -f 2>/dev/null || exit 0
+}
 
-    sys.stdout.write(banner)
-    sys.stdout.flush()
+launch_recovery_env() {
+    printf '\033[2J\033[H\033[38;5;208;1m[BERE] BlazeOS Kurtarma Ortami baslatiliyor...\033[0m\n'
 
-def main():
-    try:
-        render_screen()
-        while True:
-            c = get_char()
-            if c in ['\r', '\n']:
-                # Launch BERE GUI Recovery
-                clear_screen()
-                sys.stdout.write("\033[38;5;208m[BERE] BlazeOS Recovery Environment baslatiliyor...\033[0m\n")
-                sys.stdout.flush()
-                subprocess.run(["systemctl", "isolate", "blaze-recovery-gui.target"])
-                break
-            elif c in ['r', 'R']:
-                clear_screen()
-                sys.stdout.write("\033[36m[BERE] Sistem yeniden baslatiliyor...\033[0m\n")
-                sys.stdout.flush()
-                subprocess.run(["systemctl", "reboot"])
-                break
-            elif c in ['s', 'S']:
-                clear_screen()
-                sys.stdout.write("\033[37m[BERE] Kimlik dogrulamali acil durum konsolu baslatiliyor...\033[0m\n")
-                sys.stdout.flush()
-                if os.path.exists("/usr/lib/systemd/systemd-sulogin-shell"):
-                    subprocess.run(["/usr/lib/systemd/systemd-sulogin-shell"])
-                elif os.path.exists("/usr/sbin/sulogin"):
-                    subprocess.run(["/usr/sbin/sulogin"])
-                else:
-                    subprocess.run(["/sbin/sulogin"])
-                render_screen()
-    except Exception as e:
-        sys.stderr.write(f"Death screen error: {e}\n")
-        subprocess.run(["systemctl", "isolate", "blaze-recovery-gui.target"])
+    # 1. Real rootfs with full BERE GUI stack available
+    if [ ! -f /etc/initrd-release ] && [ -x /usr/bin/blaze-recovery-gui-launcher ]; then
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl isolate blaze-recovery-gui.target && exit 0
+        fi
+        /usr/bin/blaze-recovery-gui-launcher && exit 0
+    fi
 
-if __name__ == "__main__":
-    main()
+    # 2. Dedicated Immutable Physical Recovery Vault (BLAZE_REC):
+    # Even when Hard Reset wiped / completely, BLAZE_REC holds the self-contained
+    # Graphical BERE + BERP SquashFS, kernel, and dmsquash-live initrd!
+    modprobe ext4 loop squashfs overlay 2>/dev/null || :
+    bere_vault_dev="$(blkid -L BLAZE_REC 2>/dev/null || true)"
+    if [ -z "$bere_vault_dev" ] && [ -b /dev/disk/by-label/BLAZE_REC ]; then
+        bere_vault_dev="/dev/disk/by-label/BLAZE_REC"
+    fi
+    if [ -n "$bere_vault_dev" ] && [ -b "$bere_vault_dev" ]; then
+        bere_vault_uuid="$(blkid -s UUID -o value "$bere_vault_dev" 2>/dev/null || true)"
+        mkdir -p /run/bere_vault
+        if mount -o ro "$bere_vault_dev" /run/bere_vault 2>/dev/null; then
+            # Fast & clean kexec transition straight into Graphical Wayland BERE from BLAZE_REC
+            if command -v kexec >/dev/null 2>&1 && \
+               [ -f /run/bere_vault/boot/vmlinuz-bere ] && \
+               [ -f /run/bere_vault/boot/initrd-bere.img ]; then
+                vault_root_arg="root=live:LABEL=BLAZE_REC"
+                if [ -n "$bere_vault_uuid" ]; then
+                    vault_root_arg="root=live:UUID=${bere_vault_uuid}"
+                fi
+                if kexec -l /run/bere_vault/boot/vmlinuz-bere \
+                    --initrd=/run/bere_vault/boot/initrd-bere.img \
+                    --command-line="${vault_root_arg} rd.live.image ro quiet systemd.unit=blaze-recovery-gui.target systemd.mask=sddm.service systemd.mask=display-manager.service" 2>/dev/null; then
+                    printf '\033[32;1m[BERE] Zirhli BLAZE_REC kurtarma bolumu yuklendi; Grafiksel BERE baslatiliyor...\033[0m\n'
+                    sync 2>/dev/null || :
+                    umount -l /sysroot 2>/dev/null || :
+                    kexec -e 2>/dev/null || systemctl kexec 2>/dev/null || :
+                fi
+            fi
+
+            # Fallback if kexec is blocked (e.g. strict Secure Boot lockdown): mount SquashFS + RAM overlay onto /sysroot
+            if [ -f /run/bere_vault/LiveOS/squashfs.img ] && command -v systemctl >/dev/null 2>&1; then
+                mkdir -p /run/bere_sq /run/bere_ov /run/systemd/system/sysroot.mount.d
+                printf '[Mount]\nWhat=overlay\nType=overlay\nOptions=lowerdir=/run/bere_sq,upperdir=/run/bere_ov/up,workdir=/run/bere_ov/wk\n' \
+                    > /run/systemd/system/sysroot.mount.d/99-bere-vault.conf
+                if mount -t squashfs -o ro,loop /run/bere_vault/LiveOS/squashfs.img /run/bere_sq 2>/dev/null; then
+                    mount -t tmpfs -o size=50%,mode=0755 tmpfs /run/bere_ov 2>/dev/null || :
+                    mkdir -p /run/bere_ov/up /run/bere_ov/wk
+                    umount -l /sysroot 2>/dev/null || :
+                    if mount -t overlay overlay -o lowerdir=/run/bere_sq,upperdir=/run/bere_ov/up,workdir=/run/bere_ov/wk /sysroot 2>/dev/null; then
+                        systemctl daemon-reload 2>/dev/null || :
+                        systemctl --no-block switch-root /sysroot /usr/lib/systemd/systemd systemd.unit=blaze-recovery-gui.target 2>/dev/null && exit 0
+                    fi
+                fi
+            fi
+        fi
+    fi
+
+    # 3. Initramfs where /sysroot still has an intact OS + BERE GUI stack
+    if [ -f /etc/initrd-release ] && [ -x /sysroot/usr/bin/blaze-recovery-gui-launcher ] && [ -x /sysroot/usr/lib/systemd/systemd ]; then
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl --no-block switch-root /sysroot /usr/lib/systemd/systemd systemd.unit=blaze-recovery-gui.target 2>/dev/null && exit 0
+        fi
+    fi
+
+    # 4. Standalone BERP Rust TUI (works even inside initramfs without BLAZE_REC)
+    for berp_bin in /usr/bin/blaze-recovery /run/bere_vault/boot/blaze-recovery /boot/bere/blaze-recovery /sysroot/boot/bere/blaze-recovery; do
+        if [ -x "$berp_bin" ]; then
+            stty sane 2>/dev/null || :
+            "$berp_bin"
+            stty sane 2>/dev/null || :
+            return 0
+        fi
+    done
+
+    printf '\033[31;1m[BERE] Grafik veya TUI kurtarma ikilisi bulunamadi; acil durum kabuguna geciliyor...\033[0m\n'
+    sleep 1
+    launch_emergency_shell
+}
+
+launch_emergency_shell() {
+    printf '\033[2J\033[H\033[37;1m[BERE] Acil durum root konsolu baslatiliyor (cikmak icin "exit" yazin)...\033[0m\n'
+    stty sane 2>/dev/null || :
+
+    auth_verified=0
+    for berp_bin in /usr/bin/blaze-recovery /boot/bere/blaze-recovery /run/bere_vault/boot/blaze-recovery /sysroot/usr/bin/blaze-recovery; do
+        if [ -x "$berp_bin" ]; then
+            if [ -f /sysroot/etc/shadow ]; then
+                "$berp_bin" --verify-auth --sysroot /sysroot && auth_verified=1 || return 1
+            else
+                "$berp_bin" --verify-auth && auth_verified=1 || return 1
+            fi
+            break
+        fi
+    done
+
+    if [ "$auth_verified" -eq 0 ]; then
+        if [ ! -f /etc/initrd-release ] && [ -r /etc/shadow ] && grep -Eq '^root:[^!*]' /etc/shadow 2>/dev/null; then
+            if [ -x /usr/lib/systemd/systemd-sulogin-shell ]; then
+                /usr/lib/systemd/systemd-sulogin-shell
+                return 0
+            elif command -v sulogin >/dev/null 2>&1; then
+                sulogin
+                return 0
+            fi
+        fi
+        if [ -r /sysroot/etc/shadow ] && grep -Eq '^[^:]+:[^!*]' /sysroot/etc/shadow 2>/dev/null; then
+            if command -v sulogin >/dev/null 2>&1; then
+                sulogin || return 1
+            else
+                printf '\033[31;1m[GUVENLIK] Kimlik dogrulama araci bulunamadi; root konsolu reddedildi.\033[0m\n'
+                sleep 2
+                return 1
+            fi
+        fi
+    fi
+
+    PS1='[BLAZE-EMERGENCY \w]# ' /bin/sh -i
+}
+
+render_screen() {
+    FAULT_REASON="$(detect_fault_reason)"
+    RED_BG="$(printf '\033[41;37;1m')"
+    ORANGE="$(printf '\033[38;5;208;1m')"
+    CYAN="$(printf '\033[36;1m')"
+    YELLOW="$(printf '\033[33;1m')"
+    WHITE="$(printf '\033[37;1m')"
+    DIM="$(printf '\033[37;2m')"
+    RESET="$(printf '\033[0m')"
+
+    printf '\033[2J\033[H'
+    cat <<EOF
+
+${RED_BG}                                                                                ${RESET}
+${RED_BG}                   BLAZEOS ACIL DURUM PROTOKOLU (BERE / BERP)                   ${RESET}
+${RED_BG}                     CRITICAL SYSTEM FAULT / EMERGENCY RECOVERY                 ${RESET}
+${RED_BG}                                                                                ${RESET}
+
+${YELLOW}  Hata Kodu / Durum : ${FAULT_REASON}${RESET}
+
+${WHITE}  [TR] Isletim sistemi baslatilamadi veya kritik bir sistem hatasi olustu.
+  Donaniminiz saglamdir; BERE / BERP Kurtarma Ortami ile sistemi onarabilir,
+  Btrfs yedekten geri yukleyebilir veya kurulum medyasina gecebilirsiniz.
+
+  [EN] The operating system failed to start or a critical system fault occurred.
+  Your hardware is intact. Use the BERE / BERP Recovery Environment to repair,
+  roll back a Btrfs snapshot, or reboot into installation media.${RESET}
+
+${DIM}  ----------------------------------------------------------------------------${RESET}
+${ORANGE}    [ ENTER ]  : Kurtarma Ortamini Baslat (BERE GUI / BERP Time Machine)${RESET}
+${YELLOW}    [ B ]      : Dogrudan BERP Konsol Kurtarma Araci (TUI)${RESET}
+${CYAN}    [ R ]      : Sistemi Yeniden Baslat / Reboot System${RESET}
+${WHITE}    [ S ]      : Acil Durum Konsolu / Emergency Root Shell${RESET}
+${DIM}  ----------------------------------------------------------------------------${RESET}
+
+  Lutfen bir secim yapin [ENTER / B / R / S]: 
+EOF
+}
+
+while :; do
+    render_screen
+    ch="$(read_single_key)"
+    case "$ch" in
+        ""|"$(printf '\r')"|"$(printf '\n')")
+            launch_recovery_env
+            ;;
+        b|B)
+            for berp_bin in /usr/bin/blaze-recovery /boot/bere/blaze-recovery /run/bere_vault/boot/blaze-recovery /sysroot/usr/bin/blaze-recovery; do
+                if [ -x "$berp_bin" ]; then
+                    stty sane 2>/dev/null || :
+                    "$berp_bin"
+                    break
+                fi
+            done
+            ;;
+        r|R)
+            do_force_reboot
+            ;;
+        s|S)
+            launch_emergency_shell
+            ;;
+    esac
+done

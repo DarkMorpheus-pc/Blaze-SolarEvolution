@@ -1,0 +1,9 @@
+#!/bin/sh
+CFG="/usr/share/blaze-setup/niri-setup.kdl"
+if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "${XDG_RUNTIME_DIR}" ]; then
+    RUNTIME_CFG="${XDG_RUNTIME_DIR}/blaze-oobe-niri.kdl"
+    if cp -f "${CFG}" "${RUNTIME_CFG}" 2>/dev/null; then
+        CFG="${RUNTIME_CFG}"
+    fi
+fi
+exec /usr/bin/niri --config "${CFG}"

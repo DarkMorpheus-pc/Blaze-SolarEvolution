@@ -17,7 +17,7 @@ OVERLAY="${BLAZEOS_ROOT:-$(pwd)}/blazeos_custom_apps"
 SOLARUI_SRC="${BLAZEOS_ROOT:-$(pwd)}/solarui"
 
 echo "=== [0/5] Building the current SolarUI controller ==="
-cargo build --manifest-path "$SOLARUI_SRC/Cargo.toml" --release -p solar-shell -p solar-session -p solar-core -p blaze-recovery
+RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=${HOME}=/build" cargo build --manifest-path "$SOLARUI_SRC/Cargo.toml" --release -p solar-shell -p solar-session -p solar-core -p blaze-recovery
 install -m 0755 "$SOLARUI_SRC/target/release/solar-shell" "$OVERLAY/usr/bin/solar-shell"
 install -m 0755 "$SOLARUI_SRC/target/release/solar-session" "$OVERLAY/usr/bin/solar-session"
 install -m 0755 "$SOLARUI_SRC/target/release/solar-core" "$OVERLAY/usr/bin/solar-core"
@@ -27,6 +27,14 @@ if ! grep -q 'end4-pc' <<<"$SOLAR_SHELL_PROBE"; then
     echo "Refusing to build: solar-shell does not contain the End4 switch implementation" >&2
     exit 1
 fi
+if ! grep -q 'we10x' <<<"$SOLAR_SHELL_PROBE"; then
+    echo "Refusing to build: solar-shell does not contain the We10X switch implementation" >&2
+    exit 1
+fi
+test -f "$SOLARUI_SRC/vendor/we10x-shell/shell.qml"
+rm -rf "$OVERLAY/usr/share/quickshell/we10x"
+mkdir -p "$OVERLAY/usr/share/quickshell"
+cp -a "$SOLARUI_SRC/vendor/we10x-shell" "$OVERLAY/usr/share/quickshell/we10x"
 
 echo "=== [1/5] Building Offline Squashfs with full SELinux labels in tmpfs ==="
 UNSHARE_FLAGS="-rm"
@@ -67,6 +75,17 @@ mkdir -p "$ROOTFS/usr/share/doc/solarui" "$ROOTFS/usr/share/licenses/solarui/end
 cp "$ROOTFS/usr/share/quickshell/end4-pC/UPSTREAM.md" "$ROOTFS/usr/share/doc/solarui/end4-pC-UPSTREAM"
 cp "$ROOTFS/usr/share/quickshell/end4-pC/BLAZEOS-CHANGES.md" "$ROOTFS/usr/share/doc/solarui/end4-pC-BLAZEOS-CHANGES"
 cp "$ROOTFS/usr/share/quickshell/end4-pC/LICENSE" "$ROOTFS/usr/share/licenses/solarui/end4-pC/LICENSE"
+
+echo "  -> Installing pinned We10X (Tanıdık Klasik Düzen) shell source & icon cache..."
+rm -rf "$ROOTFS/usr/share/quickshell/we10x"
+cp -a --no-preserve=ownership "'"${BLAZEOS_ROOT:-$(pwd)}"'/solarui/vendor/we10x-shell" "$ROOTFS/usr/share/quickshell/we10x"
+find "$ROOTFS/usr/share/quickshell/we10x" -type d -exec chmod 755 {} +
+find "$ROOTFS/usr/share/quickshell/we10x" -type f -exec chmod 644 {} +
+mkdir -p "$ROOTFS/usr/share/doc/solarui" "$ROOTFS/usr/share/licenses/solarui/we10x"
+cp "$ROOTFS/usr/share/quickshell/we10x/UPSTREAM.md" "$ROOTFS/usr/share/doc/solarui/we10x-UPSTREAM"
+cp "$ROOTFS/usr/share/quickshell/we10x/BLAZEOS-CHANGES.md" "$ROOTFS/usr/share/doc/solarui/we10x-BLAZEOS-CHANGES"
+cp "$ROOTFS/usr/share/quickshell/we10x/LICENSE" "$ROOTFS/usr/share/licenses/solarui/we10x/LICENSE"
+gtk-update-icon-cache -f -t "$ROOTFS/usr/share/icons/We10X" 2>/dev/null || true
 
 echo "  -> Installing the pinned graphical polkit authentication agent..."
 for spec in \
@@ -165,15 +184,26 @@ fi
 setcap cap_setuid+ep "$ROOTFS/usr/bin/newuidmap" 2>/dev/null || chmod 4755 "$ROOTFS/usr/bin/newuidmap" 2>/dev/null || true
 setcap cap_setgid+ep "$ROOTFS/usr/bin/newgidmap" 2>/dev/null || chmod 4755 "$ROOTFS/usr/bin/newgidmap" 2>/dev/null || true
 chmod 4755 "$ROOTFS/opt/FireHub/chrome-sandbox" 2>/dev/null || true
+chmod 0600 "$ROOTFS/etc/shadow" "$ROOTFS/etc/gshadow" 2>/dev/null || true
+grep -q "^sddm:" "$ROOTFS/etc/shadow" || echo "sddm:!*:20726::::::" >> "$ROOTFS/etc/shadow"
+grep -q "^blaze-setup:" "$ROOTFS/etc/shadow" || echo "blaze-setup::20726::::::" >> "$ROOTFS/etc/shadow"
+grep -q "^sddm:" "$ROOTFS/etc/gshadow" || echo "sddm:!*::" >> "$ROOTFS/etc/gshadow"
+grep -q "^blaze-setup:" "$ROOTFS/etc/gshadow" || echo "blaze-setup:!::" >> "$ROOTFS/etc/gshadow"
+for grp in wheel video audio input render; do
+    chroot "$ROOTFS" usermod -aG "$grp" blaze-setup 2>/dev/null || true
+done
+chmod 0000 "$ROOTFS/etc/shadow" "$ROOTFS/etc/gshadow" 2>/dev/null || true
+mkdir -p "$ROOTFS/var/lib/blaze-setup"
 chown -R 961:961 "$ROOTFS/var/lib/blaze-setup" 2>/dev/null || true
 chmod 755 "$ROOTFS/var/lib/blaze-setup" 2>/dev/null || true
 chmod 0440 "$ROOTFS/etc/sudoers.d/99-blaze-setup" 2>/dev/null || true
+chmod 755 "$ROOTFS/usr/libexec/blazeos-provision-bere-vault" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/firehub" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/blaze-house" 2>/dev/null || true
-chmod 755 "$ROOTFS/usr/local/bin/blazeos-control" 2>/dev/null || true
-chmod 755 "$ROOTFS/usr/local/bin/blazeos-apply-install-choices" 2>/dev/null || true
-chmod 755 "$ROOTFS/usr/local/bin/blazeos-desktop-provision" 2>/dev/null || true
-chmod 755 "$ROOTFS/usr/local/bin/blazeos-remove-solarui" 2>/dev/null || true
+chmod 755 "$ROOTFS/usr/bin/blazeos-control" 2>/dev/null || true
+chmod 755 "$ROOTFS/usr/bin/blazeos-apply-install-choices" 2>/dev/null || true
+chmod 755 "$ROOTFS/usr/bin/blazeos-desktop-provision" 2>/dev/null || true
+chmod 755 "$ROOTFS/usr/bin/blazeos-remove-solarui" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/libexec/blazeos-wayland-session-ready" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/libexec/blazeos-update" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/libexec/blazeos-offline-update" 2>/dev/null || true
@@ -197,10 +227,14 @@ LD_LIBRARY_PATH="$ROOTFS/usr/lib64" "$ROOTFS/usr/sbin/setfiles" -r "$ROOTFS" "$R
 
 echo "  -> Explicitly ensuring systemd and custom apps have correct labels..."
 setfattr -n security.selinux -v "system_u:object_r:init_exec_t:s0" "$ROOTFS/usr/lib/systemd/systemd"
-setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/local/bin/blazeos-welcome" 2>/dev/null || true
-setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/local/bin/blazeos-control" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/blazeos-welcome" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/blazeos-control" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/firehub" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/blaze-house" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/niri" 2>/dev/null || true
+find "$ROOTFS/usr/share/quickshell/we10x" -exec setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" {} + 2>/dev/null || true
+find "$ROOTFS/usr/share/icons/We10X" -exec setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" {} + 2>/dev/null || true
+find "$ROOTFS/usr/share/backgrounds/blazeos/we10x" -exec setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" {} + 2>/dev/null || true
 
 echo "  -> Creating ZSTD-compressed squashfs.img for Offline ISO..."
 rm -f "'"$NEW_SQUASHFS"'"

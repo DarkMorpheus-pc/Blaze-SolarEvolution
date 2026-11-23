@@ -9,7 +9,7 @@ ConditionVirtualization=!container
 [Service]
 Type=oneshot
 ExecCondition=/usr/bin/sh -c '/usr/bin/lspci 2>/dev/null | /usr/bin/grep -iq nvidia'
-ExecStart=/usr/local/bin/blazeos-nvidia-setup
+ExecStart=/usr/bin/blazeos-nvidia-setup
 StandardOutput=journal
 StandardError=journal
 TimeoutStartSec=600

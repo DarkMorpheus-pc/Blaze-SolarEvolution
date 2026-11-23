@@ -2,9 +2,9 @@
 set -euo pipefail
 export PATH="${HOME}/bin:${HOME}/.local/bin:/usr/local/bin:/usr/local/sbin:$PATH"
 
-BASE_ISO="${BLAZEOS_ROOT:-$(pwd)}/f45_base/Fedora-Workstation-Live-45_Beta-1.3.x86_64.iso"
+BASE_ISO="${BLAZEOS_ROOT:-$(pwd)}/f45_base/Fedora-Workstation-Live-45-1.4.x86_64.iso"
 OUT_ISO="${BLAZEOS_ROOT:-$(pwd)}/Blaze-SolarEvolution-5-x86_64.iso"
-WORK="${BLAZEOS_ROOT:-$(pwd)}/work_f45"
+WORK="${BLAZEOS_ROOT:-$(pwd)}/work_f45_stable"
 ROOTFS_SRC="$WORK/rootfs"
 NEW_SQUASHFS="$WORK/LiveOS/squashfs.img"
 PATCHED_INITRD="$WORK/initrd_work/patched_initrd"
@@ -13,7 +13,8 @@ OVERLAY="${BLAZEOS_ROOT:-$(pwd)}/blazeos_custom_apps"
 SOLARUI_SRC="${BLAZEOS_ROOT:-$(pwd)}/solarui"
 
 echo "=== [0/5] Building SolarUI controller and validating tracked code ==="
-cargo build --manifest-path "$SOLARUI_SRC/Cargo.toml" --release -p solar-shell -p solar-session -p solar-core -p blaze-recovery
+test -f "$PATCHED_INITRD"
+RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=${HOME}=/build" cargo build --manifest-path "$SOLARUI_SRC/Cargo.toml" --release -p solar-shell -p solar-session -p solar-core -p blaze-recovery
 install -m 0755 "$SOLARUI_SRC/target/release/solar-shell" "$OVERLAY/usr/bin/solar-shell"
 install -m 0755 "$SOLARUI_SRC/target/release/solar-session" "$OVERLAY/usr/bin/solar-session"
 install -m 0755 "$SOLARUI_SRC/target/release/solar-core" "$OVERLAY/usr/bin/solar-core"
@@ -24,24 +25,49 @@ if ! grep -q 'end4-pc' <<<"$SOLAR_SHELL_PROBE"; then
     echo "Refusing to build: solar-shell does not contain the End4 switch implementation" >&2
     exit 1
 fi
+if ! grep -q 'we10x' <<<"$SOLAR_SHELL_PROBE"; then
+    echo "Refusing to build: solar-shell does not contain the We10X switch implementation" >&2
+    exit 1
+fi
+test -f "$SOLARUI_SRC/vendor/we10x-shell/shell.qml"
+mkdir -p "$OVERLAY/usr/share/quickshell"
+rm -rf "$OVERLAY/usr/share/quickshell/we10x"
+cp -a "$SOLARUI_SRC/vendor/we10x-shell" "$OVERLAY/usr/share/quickshell/we10x"
 grep -qx 'VERSION="5.05"' "$OVERLAY/etc/os-release"
 grep -qx 'VERSION_ID=5.05' "$OVERLAY/etc/os-release"
 grep -qx 'PRETTY_NAME="Blaze SolarEvolution 5.05"' "$OVERLAY/etc/os-release"
+grep -qx 'Blaze SolarEvolution release 5.05 (SolarEvolution)' "$OVERLAY/usr/share/blazeos/identity/fedora-release"
+grep -qx 'Product=Blaze SolarEvolution' "$OVERLAY/.buildstamp"
+grep -qx 'GRUB_DISTRIBUTOR="Blaze SolarEvolution"' "$OVERLAY/etc/default/grub"
+grep -qx '45' "$OVERLAY/etc/dnf/vars/releasever"
+grep -q 'excludepkgs=fedora-release\*' "$OVERLAY/etc/dnf/libdnf5.conf.d/10-blaze-identity.conf"
+BLAZE_RELEASE_RPM="${BLAZEOS_ROOT:-$(pwd)}/packaging/out/repo/blaze-release-5.05-3.blaze.noarch.rpm"
+test -f "$BLAZE_RELEASE_RPM"
 bash -n \
+    "$OVERLAY/usr/bin/blazeos-sync-identity" \
+    "$OVERLAY/etc/kernel/install.d/05-blaze-identity.install" \
+    "$OVERLAY/etc/kernel/install.d/99-zz-blaze-identity.install" \
     "$OVERLAY/usr/libexec/livesys/sessions.d/livesys-solarui" \
     "$OVERLAY/usr/libexec/blazeos-oobe-hygiene" \
-    "$OVERLAY/usr/local/bin/blazeos-apply-install-choices" \
-    "$OVERLAY/usr/local/bin/blazeos-desktop-provision" \
-    "$OVERLAY/usr/local/bin/blazeos-remove-solarui" \
-    "$OVERLAY/usr/local/bin/blazeos-postinstall" \
+    "$OVERLAY/usr/bin/blazeos-apply-install-choices" \
+    "$OVERLAY/usr/bin/blazeos-desktop-provision" \
+    "$OVERLAY/usr/bin/blazeos-remove-solarui" \
+    "$OVERLAY/usr/bin/blazeos-postinstall" \
     "$OVERLAY/usr/libexec/blazeos-wayland-session-ready" \
     "$OVERLAY/usr/libexec/blazeos-update" \
     "$OVERLAY/usr/libexec/blazeos-offline-update" \
     "$OVERLAY/usr/libexec/blaze-style-center-first-run" \
-    "$OVERLAY/usr/local/bin/blaze-bootloader" \
-    "$OVERLAY/usr/local/bin/blazeos-limine-install" \
-    "$OVERLAY/usr/bin/blaze-system-monitor"
+    "$OVERLAY/usr/bin/blaze-bootloader" \
+    "$OVERLAY/usr/bin/blazeos-limine-install" \
+    "$OVERLAY/usr/bin/blaze-system-monitor" \
+    "$OVERLAY/usr/bin/blaze-optimize" \
+    "$OVERLAY/usr/bin/blaze-recovery-gui-launcher" \
+    "$OVERLAY/usr/libexec/blazeos-provision-bere-vault" \
+    "$OVERLAY/usr/libexec/blaze-oobe-session" \
+    "$OVERLAY/usr/lib/dracut/modules.d/99blaze-bere/module-setup.sh"
+sh -n "$OVERLAY/etc/sddm/wayland-session" "$OVERLAY/usr/bin/blaze-death-screen" "$OVERLAY/etc/grub.d/09_berp" "$OVERLAY/etc/grub.d/99_berp"
 node --check "$OVERLAY/usr/share/cockpit/anaconda-webui/index.js"
+node --check "$OVERLAY/usr/share/berp-recovery/app.js"
 grep -q 'spawn-at-startup "/usr/libexec/blazeos-wayland-session-ready"' "$OVERLAY/etc/solarui/niri.kdl"
 grep -q 'spawn-at-startup "/usr/libexec/blazeos-wayland-session-ready"' "$OVERLAY/etc/skel/.config/solarui/niri.kdl"
 grep -q 'spawn-at-startup "/usr/libexec/blazeos-wayland-session-ready"' "$OVERLAY/etc/skel/.config/niri/config.kdl"
@@ -50,6 +76,8 @@ python3 -c 'compile(open("'"$OVERLAY/usr/bin/blaze-setup"'", encoding="utf-8").r
 python3 -c 'compile(open("'"$OVERLAY/usr/bin/berp-recovery-gui"'", encoding="utf-8").read(), "berp-recovery-gui", "exec")'
 python3 -c 'compile(open("'"$OVERLAY/usr/bin/blaze-style-center"'", encoding="utf-8").read(), "blaze-style-center", "exec")'
 python3 -c 'compile(open("'"$OVERLAY/usr/bin/blaze-gamezone-browser"'", encoding="utf-8").read(), "blaze-gamezone-browser", "exec")'
+python3 -c 'compile(open("'"$OVERLAY/usr/lib64/python3.15/site-packages/pyanaconda/modules/boss/installation.py"'", encoding="utf-8").read(), "installation.py", "exec")'
+python3 -c 'compile(open("'"$OVERLAY/usr/lib64/python3.15/site-packages/pyanaconda/modules/storage/partitioning/automatic/utils.py"'", encoding="utf-8").read(), "automatic_utils.py", "exec")'
 if grep -Eq '/root/var/lib/mock|image-root' "$OVERLAY/boot/efi/EFI/fedora/grub.cfg"; then
     echo "Refusing to build: EFI grub.cfg contains a build-host path" >&2
     exit 1
@@ -62,19 +90,35 @@ test -L "$OVERLAY/etc/systemd/system/graphical.target.wants/blazeos-desktop-prov
 test -L "$OVERLAY/etc/systemd/system/dbus-org.freedesktop.PolicyKit1.service"
 cmp -s "$OVERLAY/usr/share/wayland-sessions/blaze-oobe.desktop" \
     "$OVERLAY/usr/share/blaze-setup/blaze-oobe.desktop"
+cmp -s "$OVERLAY/usr/share/sddm/scripts/wayland-session" \
+    "$OVERLAY/etc/sddm/wayland-session"
+if grep -Fq 'exec "$@"' "$OVERLAY/etc/sddm/wayland-session"; then
+    echo "Refusing to build: etc/sddm/wayland-session contains exec \"\$@\" which breaks OOBE SDDM startup" >&2
+    exit 1
+fi
+test -x "$OVERLAY/usr/libexec/blaze-oobe-session"
+grep -qx "Exec=/usr/libexec/blaze-oobe-session" "$OVERLAY/usr/share/wayland-sessions/blaze-oobe.desktop"
+if [ -x "$OVERLAY/usr/bin/niri" ]; then
+    "$OVERLAY/usr/bin/niri" validate -c "$OVERLAY/usr/share/blaze-setup/niri-setup.kdl"
+fi
 if grep -Eq 'id="input-password(-confirm)?"[^>]*value=' \
     "$OVERLAY/usr/share/blaze-setup/index.html"; then
     echo "Refusing to build: OOBE password fields must never contain a preset value" >&2
     exit 1
 fi
 if grep -Eq 'cat > /etc/sddm\.conf\.d/(10-blaze-session|autologin)\.conf|DisplayServer=wayland|CompositorCommand=weston' \
-    "$OVERLAY/usr/local/bin/blazeos-postinstall"; then
+    "$OVERLAY/usr/bin/blazeos-postinstall"; then
     echo "Refusing to build: postinstall overrides the known-good SDDM greeter path" >&2
+    exit 1
+fi
+grep -q 'default_scheme = BTRFS' "$OVERLAY/etc/anaconda/conf.d/99-blazeos.conf"
+if grep -Eq '^\s*enabled\s*=\s*1' "$ROOTFS_SRC"/usr/share/dnf5/repos.d/*testing*.repo "$ROOTFS_SRC"/etc/yum.repos.d/*testing*.repo 2>/dev/null; then
+    echo "Refusing to build: updates-testing repository is enabled in base rootfs" >&2
     exit 1
 fi
 
 echo "=== [1/5] Building Squashfs with full SELinux labels in tmpfs ==="
-UNSHARE_FLAGS="-rm"
+UNSHARE_FLAGS="-rm --map-auto"
 if [ "$(id -u)" -eq 0 ]; then
     UNSHARE_FLAGS="-m"
 fi
@@ -88,7 +132,7 @@ ROOTFS="$MNT/rootfs"
 ROOTFS_WORK="$ROOTFS"
 
 echo "  -> Copying rootfs into tmpfs..."
-cp -a "'"$ROOTFS_SRC"'" "$ROOTFS"
+cp -a --no-preserve=ownership "'"$ROOTFS_SRC"'" "$ROOTFS"
 rm -rf "$ROOTFS/home/"*
 
 echo "  -> Ensuring root:root ownership..."
@@ -97,10 +141,22 @@ chown -R 0:0 "$ROOTFS"
 echo "  -> Applying tracked BlazeOS overlay..."
 rm -f "$ROOTFS/usr/bin/solar-settings"
 cp -a --no-preserve=ownership "'"${BLAZEOS_ROOT:-$(pwd)}"'/blazeos_custom_apps/." "$ROOTFS/"
+BLAZE_RELEASE_RPM="'"${BLAZEOS_ROOT:-$(pwd)}"'/packaging/out/repo/blaze-release-5.05-3.blaze.noarch.rpm"
+rpm --root "$ROOTFS" --import "'"${BLAZEOS_ROOT:-$(pwd)}"'/blazeos_custom_apps/etc/pki/rpm-gpg/RPM-GPG-KEY-blaze" 2>/dev/null || true
+rpm --root "$ROOTFS" -K "$BLAZE_RELEASE_RPM"
+rpm --root "$ROOTFS" -Uvh --replacepkgs --replacefiles --noscripts "$BLAZE_RELEASE_RPM"
+rm -f "$ROOTFS/etc/dnf/protected.d/fedora-workstation.conf"
 install -m 0755 "'"${BLAZEOS_ROOT:-$(pwd)}"'/blazeos_custom_apps/usr/bin/solar-shell" "$ROOTFS/usr/bin/solar-shell"
 ln -sf solar-shell "$ROOTFS/usr/bin/solar-settings"
 head -c 4 "$ROOTFS/usr/bin/solar-shell" | grep -q "ELF"
-rm -f "$ROOTFS_WORK/etc/grub.d/11_berp"
+rm -f "$ROOTFS_WORK/etc/grub.d/11_berp" "$ROOTFS/etc/grub.d/08_fallback_counting"
+rm -f "$ROOTFS/boot/loader/entries/"*rescue*.conf
+for bls_f in "$ROOTFS/boot/loader/entries/"*.conf; do
+    [ -f "$bls_f" ] || continue
+    if grep -qE "/var/lib/mock/|f45-kiwi-build" "$bls_f"; then
+        rm -f "$bls_f"
+    fi
+done
 # Keep display branding and boot branding separate.  The transparent asset is
 # reserved for the Plymouth normal/update splash; the GDM/taskbar icon remains
 # the square application logo under /usr/share/blazeos/gdm.
@@ -122,6 +178,17 @@ mkdir -p "$ROOTFS/usr/share/doc/solarui" "$ROOTFS/usr/share/licenses/solarui/end
 cp "$ROOTFS/usr/share/quickshell/end4-pC/UPSTREAM.md" "$ROOTFS/usr/share/doc/solarui/end4-pC-UPSTREAM"
 cp "$ROOTFS/usr/share/quickshell/end4-pC/BLAZEOS-CHANGES.md" "$ROOTFS/usr/share/doc/solarui/end4-pC-BLAZEOS-CHANGES"
 cp "$ROOTFS/usr/share/quickshell/end4-pC/LICENSE" "$ROOTFS/usr/share/licenses/solarui/end4-pC/LICENSE"
+
+echo "  -> Installing pinned We10X (Tanıdık Klasik Düzen) shell source & icon cache..."
+rm -rf "$ROOTFS/usr/share/quickshell/we10x"
+cp -a --no-preserve=ownership "'"${BLAZEOS_ROOT:-$(pwd)}"'/solarui/vendor/we10x-shell" "$ROOTFS/usr/share/quickshell/we10x"
+find "$ROOTFS/usr/share/quickshell/we10x" -type d -exec chmod 755 {} +
+find "$ROOTFS/usr/share/quickshell/we10x" -type f -exec chmod 644 {} +
+mkdir -p "$ROOTFS/usr/share/doc/solarui" "$ROOTFS/usr/share/licenses/solarui/we10x"
+cp "$ROOTFS/usr/share/quickshell/we10x/UPSTREAM.md" "$ROOTFS/usr/share/doc/solarui/we10x-UPSTREAM"
+cp "$ROOTFS/usr/share/quickshell/we10x/BLAZEOS-CHANGES.md" "$ROOTFS/usr/share/doc/solarui/we10x-BLAZEOS-CHANGES"
+cp "$ROOTFS/usr/share/quickshell/we10x/LICENSE" "$ROOTFS/usr/share/licenses/solarui/we10x/LICENSE"
+gtk-update-icon-cache -f -t "$ROOTFS/usr/share/icons/We10X" 2>/dev/null || true
 
 echo "  -> Installing Fedora 45-matched Quickshell runtime for end4-pC..."
 # Quickshell and Qt QML plugins use private Qt ABI. Never copy these libraries
@@ -175,11 +242,22 @@ for spec in \
     END4_RPMS+=("$rpm_path")
 done
 rpm --root "$ROOTFS" -Uvh --replacepkgs --noscripts "${END4_RPMS[@]}"
+if [ -f "$ROOTFS/usr/share/applications/swappy.desktop" ]; then
+    sed -i -E "s|^Exec=.*|Exec=swappy -f %F|" "$ROOTFS/usr/share/applications/swappy.desktop"
+fi
 
 # Cockpit prefers pre-compressed assets when the browser advertises gzip.
 # Rebuild the compressed bundle so it can never lag behind the patched source.
-echo "  -> Synchronizing Anaconda WebUI compressed bundle..."
+echo "  -> Synchronizing Anaconda WebUI compressed bundle & Python bytecode..."
 gzip -9 -n -c "$ROOTFS/usr/share/cockpit/anaconda-webui/index.js" > "$ROOTFS/usr/share/cockpit/anaconda-webui/index.js.gz"
+rm -f "$ROOTFS/usr/lib64/python3.15/site-packages/pyanaconda/modules/boss/__pycache__/installation.cpython-"*
+rm -f "$ROOTFS/usr/lib64/python3.15/site-packages/pyanaconda/modules/storage/partitioning/automatic/__pycache__/utils.cpython-"*
+
+echo "  -> Installing squashfs-tools for BLAZE_REC immutable recovery vault provisioning..."
+SQUASHFS_RPM="'"${BLAZEOS_ROOT:-$(pwd)}"'/packages/squashfs-tools-4.7.4-2.fc45.x86_64.rpm"
+SQUASHFS_SHA256="c3ba4b1a1d4fa32779a692a50770ba0d53c4063f983ecfe9c6dbb08ae94c2c39"
+echo "${SQUASHFS_SHA256}  ${SQUASHFS_RPM}" | sha256sum --check --status
+rpm --root "$ROOTFS" -Uvh --replacepkgs --noscripts "$SQUASHFS_RPM"
 
 echo "  -> Replacing GNOME System Monitor with Fedora htop..."
 HTOP_RPM="'"${BLAZEOS_ROOT:-$(pwd)}"'/packages/htop-3.5.3-1.fc45.x86_64.rpm"
@@ -192,6 +270,32 @@ if rpm --root "$ROOTFS" -q gnome-system-monitor >/dev/null 2>&1; then
     rpm --root "$ROOTFS" -e --nodeps --noscripts gnome-system-monitor
 fi
 rpm --root "$ROOTFS" -Uvh --replacepkgs --noscripts "$HWLOC_RPM" "$HTOP_RPM"
+
+echo "  -> Purging stock GNOME desktop & bloat packages (selectable via Anaconda)..."
+mapfile -t GNOME_PURGE < <(
+    rpm --root "$ROOTFS" -qa --qf "%{NAME}\n" | grep -E \
+        "^(gdm|gnome-shell($|-extension-.*)|gnome-tour|gnome-initial-setup|gnome-control-center|gnome-classic-session|gnome-session-wayland-session|gnome-browser-connector|gnome-system-monitor|oo7-daemon|oo7-portal|pam_oo7)$" || true
+)
+if ((${#GNOME_PURGE[@]})); then
+    rpm --root "$ROOTFS" -e --nodeps --noscripts "${GNOME_PURGE[@]}"
+fi
+rm -f "$ROOTFS/usr/lib/systemd/user/dbus-org.freedesktop.secrets.service" \
+      "$ROOTFS/usr/lib/systemd/user/dbus-org.freedesktop.impl.portal.desktop.oo7.service"
+systemctl --root="$ROOTFS" --global mask oo7-daemon.service oo7-portal.service 2>/dev/null || true
+
+echo "  -> Suppressing Workstation background autostart agents inside SolarUI sessions..."
+for xdg_auto in \
+    "$ROOTFS/etc/xdg/autostart/org.gnome.Evolution-alarm-notify.desktop" \
+    "$ROOTFS/etc/xdg/autostart/geoclue-demo-agent.desktop" \
+    "$ROOTFS/etc/xdg/autostart/user-dirs-update-gtk.desktop"; do
+    if [ -f "$xdg_auto" ] && ! grep -q "SolarUI;" "$xdg_auto"; then
+        if grep -q "^NotShowIn=" "$xdg_auto"; then
+            sed -i "/^NotShowIn=/ s/\$/SolarUI;/" "$xdg_auto"
+        else
+            sed -i "/^\[Desktop Entry\]/a NotShowIn=SolarUI;" "$xdg_auto"
+        fi
+    fi
+done
 
 echo "  -> Trimming Workstation host payload from the SolarUI core image..."
 # The Fedora Workstation source image carries a complete office suite and a
@@ -206,18 +310,67 @@ mapfile -t CORE_TRIM < <(
 if ((${#CORE_TRIM[@]})); then
     rpm --root "$ROOTFS" -e --nodeps --noscripts "${CORE_TRIM[@]}"
 fi
+chroot "$ROOTFS" find /etc/systemd/system -xtype l -delete
+rm -f "$ROOTFS/etc/systemd/system/sockets.target.wants/virt"*.socket \
+      "$ROOTFS/etc/systemd/system/multi-user.target.wants/virt"*.service
 # These eager units add boot latency/RSS on ordinary desktops. Their packages
 # remain installed and D-Bus/socket activation still starts the feature when a
 # user actually needs printing, discovery, cellular networking or remote FS.
 for unit in \
     network-online.target.wants/NetworkManager-wait-online.service \
     multi-user.target.wants/avahi-daemon.service \
+    sockets.target.wants/avahi-daemon.socket \
     multi-user.target.wants/systemd-homed.service \
+    systemd-homed.service.wants/systemd-homed-activate.service \
+    dbus-org.freedesktop.home1.service \
+    multi-user.target.wants/atd.service \
+    multi-user.target.wants/crond.service \
+    user@.service.wants/uresourced.service \
+    multi-user.target.wants/auditd.service \
+    multi-user.target.wants/audit-rules.service \
+    multi-user.target.wants/sssd.service \
+    sockets.target.wants/sssd-kcm.socket \
+    multi-user.target.wants/stratisd.service \
+    multi-user.target.wants/mcelog.service \
+    multi-user.target.wants/rsyslog.service \
+    multi-user.target.wants/ModemManager.service \
+    timers.target.wants/dnf-makecache.timer \
     sysinit.target.wants/iscsi-onboot.service \
     sysinit.target.wants/iscsi-starter.service \
+    sockets.target.wants/iscsid.socket \
+    sockets.target.wants/iscsiuio.socket \
+    sockets.target.wants/systemd-journalctl-metrics.socket \
+    sockets.target.wants/systemd-journald-audit.socket \
+    systemd-journald.service.wants/systemd-journald-audit.socket \
+    sockets.target.wants/systemd-report.socket \
+    sockets.target.wants/systemd-report-basic.socket \
+    sockets.target.wants/systemd-report-cgroup.socket \
+    sockets.target.wants/systemd-report-files.socket \
+    sockets.target.wants/systemd-report-sign-plain.socket \
+    sockets.target.wants/systemd-report-sign-tsm.socket \
     multi-user.target.wants/mdmonitor.service; do
     rm -f "$ROOTFS/etc/systemd/system/$unit"
 done
+ln -sf /dev/null "$ROOTFS/etc/systemd/system/systemd-homed.service"
+ln -sf /dev/null "$ROOTFS/etc/systemd/system/uresourced.service"
+systemctl --root="$ROOTFS" --global mask uresourced.service 2>/dev/null || {
+    mkdir -p "$ROOTFS/etc/systemd/user"
+    ln -sf /dev/null "$ROOTFS/etc/systemd/user/uresourced.service"
+}
+systemctl --root="$ROOTFS" preset \
+    sddm.service \
+    blaze-sentinel.service \
+    blaze-boot-success.service \
+    blazeos-postinstall.service \
+    blazeos-apply-install-choices.service \
+    blazeos-desktop-provision.service \
+    blazeos-plymouth-failsafe.service \
+    blazeos-nvidia-firstboot.service \
+    blazeos-oobe-hygiene.service \
+    blaze-optimization.service \
+    blazeos-identity-guard.service \
+    polkit.service
+ln -sf /usr/lib/systemd/system/NetworkManager.service "$ROOTFS/etc/systemd/system/dbus-org.freedesktop.NetworkManager.service"
 CORE_PACKAGE_COUNT=$(rpm --root "$ROOTFS" -qa | wc -l)
 echo "  -> SolarUI core package count after trim: $CORE_PACKAGE_COUNT"
 test "$CORE_PACKAGE_COUNT" -lt 1950
@@ -269,13 +422,52 @@ chmod 2755 "$ROOTFS/usr/bin/crontab" 2>/dev/null || true
 chmod 2755 "$ROOTFS/usr/bin/at" 2>/dev/null || true
 chmod 2755 "$ROOTFS/usr/bin/chage" 2>/dev/null || true
 chmod 2755 "$ROOTFS/usr/libexec/utempter/utempter" 2>/dev/null || true
+echo "  -> Enforcing OOBE blaze-setup & sddm account / shadow / group / home integrity..."
+grep -q "^sddm:" "$ROOTFS/etc/passwd" || echo "sddm:x:962:962:SDDM Greeter Account:/var/lib/sddm:/usr/sbin/nologin" >> "$ROOTFS/etc/passwd"
+grep -q "^blaze-setup:" "$ROOTFS/etc/passwd" || echo "blaze-setup:x:961:961:BlazeOS Setup Assistant:/var/lib/blaze-setup:/bin/bash" >> "$ROOTFS/etc/passwd"
+grep -q "^sddm:" "$ROOTFS/etc/group" || echo "sddm:x:962:" >> "$ROOTFS/etc/group"
+grep -q "^blaze-setup:" "$ROOTFS/etc/group" || echo "blaze-setup:x:961:" >> "$ROOTFS/etc/group"
+chmod 0600 "$ROOTFS/etc/shadow" "$ROOTFS/etc/gshadow"
+grep -q "^sddm:" "$ROOTFS/etc/shadow" || echo "sddm:!*:20726::::::" >> "$ROOTFS/etc/shadow"
+if grep -q "^blaze-setup:" "$ROOTFS/etc/shadow"; then
+    sed -i "s/^blaze-setup:[^:]*:/blaze-setup::/" "$ROOTFS/etc/shadow"
+else
+    echo "blaze-setup::20726::::::" >> "$ROOTFS/etc/shadow"
+fi
+grep -q "^sddm:" "$ROOTFS/etc/gshadow" || echo "sddm:!*::" >> "$ROOTFS/etc/gshadow"
+grep -q "^blaze-setup:" "$ROOTFS/etc/gshadow" || echo "blaze-setup:!::" >> "$ROOTFS/etc/gshadow"
+python3 - "$ROOTFS/etc/group" "$ROOTFS/etc/gshadow" <<'PYGRP'
+import sys
+for path in sys.argv[1:]:
+    out = []
+    for ln in open(path, encoding="utf-8"):
+        cols = ln.rstrip("\n").split(":")
+        if len(cols) == 4 and cols[0] in ("wheel", "video", "audio", "input", "render"):
+            mems = [m for m in cols[3].split(",") if m]
+            if "blaze-setup" not in mems:
+                mems.append("blaze-setup")
+            cols[3] = ",".join(mems)
+            ln = ":".join(cols) + "\n"
+        out.append(ln)
+    open(path, "w", encoding="utf-8").writelines(out)
+PYGRP
+chmod 0000 "$ROOTFS/etc/shadow" "$ROOTFS/etc/gshadow"
+chmod 0600 "$ROOTFS/etc/shadow"
+grep -q "^blaze-setup::" "$ROOTFS/etc/shadow"
+grep -q "^sddm:" "$ROOTFS/etc/shadow"
+chmod 0000 "$ROOTFS/etc/shadow"
+grep -q "^wheel:.*blaze-setup" "$ROOTFS/etc/group"
+grep -q "^video:.*blaze-setup" "$ROOTFS/etc/group"
+mkdir -p "$ROOTFS/var/lib/blaze-setup"
 chown -R 961:961 "$ROOTFS/var/lib/blaze-setup" 2>/dev/null || true
-chmod 755 "$ROOTFS/var/lib/blaze-setup" 2>/dev/null || true
+chmod 0755 "$ROOTFS/var/lib/blaze-setup"
 chmod 0440 "$ROOTFS/etc/sudoers.d/99-blaze-setup" 2>/dev/null || true
 if [ ! -f "$ROOTFS/usr/lib/kitty/bin/kitty" ]; then
     echo "  -> Fetching Kitty standalone bundle..."
     mkdir -p "$ROOTFS/usr/lib/kitty"
     curl -sL https://github.com/kovidgoyal/kitty/releases/download/v0.49.1/kitty-0.49.1-x86_64.txz | tar -xJ -C "$ROOTFS/usr/lib/kitty"
+fi
+if [ -f "$ROOTFS/usr/lib/kitty/bin/kitty" ]; then
     ln -sf ../lib/kitty/bin/kitty "$ROOTFS/usr/bin/kitty"
     ln -sf ../lib/kitty/bin/kitten "$ROOTFS/usr/bin/kitten"
 fi
@@ -292,10 +484,10 @@ chmod 755 "$ROOTFS/usr/bin/solar-session" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/kitty" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/kitten" 2>/dev/null || true
 chmod -R 755 "$ROOTFS/usr/lib/kitty" 2>/dev/null || true
-chmod 755 "$ROOTFS/usr/local/bin/blazeos-control" 2>/dev/null || true
-chmod 755 "$ROOTFS/usr/local/bin/blazeos-apply-install-choices" 2>/dev/null || true
-chmod 755 "$ROOTFS/usr/local/bin/blazeos-desktop-provision" 2>/dev/null || true
-chmod 755 "$ROOTFS/usr/local/bin/blazeos-remove-solarui" 2>/dev/null || true
+chmod 755 "$ROOTFS/usr/bin/blazeos-control" 2>/dev/null || true
+chmod 755 "$ROOTFS/usr/bin/blazeos-apply-install-choices" 2>/dev/null || true
+chmod 755 "$ROOTFS/usr/bin/blazeos-desktop-provision" 2>/dev/null || true
+chmod 755 "$ROOTFS/usr/bin/blazeos-remove-solarui" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/caelestia" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/quickshell" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/quickshell.bin" 2>/dev/null || true
@@ -318,24 +510,25 @@ chmod 0755 "$ROOTFS/usr/bin/blaze-recovery" \
     "$ROOTFS/usr/bin/solar-settings" \
     "$ROOTFS/usr/bin/blaze-house" \
     "$ROOTFS/usr/bin/blaze-setup" \
-    "$ROOTFS/usr/local/bin/blaze-snapshot" \
-    "$ROOTFS/usr/local/bin/blaze-bootloader" \
-    "$ROOTFS/usr/local/bin/blazeos-postinstall" \
-    "$ROOTFS/usr/local/bin/blazeos-limine-install" \
-    "$ROOTFS/usr/local/bin/blazeos-control" \
-    "$ROOTFS/usr/local/bin/blazeos-desktop-provision" \
-    "$ROOTFS/usr/local/bin/blazeos-remove-solarui" 2>/dev/null || true
+    "$ROOTFS/usr/bin/blaze-snapshot" \
+    "$ROOTFS/usr/bin/blaze-bootloader" \
+    "$ROOTFS/usr/bin/blazeos-postinstall" \
+    "$ROOTFS/usr/bin/blazeos-limine-install" \
+    "$ROOTFS/usr/bin/blazeos-control" \
+    "$ROOTFS/usr/bin/blazeos-desktop-provision" \
+    "$ROOTFS/usr/bin/blazeos-remove-solarui" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/libexec/blazeos-wayland-session-ready" 2>/dev/null || true
+chmod 755 "$ROOTFS/usr/libexec/blaze-oobe-session" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/libexec/blazeos-update" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/libexec/blazeos-offline-update" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/libexec/blazeos-offline-progress-filter" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/libexec/blaze-style-center-first-run" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/blaze-style-center" 2>/dev/null || true
-chmod 755 "$ROOTFS/usr/local/bin/blazeos-apply-install-choices" 2>/dev/null || true
+chmod 755 "$ROOTFS/usr/bin/blazeos-apply-install-choices" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/gen_grub_cfgstub" 2>/dev/null || true
 chmod 755 "$ROOTFS/etc/grub.d/09_berp" 2>/dev/null || true
 chmod 755 "$ROOTFS/etc/grub.d/99_berp" 2>/dev/null || true
-chmod 755 "$ROOTFS/usr/local/bin/solar-torture" 2>/dev/null || true
+chmod 755 "$ROOTFS/usr/bin/solar-torture" 2>/dev/null || true
 chmod 600 "$ROOTFS/etc/NetworkManager/system-connections/"*.nmconnection 2>/dev/null || true
 
 echo "  -> Compiling GSettings schemas..."
@@ -351,9 +544,19 @@ ln -sf /usr/lib/systemd/system/sddm.service "$ROOTFS/etc/systemd/system/multi-us
 ln -sf /usr/lib/systemd/system/graphical.target "$ROOTFS/etc/systemd/system/default.target"
 ln -sf /dev/null "$ROOTFS/etc/systemd/system/gdm.service"
 ln -sf /usr/lib/systemd/system/polkit.service "$ROOTFS/etc/systemd/system/dbus-org.freedesktop.PolicyKit1.service"
+ln -sf /etc/systemd/system/blazeos-identity-guard.service "$ROOTFS/etc/systemd/system/multi-user.target.wants/blazeos-identity-guard.service"
+
+test -f "$ROOTFS/usr/bin/blaze-optimize"
+echo "  -> Applying BlazeOS identity & logos..."
+mkdir -p "$ROOTFS/proc"
+mount --rbind /proc "$ROOTFS/proc"
+chroot "$ROOTFS" /usr/libexec/blazeos-apply-logos || true
+chroot "$ROOTFS" /usr/bin/blazeos-sync-identity --force || true
+umount -l "$ROOTFS/proc"
+test -z "$(ls -A "$ROOTFS/proc")"
 
 echo "  -> Updating dynamic linker cache (ldconfig)..."
-chroot "$ROOTFS" ldconfig 2>/dev/null || ldconfig -r "$ROOTFS" -f "$ROOTFS/etc/ld.so.conf" -C "/etc/ld.so.cache" 2>/dev/null || true
+chroot "$ROOTFS" ldconfig 2>/dev/null || ldconfig -r "$ROOTFS" -f /etc/ld.so.conf -C /etc/ld.so.cache 2>/dev/null || true
 
 echo "  -> Setting SELinux contexts with setfiles..."
 LD_LIBRARY_PATH="$ROOTFS/usr/lib64" "$ROOTFS/usr/sbin/setfiles" -r "$ROOTFS" "$ROOTFS/etc/selinux/targeted/contexts/files/file_contexts" "$ROOTFS" 2>&1 | tail -10
@@ -361,24 +564,25 @@ chroot "$ROOTFS" semanage permissive -a virt_qemu_ga_t 2>/dev/null || true
 
 echo "  -> Explicitly ensuring systemd and custom apps have correct labels..."
 setfattr -n security.selinux -v "system_u:object_r:init_exec_t:s0" "$ROOTFS/usr/lib/systemd/systemd"
-setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/local/bin/blazeos-welcome" 2>/dev/null || true
-setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/local/bin/blazeos-control" 2>/dev/null || true
-setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/local/bin/solar-torture" 2>/dev/null || true
-setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/local/bin/blazeos-nvidia-setup" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/blazeos-welcome" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/blazeos-control" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/solar-torture" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/blazeos-nvidia-setup" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/solar-shell" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/solar-session" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/lib/kitty/bin/kitty" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/lib/kitty/bin/kitten" 2>/dev/null || true
-setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/local/bin/blazeos-limine-install" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/blazeos-limine-install" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/libexec/blazeos-welcome-helper" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/blazeos-control" 2>/dev/null || true
-setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/local/bin/blaze-optimize" 2>/dev/null || true
-setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/local/bin/blaze-bootloader" 2>/dev/null || true
-setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/local/bin/blazeos-postinstall" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/blaze-optimize" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/blaze-bootloader" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/blazeos-postinstall" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/limine" 2>/dev/null || true
 find "$ROOTFS/usr/share/limine" -exec setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" {} + 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:systemd_unit_file_t:s0" "$ROOTFS/etc/systemd/system/blaze-optimization.service" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:systemd_unit_file_t:s0" "$ROOTFS/etc/systemd/system/blazeos-postinstall.service" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:systemd_unit_file_t:s0" "$ROOTFS/etc/systemd/system/blazeos-identity-guard.service" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/fastfetch" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/yad" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/firehub" 2>/dev/null || true
@@ -429,16 +633,27 @@ for bin_path in \
     "$ROOTFS/usr/bin/solar-settings" \
     "$ROOTFS/usr/bin/blaze-house" \
     "$ROOTFS/usr/bin/blaze-setup" \
-    "$ROOTFS/usr/local/bin/blaze-snapshot" \
-    "$ROOTFS/usr/local/bin/blaze-bootloader" \
-    "$ROOTFS/usr/local/bin/blazeos-postinstall" \
-    "$ROOTFS/usr/local/bin/blazeos-limine-install" \
-    "$ROOTFS/usr/local/bin/blazeos-control" \
-    "$ROOTFS/usr/local/bin/blazeos-desktop-provision" \
-    "$ROOTFS/usr/local/bin/blazeos-remove-solarui"; do
+    "$ROOTFS/usr/bin/blaze-snapshot" \
+    "$ROOTFS/usr/bin/blaze-bootloader" \
+    "$ROOTFS/usr/bin/blazeos-postinstall" \
+    "$ROOTFS/usr/bin/blazeos-limine-install" \
+    "$ROOTFS/usr/bin/blazeos-control" \
+    "$ROOTFS/usr/bin/blazeos-desktop-provision" \
+    "$ROOTFS/usr/bin/blazeos-remove-solarui" \
+    "$ROOTFS/usr/bin/blazeos-sync-identity" \
+    "$ROOTFS/etc/kernel/install.d/05-blaze-identity.install" \
+    "$ROOTFS/etc/kernel/install.d/99-zz-blaze-identity.install" \
+    "$ROOTFS/usr/libexec/blazeos-provision-bere-vault" \
+    "$ROOTFS/usr/libexec/blaze-oobe-session" \
+    "$ROOTFS/usr/lib/dracut/modules.d/99blaze-bere/module-setup.sh" \
+    "$ROOTFS/usr/lib/dracut/modules.d/99blaze-bere/blaze-emergency-hook.sh"; do
     chmod 0755 "$bin_path" 2>/dev/null || true
     setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$bin_path" 2>/dev/null || true
 done
+setfattr -n security.selinux -v "system_u:object_r:shadow_t:s0" "$ROOTFS/etc/shadow" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:shadow_t:s0" "$ROOTFS/etc/gshadow" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:user_home_dir_t:s0" "$ROOTFS/var/lib/blaze-setup" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:etc_t:s0" "$ROOTFS/etc/udev/rules.d/99-blaze-recovery-vault.rules" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:etc_t:s0" "$ROOTFS/etc/sddm.conf.d/00-blaze-oobe.conf" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:etc_t:s0" "$ROOTFS/etc/sudoers.d/99-blaze-setup" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" "$ROOTFS/usr/share/wayland-sessions/blaze-oobe.desktop" 2>/dev/null || true
@@ -452,6 +667,14 @@ setfattr -n security.selinux -v "system_u:object_r:lib_t:s0" "$ROOTFS/usr/lib/so
 find "$ROOTFS/usr/lib64/quickshell" -exec setfattr -n security.selinux -v "system_u:object_r:lib_t:s0" {} + 2>/dev/null || true
 find "$ROOTFS/usr/share/caelestia" -exec setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" {} + 2>/dev/null || true
 find "$ROOTFS/usr/share/quickshell/end4-pC" -exec setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" {} + 2>/dev/null || true
+find "$ROOTFS/usr/share/quickshell/we10x" -exec setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" {} + 2>/dev/null || true
+find "$ROOTFS/usr/share/icons/We10X" -exec setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" {} + 2>/dev/null || true
+find "$ROOTFS/usr/share/backgrounds/blazeos/we10x" -exec setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" {} + 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:lib_t:s0" "$ROOTFS/usr/lib64/plymouth/script.so" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:lib_t:s0" "$ROOTFS"/usr/lib64/libqalculate.so* 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:lib_t:s0" "$ROOTFS"/usr/lib64/libical.so.4* 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:lib_t:s0" "$ROOTFS"/usr/lib64/libtomlplusplus.so* 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:lib_t:s0" "$ROOTFS"/usr/lib64/libjxl*.so.0.12* 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:lib_t:s0" "$ROOTFS"/usr/lib64/libseat.so* 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:lib_t:s0" "$ROOTFS"/usr/lib64/libyyjson.so* 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:lib_t:s0" "$ROOTFS"/usr/lib64/libgtksourceview-3.0.so* 2>/dev/null || true
@@ -462,12 +685,31 @@ setfattr -n security.selinux -v "system_u:object_r:lib_t:s0" "$ROOTFS"/usr/lib64
 setfattr -n security.selinux -v "system_u:object_r:lib_t:s0" "$ROOTFS"/usr/lib64/libmng*.so* 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:lib_t:s0" "$ROOTFS"/usr/lib/python3.15/site-packages/materialyoucolor/quantize/celebi*.so 2>/dev/null || true
 
-echo "  -> Verifying critical SELinux labels..."
+echo "  -> Verifying critical SELinux labels & SDDM Wayland session integrity..."
+cmp -s "$ROOTFS/usr/share/sddm/scripts/wayland-session" "$ROOTFS/etc/sddm/wayland-session"
+grep -Fq "exec \$@" "$ROOTFS/etc/sddm/wayland-session"
+test -x "$ROOTFS/usr/libexec/blaze-oobe-session"
+for ws in "$ROOTFS/usr/share/wayland-sessions/"*.desktop; do
+    [ -f "$ws" ] || continue
+    ws_exec=$(awk -F= "/^Exec=/{print substr(\$0,6); exit}" "$ws" | awk "{print \$1}")
+    case "$ws_exec" in
+        /*) test -x "$ROOTFS$ws_exec" ;;
+    esac
+done
 getfattr -d -m - "$ROOTFS/usr/lib/systemd/systemd"
 getfattr -d -m - "$ROOTFS/usr/bin/sudo"
-getfattr -d -m - "$ROOTFS/usr/local/bin/blazeos-welcome"
-getfattr -d -m - "$ROOTFS/usr/local/bin/blazeos-control"
+getfattr -d -m - "$ROOTFS/usr/bin/blazeos-welcome"
+getfattr -d -m - "$ROOTFS/usr/bin/blazeos-control"
 getfattr -d -m - "$ROOTFS/usr/bin/blaze-house"
+rpm --root "$ROOTFS" -q blaze-release
+grep -qx '\''PRETTY_NAME="Blaze SolarEvolution 5.05"'\'' "$ROOTFS/usr/lib/os-release"
+grep -qx '\''Blaze SolarEvolution release 5.05 (SolarEvolution)'\'' "$ROOTFS/usr/lib/fedora-release"
+grep -qx '\''GRUB_DISTRIBUTOR="Blaze SolarEvolution"'\'' "$ROOTFS/etc/default/grub"
+grep -qx '\''45'\'' "$ROOTFS/etc/dnf/vars/releasever"
+grep -qx '\''Product=Blaze SolarEvolution'\'' "$ROOTFS/.buildstamp"
+test -L "$ROOTFS/etc/redhat-release"
+test -L "$ROOTFS/etc/system-release"
+test -L "$ROOTFS/etc/systemd/system/multi-user.target.wants/blazeos-identity-guard.service"
 
 echo "  -> Compressing rootfs into LiveOS/squashfs.img with zstd & xattrs..."
 mkdir -p "'"$WORK"'"/LiveOS
@@ -523,5 +765,5 @@ fi
 
 echo "=== BUILD COMPLETE! ==="
 ls -lh "$OUT_ISO"
-sha256sum "$OUT_ISO" > "${OUT_ISO}.sha256"
+(cd "$(dirname "$OUT_ISO")" && sha256sum "$(basename "$OUT_ISO")") > "${OUT_ISO}.sha256"
 echo "SHA-256: $(cut -d' ' -f1 "${OUT_ISO}.sha256")"

@@ -7,6 +7,27 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body class="fox-theme">
+    <!-- Startup Root / Admin Lock Screen Overlay -->
+    <div class="bere-lock-overlay" id="bere-lock-overlay" style="display: none;">
+        <div class="bere-lock-card">
+            <div class="lock-brand-row">
+                <svg class="fox-flame" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2c1 3 4 5 4 9a6 6 0 1 1-12 0c0-4 3-6 4-9 1 3 2 4 4 4s1-2 0-4z" fill="#ff6a00" stroke="#ff8533"/>
+                </svg>
+                <h2>BlazeOS BERE Güvenlik Kilidi</h2>
+            </div>
+            <p class="lock-desc" id="bere-lock-desc">
+                Kurtarma ortamına, disk bölümleme araçlarına ve sistem sıfırlama işlemlerine erişmek için yetkili kullanıcı (wheel) veya root parolanızı girin.
+            </p>
+            <div class="lock-meta" id="bere-lock-users"></div>
+            <form id="bere-lock-form" class="lock-form">
+                <input type="password" id="bere-lock-password" class="fox-input" placeholder="Yetkili Kullanıcı / Root Parolası" autocomplete="off">
+                <div class="modal-error" id="bere-lock-error" style="display: none;"></div>
+                <button class="fox-btn primary-btn" id="btn-bere-unlock" type="submit">Kilidi Aç</button>
+            </form>
+        </div>
+    </div>
+
     <div class="recovery-app">
         <!-- Status Bar -->
         <header class="status-bar">
@@ -71,33 +92,113 @@
             <!-- Main Tab View Content -->
             <main class="tab-content-container">
                 
-                <!-- TAB 1: INSTALL / FLASH ISO (USB-less direct boot) -->
+                <!-- TAB 1: INSTALL / USB ISO EXPLORER & DIRECT BOOT -->
                 <section class="tab-pane active" id="tab-install">
                     <div class="section-header">
-                        <h2 data-i18n="install_title">USB Olmadan ISO ile Yeniden Kurulum / Güncelleme</h2>
-                        <p class="section-desc" data-i18n="install_desc">Sisteminizdeki veya takılı disklerdeki BlazeOS ISO dosyalarını doğrudan belleğe bağlayarak USB belleğe ihtiyaç duymadan kurulumu başlatabilirsiniz.</p>
+                        <h2 data-i18n="install_title">USB ISO Gezgini, Kasaya Çekme ve Doğrudan Başlatma</h2>
+                        <p class="section-desc" data-i18n="install_desc">Takılı USB belleklerin içine girip ISO kalıplarını dahili diske (.blaze-isos) çekebilir veya kexec / GRUB + RAM'e Yükle (rd.live.ram) seçenekleriyle doğrudan başlatabilirsiniz.</p>
+                    </div>
+
+                    <div id="bere-vault-banner" class="fox-card" style="display:none; margin-bottom:14px; border-color: rgba(255,106,0,0.45);">
+                        <div class="card-title-row">
+                            <h3 id="bere-vault-title">Dahili Zırhlı Kasa İmajı (BLAZE_REC — USB Gerektirmez)</h3>
+                            <span class="tag-badge" id="bere-vault-badge">SHA-256 KORUMALI</span>
+                        </div>
+                        <p class="section-desc" id="bere-vault-desc" style="margin:6px 0 12px 0;"></p>
+                        <div class="inline-row" style="flex-wrap:wrap; gap:10px;" id="bere-vault-actions">
+                            <button class="fox-btn primary-btn" id="btn-vault-reinstall" type="button">USB Olmadan Sıfırdan Kurulum (Anaconda)</button>
+                            <button class="fox-btn outline-btn" id="btn-vault-live" type="button">Zırhlı Kasadan Canlı Masaüstü Başlat</button>
+                        </div>
                     </div>
 
                     <div class="card-grid">
-                        <div class="fox-card col-span-2">
+                        <!-- LEFT PANEL: Connected USB & External Storage Explorer -->
+                        <div class="fox-card">
                             <div class="card-title-row">
-                                <h3 data-i18n="detected_isos">Tespit Edilen ISO Kalıpları</h3>
-                                <button class="fox-btn outline-btn" id="btn-refresh-isos" data-i18n="btn_rescan">Yeniden Tara</button>
+                                <h3>USB ve Harici Medya Gezgini</h3>
+                                <button class="fox-btn outline-btn fox-btn-sm" id="btn-refresh-usb" type="button">USB'leri Tara</button>
                             </div>
-                            <div class="iso-list-container" id="iso-list">
-                                <div class="empty-hint" data-i18n="scanning_isos">ISO kalıpları taranıyor...</div>
+                            <div id="usb-device-list" class="iso-list-container compact-scroll">
+                                <div class="empty-hint">Takılı USB ve harici bölümler taranıyor...</div>
+                            </div>
+
+                            <div id="usb-browser-box" class="usb-browser-box" style="display:none;">
+                                <div class="usb-breadcrumb-bar">
+                                    <button class="fox-btn outline-btn fox-btn-sm" id="btn-usb-up" type="button">Üst Klasör</button>
+                                    <span class="usb-path-label" id="usb-current-path">/</span>
+                                </div>
+                                <div id="usb-entry-list" class="iso-list-container compact-scroll"></div>
+                            </div>
+
+                            <div id="usb-pull-panel" class="usb-pull-panel" style="display:none;">
+                                <div class="usb-selected-banner" id="usb-selected-iso-label"></div>
+                                <div class="part-field" style="margin-top:8px;">
+                                    <label for="iso-pull-target">Bilgisayarda Kaydedilecek Hedef Bölüm:</label>
+                                    <select id="iso-pull-target" class="fox-select"></select>
+                                </div>
+                                <div class="inline-row" style="margin-top:10px; flex-wrap:wrap;">
+                                    <button class="fox-btn primary-btn" id="btn-pull-iso" type="button">Bilgisayara Çek</button>
+                                    <button class="fox-btn outline-btn" id="btn-boot-usb-direct" type="button">Çekmeden USB Üzerinden Seç</button>
+                                    <button class="fox-btn danger-btn fox-btn-sm" id="btn-cancel-pull" type="button" style="display:none;">İptal</button>
+                                </div>
+                                <div id="iso-pull-progress-wrap" class="pull-progress-wrap" style="display:none;">
+                                    <div class="pull-progress-bar">
+                                        <div class="pull-progress-fill" id="iso-pull-progress-fill" style="width:0%;"></div>
+                                    </div>
+                                    <div class="pull-progress-meta" id="iso-pull-progress-text">%0</div>
+                                </div>
                             </div>
                         </div>
 
-                        <div class="fox-card col-span-2" id="iso-action-card" style="display:none;">
-                            <h3 data-i18n="selected_iso_action">Seçili Kalıp İşlemi</h3>
-                            <div class="iso-meta-info" id="selected-iso-meta"></div>
-                            <div class="slider-action-wrapper">
-                                <p class="slider-instruction" data-i18n="slider_iso_desc">Bu kalıbı bir sonraki açılışta doğrudan başlatmak için kaydırın:</p>
-                                <div class="orange-slider-track" id="slider-iso-boot" role="button" tabindex="0">
-                                    <div class="slider-fill"></div>
-                                    <div class="slider-thumb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="9 18 15 12 9 6"/></svg></div>
-                                    <span class="slider-label" data-i18n="slider_iso_label">Kaydırarak ISO ile Başlat</span>
+                        <!-- RIGHT PANEL: Local ISO Vault & Launch Configuration -->
+                        <div class="fox-card">
+                            <div class="card-title-row">
+                                <h3 data-i18n="detected_isos">Bilgisayardaki ve Algılanan ISO Kalıpları</h3>
+                                <button class="fox-btn outline-btn fox-btn-sm" id="btn-refresh-isos" type="button" data-i18n="btn_rescan">Yeniden Tara</button>
+                            </div>
+                            <div class="iso-list-container compact-scroll" id="iso-list">
+                                <div class="empty-hint" data-i18n="scanning_isos">ISO kalıpları taranıyor...</div>
+                            </div>
+
+                            <div id="iso-action-card" class="iso-launch-config" style="display:none;">
+                                <h3 data-i18n="selected_iso_action">Başlatma Ayarları ve Önyükleme Motoru</h3>
+                                <div class="iso-meta-info" id="selected-iso-meta"></div>
+                                <div class="inline-row" id="selected-iso-pull-bar" style="display:none; margin-bottom: 10px;">
+                                    <button class="fox-btn outline-btn fox-btn-sm" id="btn-iso-card-pull" type="button">Bilgisayara Kopyala (Kasa)</button>
+                                </div>
+
+                                <div class="iso-settings-grid">
+                                    <div class="part-field">
+                                        <label for="iso-boot-profile">Başlatma Profili</label>
+                                        <select id="iso-boot-profile" class="fox-select">
+                                            <option value="live">Canlı Masaüstü (Standart Live)</option>
+                                            <option value="install">Doğrudan Kurulum Sihirbazı (Anaconda)</option>
+                                            <option value="safe_graphics">Güvenli Grafik Modu (nomodeset)</option>
+                                            <option value="check">Medya Bütünlük Kontrolü (rd.live.check)</option>
+                                        </select>
+                                    </div>
+                                    <div class="part-field">
+                                        <label for="iso-boot-engine">Önyükleme Motoru</label>
+                                        <select id="iso-boot-engine" class="fox-select">
+                                            <option value="auto">Otomatik Hızlı Geçiş (kexec / GRUB Yedekli)</option>
+                                            <option value="kexec">Doğrudan kexec (Limine &amp; Silinmiş Disk Uyumlu)</option>
+                                            <option value="grub">GRUB2 Loopback Üzerinden Yeniden Başlat</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <label class="fox-check" style="margin: 12px 0 6px 0;">
+                                    <input type="checkbox" id="iso-copy-to-ram">
+                                    <span>RAM'e Yükleyerek Başlat (rd.live.ram / toram — Kurulumda tüm diski biçimlendirebilmek ve USB'yi çıkarabilmek için)</span>
+                                </label>
+
+                                <div class="slider-action-wrapper" style="margin-top:12px;">
+                                    <p class="slider-instruction" data-i18n="slider_iso_desc">Seçili kalıbı bu ayarlarla başlatmak için sürgüyü kaydırın:</p>
+                                    <div class="orange-slider-track" id="slider-iso-boot" role="button" tabindex="0">
+                                        <div class="slider-fill"></div>
+                                        <div class="slider-thumb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="9 18 15 12 9 6"/></svg></div>
+                                        <span class="slider-label" data-i18n="slider_iso_label">Kaydırarak ISO ile Başlat</span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -217,10 +318,53 @@
                 <section class="tab-pane" id="tab-partitions">
                     <div class="section-header">
                         <h2 data-i18n="part_title">Bölüm ve Disk Yönetimi</h2>
-                        <p class="section-desc" data-i18n="part_desc">Bağlama (Mount/Unmount), dosya sistemi onarımı (fsck/scrub) ve disk SMART sağlığı.</p>
+                        <p class="section-desc" data-i18n="part_desc">Disk bölümleme (GPT/MBR), yeni bölüm oluşturma, biçimlendirme (Btrfs/Ext4/XFS/FAT32), bağlama, fsck/scrub onarımı ve SMART sağlığı.</p>
                     </div>
 
                     <div class="card-grid">
+                        <div class="fox-card col-span-2">
+                            <div class="card-title-row">
+                                <h3>Disk Bölümleme ve Biçimlendirme Aracı</h3>
+                            </div>
+                            <div class="part-builder-grid">
+                                <div class="part-field">
+                                    <label for="part-target-disk">Hedef Disk</label>
+                                    <select id="part-target-disk" class="fox-select"></select>
+                                </div>
+                                <div class="part-field">
+                                    <label for="part-table-type">Bölüm Tablosu</label>
+                                    <div class="inline-row">
+                                        <select id="part-table-type" class="fox-select">
+                                            <option value="gpt">GPT (UEFI / Modern)</option>
+                                            <option value="msdos">MBR (Legacy DOS)</option>
+                                        </select>
+                                        <button class="fox-btn outline-btn" id="btn-disk-mklabel" type="button">Tablo Sıfırla</button>
+                                    </div>
+                                </div>
+                                <div class="part-field">
+                                    <label for="part-new-size">Yeni Bölüm Boyutu (MB, boş = %100)</label>
+                                    <input type="text" id="part-new-size" class="fox-input" placeholder="Örn: 2048 veya boş bırakın">
+                                </div>
+                                <div class="part-field">
+                                    <label for="part-new-fs">Dosya Sistemi</label>
+                                    <select id="part-new-fs" class="fox-select">
+                                        <option value="btrfs">Btrfs (CoW / Snapshot)</option>
+                                        <option value="ext4">Ext4 (Linux Standart)</option>
+                                        <option value="xfs">XFS</option>
+                                        <option value="vfat">FAT32 / EFI (vfat)</option>
+                                        <option value="swap">Linux Swap</option>
+                                    </select>
+                                </div>
+                                <div class="part-field">
+                                    <label for="part-new-label">Bölüm Etiketi (İsteğe Bağlı)</label>
+                                    <input type="text" id="part-new-label" class="fox-input" placeholder="Örn: VERI_DISKI">
+                                </div>
+                                <div class="part-field part-field-btn">
+                                    <button class="fox-btn primary-btn" id="btn-part-create" type="button">Yeni Bölüm Oluştur</button>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="fox-card col-span-2">
                             <div class="card-title-row">
                                 <h3 data-i18n="mounted_parts_title">Bağlı ve Algılanan Bölümler</h3>
@@ -231,10 +375,10 @@
                                     <thead>
                                         <tr>
                                             <th data-i18n="th_device">Aygıt</th>
-                                            <th data-i18n="th_fs">Dosya Sistemi</th>
+                                            <th data-i18n="th_fs">Dosya Sistemi / Etiket</th>
                                             <th data-i18n="th_size">Boyut</th>
                                             <th data-i18n="th_mount">Bağlama Noktası</th>
-                                            <th data-i18n="th_action">İşlem</th>
+                                            <th data-i18n="th_action">İşlemler</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -242,6 +386,11 @@
                                     </tbody>
                                 </table>
                             </div>
+                        </div>
+
+                        <div class="fox-card col-span-2">
+                            <h3>Disk İşlem ve Denetim Günlüğü</h3>
+                            <pre class="fox-console" id="part-op-console">Disk işlemleri ve fsck/scrub çıktıları burada görüntülenir...</pre>
                         </div>
 
                         <div class="fox-card col-span-2">
@@ -257,27 +406,35 @@
                 <section class="tab-pane" id="tab-boot">
                     <div class="section-header">
                         <h2 data-i18n="boot_title">Önyükleme Onarımı (Boot Repair)</h2>
-                        <p class="section-desc" data-i18n="boot_desc">GRUB/Limine yapılandırmasını yeniden oluşturun, EFI girişlerini düzeltin ve çekirdek initramfs kalıbını onarın.</p>
+                        <p class="section-desc" data-i18n="boot_desc">GRUB2 ve Limine önyükleyicilerini yeniden kurun/yapılandırın, EFI NVRAM girişlerini düzeltin ve çekirdek initramfs kalıbını onarın.</p>
                     </div>
 
                     <div class="card-grid">
                         <div class="fox-card">
-                            <h3 data-i18n="grub_card_title">GRUB / Limine Yeniden Yapılandır</h3>
-                            <p class="card-help" data-i18n="grub_card_desc">/etc/grub.d yapılandırmasını okur, BERP ve normal sistem girişlerini yeniden bağlar.</p>
+                            <h3 data-i18n="grub_card_title">GNU GRUB2 Onar ve Etkinleştir</h3>
+                            <p class="card-help" data-i18n="grub_card_desc">EFI/MBR GRUB ikililerini doğrular, /etc/grub.d (BERE/BERP dahil) menüsünü ve EFI yönlendiricisini yeniden üretir.</p>
                             <button class="fox-btn primary-btn" id="btn-repair-grub" data-i18n="btn_repair_grub">GRUB Yapılandırmasını Onar</button>
                         </div>
                         <div class="fox-card">
+                            <h3>Limine Önyükleyici Kur / Onar</h3>
+                            <p class="card-help">Modern Limine önyükleyicisini, çekirdek senkronizasyonunu ve BERE/BERP kurtarma girişlerini yapılandırır.</p>
+                            <button class="fox-btn primary-btn" id="btn-repair-limine">Limine Yapılandırmasını Kur</button>
+                        </div>
+                        <div class="fox-card">
                             <h3 data-i18n="efi_card_title">EFI Girişlerini Sıfırla / Onar</h3>
-                            <p class="card-help" data-i18n="efi_card_desc">Anakart UEFI NVRAM tablosuna BlazeOS ve Limine girişlerini yeniden yazar.</p>
+                            <p class="card-help" data-i18n="efi_card_desc">Anakart UEFI NVRAM tablosundaki yinelenen kayıtları temizler ve aktif BlazeOS önyükleyicisini başa yazar.</p>
                             <button class="fox-btn primary-btn" id="btn-repair-efi" data-i18n="btn_repair_efi">EFI NVRAM Onarımı</button>
                         </div>
-                        <div class="fox-card col-span-2">
+                        <div class="fox-card">
                             <h3 data-i18n="dracut_card_title">Dracut Initramfs Yeniden Derle</h3>
-                            <p class="card-help" data-i18n="dracut_card_desc">Tüm kurulu çekirdekler için donanım sürücülerini içeren initramfs imajlarını baştan üretir.</p>
+                            <p class="card-help" data-i18n="dracut_card_desc">Kurulu çekirdekler için donanım sürücülerini ve BlazeOS Acil Durum Ekranı modülünü içeren initramfs üretir.</p>
                             <button class="fox-btn outline-btn" id="btn-repair-dracut" data-i18n="btn_repair_dracut">Tüm Initramfs Kalıplarını Yenile (dracut)</button>
                         </div>
                         <div class="fox-card col-span-2" id="boot-repair-log-card">
-                            <h3 data-i18n="repair_log_title">Onarım Günlüğü</h3>
+                            <div class="card-title-row">
+                                <h3 data-i18n="repair_log_title">Onarım Günlüğü</h3>
+                                <button class="fox-btn outline-btn" id="btn-boot-status" type="button">Önyükleyici Durumunu Sorgula</button>
+                            </div>
                             <pre class="fox-console" id="boot-repair-console" data-i18n="waiting_op">İşlem bekleniyor...</pre>
                         </div>
                     </div>
@@ -363,14 +520,38 @@ Type commands below.
                     <input type="text" id="input-hard-reset-confirm" class="fox-input code-input" placeholder="YES" autocomplete="off" spellcheck="false">
                 </div>
                 <div class="modal-field">
-                    <label for="input-hard-reset-pass" data-i18n="modal_pass_label">Yetkili Kullanıcı / Root Şifresi:</label>
-                    <input type="password" id="input-hard-reset-pass" class="fox-input" placeholder="Parola" autocomplete="off">
+                    <label for="input-hard-reset-pass" data-i18n="modal_pass_label">Yetkili Kullanıcı (wheel) / Root Şifresi (Zorunlu):</label>
+                    <input type="password" id="input-hard-reset-pass" class="fox-input" placeholder="Parola (Zorunlu)" autocomplete="off">
                 </div>
                 <div class="modal-error" id="modal-error-msg" style="display: none;"></div>
             </div>
             <div class="modal-footer">
                 <button class="fox-btn outline-btn" id="btn-cancel-hard-reset" data-i18n="btn_cancel">İptal</button>
                 <button class="fox-btn danger-btn" id="btn-confirm-hard-reset" data-i18n="btn_confirm_wipe">Onayla ve Kilidi Aç</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reusable Critical Action Password Modal -->
+    <div class="modal-backdrop" id="modal-action-auth" style="display: none;">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <div class="modal-title-wrap">
+                    <h3 id="action-auth-title">Güvenlik Doğrulaması (Zorunlu)</h3>
+                </div>
+                <button class="modal-close-btn" id="btn-action-auth-close" aria-label="Kapat">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-subtext" id="action-auth-desc">Bu kritik disk / sistem işlemi için Yetkili Kullanıcı (wheel) veya Root şifrenizi girin:</p>
+                <div class="modal-field">
+                    <label for="input-action-auth-pass">Yetkili Kullanıcı (wheel) / Root Şifresi (Zorunlu):</label>
+                    <input type="password" id="input-action-auth-pass" class="fox-input" placeholder="Parola (Zorunlu)" autocomplete="off">
+                </div>
+                <div class="modal-error" id="action-auth-error" style="display: none;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="fox-btn outline-btn" id="btn-action-auth-cancel">İptal</button>
+                <button class="fox-btn primary-btn" id="btn-action-auth-confirm">Doğrula ve Devam Et</button>
             </div>
         </div>
     </div>

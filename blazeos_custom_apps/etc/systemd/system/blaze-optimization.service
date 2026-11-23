@@ -1,0 +1,12 @@
+[Unit]
+Description=Blaze OS High-Performance System Optimization
+After=local-fs.target systemd-sysctl.service
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/blaze-optimize auto
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

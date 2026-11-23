@@ -3,12 +3,15 @@ use tracing::{info, warn};
 
 use crate::actions::ShellAction;
 use crate::engine::{ShellEngine, SolarShellConfig, SurfaceProvider};
-use crate::providers::{CaelestiaProvider, End4PcProvider, NoctaliaProvider, ShellProvider};
+use crate::providers::{
+    CaelestiaProvider, End4PcProvider, NoctaliaProvider, ShellProvider, We10xProvider,
+};
 
 pub struct SolarSurfaceRouter {
     noctalia: NoctaliaProvider,
     caelestia: CaelestiaProvider,
     end4_pc: End4PcProvider,
+    we10x: We10xProvider,
 }
 
 impl Default for SolarSurfaceRouter {
@@ -17,6 +20,7 @@ impl Default for SolarSurfaceRouter {
             noctalia: NoctaliaProvider::new(),
             caelestia: CaelestiaProvider::new(),
             end4_pc: End4PcProvider::new(),
+            we10x: We10xProvider::new(),
         }
     }
 }
@@ -32,6 +36,7 @@ impl SolarSurfaceRouter {
             ShellEngine::Noctalia => SurfaceProvider::Noctalia,
             ShellEngine::Caelestia => SurfaceProvider::Caelestia,
             ShellEngine::End4Pc => SurfaceProvider::End4Pc,
+            ShellEngine::We10x => SurfaceProvider::We10x,
         }
     }
 
@@ -65,6 +70,7 @@ impl SolarSurfaceRouter {
                 }
             }
             SurfaceProvider::End4Pc => self.end4_pc.dispatch(action).await,
+            SurfaceProvider::We10x => self.we10x.dispatch(action).await,
             SurfaceProvider::SolarUI => {
                 match action {
                     ShellAction::Overview => {
@@ -134,4 +140,15 @@ mod tests {
         assert_eq!(router.provider_for(ShellAction::Session, &cfg), SurfaceProvider::End4Pc);
     }
 
+    #[test]
+    fn test_router_we10x_mode() {
+        let router = SolarSurfaceRouter::new();
+        let cfg = SolarShellConfig {
+            engine: ShellEngine::We10x,
+            ..Default::default()
+        };
+        assert_eq!(router.provider_for(ShellAction::Launcher, &cfg), SurfaceProvider::We10x);
+        assert_eq!(router.provider_for(ShellAction::ControlCenter, &cfg), SurfaceProvider::We10x);
+        assert_eq!(router.provider_for(ShellAction::WindowSwitcher, &cfg), SurfaceProvider::We10x);
+    }
 }

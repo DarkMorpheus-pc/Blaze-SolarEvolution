@@ -13,29 +13,31 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: ShellCheck Static Analysis
+      - name: Shell Syntax & Critical Checks
         run: |
-          sudo apt-get update && sudo apt-get install -y shellcheck
-          find blazeos_custom_apps/usr/local/bin blazeos_custom_apps/usr/libexec packaging scripts -type f -name "*.sh" -o -perm -111 | while read -r script; do
-            if head -n1 "$script" | grep -q "sh"; then
-              echo "Checking $script..."
-              shellcheck -e SC1090,SC1091,SC2034,SC2154 "$script" || true
+          sudo apt-get update && sudo apt-get install -y shellcheck desktop-file-utils
+          find blazeos_custom_apps/usr/bin blazeos_custom_apps/usr/libexec packaging scripts -type f \( -name "*.sh" -o -perm -111 \) | while read -r script; do
+            if head -n1 "$script" | grep -qE "bash|/bin/sh|/usr/bin/sh"; then
+              bash -n "$script"
             fi
           done
+          shellcheck -S error -e SC1090,SC1091,SC2034,SC2154 packaging/*.sh scripts/*.sh
 
       - name: Desktop File Validation
         run: |
-          sudo apt-get install -y desktop-file-utils
           find blazeos_custom_apps/usr/share/applications -name "*.desktop" -exec desktop-file-validate {} +
 
-      - name: Python Syntax & Regression Validation
+      - name: Python Syntax & Unit/Regression Validation
         run: |
-          python3 -m py_compile blazeos_custom_apps/usr/bin/berp-recovery-gui || true
-          python3 -m py_compile blazeos_custom_apps/usr/bin/blaze-death-screen || true
-          python3 -m py_compile blazeos_custom_apps/usr/bin/blaze-ghost-overlay || true
+          python3 -m py_compile blazeos_custom_apps/usr/bin/berp-recovery-gui
+          python3 -m py_compile blazeos_custom_apps/usr/bin/blaze-ghost-overlay
+          python3 -m unittest tests.test_audit_regressions
+          python3 -m tests.e2e.run_e2e --tier unit
 
-      - name: Run Audit Regression Tests
+      - name: Verify Repository URL & Hygiene Rules
         run: |
-          if [ -f tests/test_audit_regressions.py ]; then
-            python3 tests/test_audit_regressions.py || true
+          if grep -rn "DarkMorpheus-pc/Blaze-Galaxy" README.md packaging/ blazeos_custom_apps/etc/os-release blazeos_custom_apps/usr/share/dnf5/; then
+            echo "ERROR: Stale Blaze-Galaxy URL detected!" >&2
+            exit 1
           fi
+          ! grep -q "/home/" Blaze-SolarEvolution-5-x86_64.iso.sha256

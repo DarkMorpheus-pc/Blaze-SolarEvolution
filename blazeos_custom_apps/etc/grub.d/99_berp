@@ -104,7 +104,39 @@ if [ -n "$latest_version" ]; then
     fi
   fi
 
-  cat << BERPENTRY
+  # Check for dedicated immutable BLAZE_REC physical recovery partition first!
+  bere_vault_dev="`blkid -L BLAZE_REC 2>/dev/null || true`"
+  bere_vault_uuid=""
+  if [ -n "${bere_vault_dev}" ]; then
+    bere_vault_uuid="`blkid -s UUID -o value "${bere_vault_dev}" 2>/dev/null || true`"
+  fi
+
+  if [ -n "${bere_vault_uuid}" ]; then
+    cat << BERPVAULTENTRY
+menuentry "BlazeOS Recovery Environment (BERE - Powered by BERP)" --hotkey space --class recovery --class tool {
+	load_video
+	set gfxpayload=keep
+	insmod gzio
+	insmod part_gpt
+	insmod ext2
+	search --no-floppy --fs-uuid --set=root ${bere_vault_uuid}
+	linux /boot/vmlinuz-bere root=live:UUID=${bere_vault_uuid} rd.live.image ro quiet systemd.unit=blaze-recovery-gui.target systemd.mask=sddm.service systemd.mask=display-manager.service
+	initrd /boot/initrd-bere.img
+}
+
+menuentry "Blaze Emergency Recovery Protocol (BERP Console - TUI)" --hotkey b --class recovery --class tool {
+	load_video
+	set gfxpayload=keep
+	insmod gzio
+	insmod part_gpt
+	insmod ext2
+	search --no-floppy --fs-uuid --set=root ${bere_vault_uuid}
+	linux /boot/vmlinuz-bere root=live:UUID=${bere_vault_uuid} rd.live.image ro quiet console=tty1 systemd.unit=blaze-recovery.target
+	initrd /boot/initrd-bere.img
+}
+BERPVAULTENTRY
+  else
+    cat << BERPENTRY
 menuentry "BlazeOS Recovery Environment (BERE - Powered by BERP)" --hotkey space --class recovery --class tool {
 	load_video
 	set gfxpayload=keep
@@ -123,5 +155,6 @@ ${boot_device_access}
 	initrd ${rel_initrd}
 }
 BERPENTRY
+  fi
 fi
 

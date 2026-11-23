@@ -2,9 +2,16 @@ use anyhow::{bail, Context, Result};
 use std::path::PathBuf;
 
 fn get_noctalia_settings_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| {
-        std::env::var("USER").map(|u| format!("/home/{}", u)).unwrap_or_else(|_| "/tmp".to_string())
-    });
+    let home = std::env::var("HOME")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| {
+            std::env::var("USER")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .map(|u| format!("/home/{}", u))
+                .unwrap_or_else(|| "/tmp".to_string())
+        });
     PathBuf::from(home).join(".local/state/noctalia/settings.toml")
 }
 
@@ -23,17 +30,21 @@ pub fn get_config_json() -> Result<String> {
 
 pub fn set_config_value(key_path: &str, raw_value: &str) -> Result<()> {
     let path = get_noctalia_settings_path();
+    set_config_value_at(&path, key_path, raw_value)
+}
+
+fn set_config_value_at(path: &std::path::Path, key_path: &str, raw_value: &str) -> Result<()> {
+    let keys: Vec<&str> = key_path.split('.').collect();
+    if key_path.is_empty() || keys.iter().any(|k| k.is_empty()) {
+        bail!("Empty key path or segment in '{}'", key_path);
+    }
+
     let mut toml_val: toml::Value = if path.exists() {
-        let content = std::fs::read_to_string(&path)?;
+        let content = std::fs::read_to_string(path)?;
         toml::from_str(&content)?
     } else {
         toml::Value::Table(toml::map::Map::new())
     };
-
-    let keys: Vec<&str> = key_path.split('.').collect();
-    if keys.is_empty() {
-        bail!("Empty key path");
-    }
 
     let parsed_val: toml::Value = if raw_value.eq_ignore_ascii_case("true") {
         toml::Value::Boolean(true)
@@ -49,25 +60,25 @@ pub fn set_config_value(key_path: &str, raw_value: &str) -> Result<()> {
 
     let mut current = &mut toml_val;
     for k in &keys[..keys.len() - 1] {
-        if !current.is_table() {
-            *current = toml::Value::Table(toml::map::Map::new());
-        }
-        let table = current.as_table_mut().unwrap();
+        let table = current.as_table_mut().ok_or_else(|| {
+            anyhow::anyhow!("Cannot set '{}': parent path is not a TOML table", key_path)
+        })?;
         if !table.contains_key(*k) {
             table.insert(k.to_string(), toml::Value::Table(toml::map::Map::new()));
         }
         current = table.get_mut(*k).unwrap();
     }
 
-    if let Some(table) = current.as_table_mut() {
-        table.insert(keys.last().unwrap().to_string(), parsed_val);
-    }
+    let leaf_table = current.as_table_mut().ok_or_else(|| {
+        anyhow::anyhow!("Cannot set '{}': parent path is not a TOML table", key_path)
+    })?;
+    leaf_table.insert(keys.last().unwrap().to_string(), parsed_val);
 
     let toml_str = toml::to_string_pretty(&toml_val)?;
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    std::fs::write(&path, toml_str)?;
+    std::fs::write(path, toml_str)?;
     Ok(())
 }
 
@@ -101,4 +112,29 @@ pub fn sync_taskbar_state(enabled: bool) -> Result<()> {
         .status();
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_config_value_rejects_empty_path_and_non_table_parent() {
+        let dir = std::env::temp_dir().join(format!("blaze_noctalia_t5_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".local/state/noctalia/settings.toml");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "scalar = 42\n").unwrap();
+
+        assert!(set_config_value_at(&path, "", "badval").is_err());
+        assert!(set_config_value_at(&path, "a..b", "badval").is_err());
+        assert!(set_config_value_at(&path, ".leading", "badval").is_err());
+        assert!(set_config_value_at(&path, "trailing.", "badval").is_err());
+        assert!(set_config_value_at(&path, "scalar.nested", "dropped").is_err());
+        assert!(set_config_value_at(&path, "scalar.nested.deep", "dropped").is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "scalar = 42\n");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

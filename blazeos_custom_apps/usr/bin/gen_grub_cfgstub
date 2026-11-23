@@ -24,27 +24,56 @@ trap 'rm -f -- "${TMP_CFG}"' EXIT HUP INT TERM
 # the source image leaking into the installed ESP.
 BOOT_UUID=$(grub2-probe --target=fs_uuid "${GRUB_HOME}" 2>/dev/null || true)
 GRUB_DIR=$(grub2-mkrelpath "${GRUB_HOME}" 2>/dev/null || true)
+BERE_DEV=$(blkid -L BLAZE_REC 2>/dev/null | head -n1 || true)
+BERE_UUID=""
+if [ -n "${BERE_DEV}" ]; then
+    BERE_UUID=$(blkid -s UUID -o value "${BERE_DEV}" 2>/dev/null | head -n1 || true)
+fi
+if [ -n "${BERE_UUID}" ]; then
+    BERE_ROOT_ARG="UUID=${BERE_UUID}"
+else
+    BERE_ROOT_ARG="LABEL=BLAZE_REC"
+fi
 
 if [ -n "${BOOT_UUID}" ] && [ -n "${GRUB_DIR}" ]; then
     cat << EOF > "${TMP_CFG}"
-search --no-floppy --root-dev-only --fs-uuid --set=dev ${BOOT_UUID}
-set prefix=(\$dev)${GRUB_DIR}
-export \$prefix
-configfile \$prefix/grub.cfg
+if search --no-floppy --root-dev-only --fs-uuid --set=dev ${BOOT_UUID}; then
+    set prefix=(\$dev)${GRUB_DIR}
+    export \$prefix
+    configfile \$prefix/grub.cfg
+elif search --no-floppy --file --set=bere_dev /BLAZE_RECOVERY_VAULT.json; then
+    insmod gzio
+    insmod part_gpt
+    insmod ext2
+    set root=(\$bere_dev)
+    linux /boot/vmlinuz-bere root=live:${BERE_ROOT_ARG} rd.live.image ro quiet systemd.unit=blaze-recovery-gui.target systemd.mask=sddm.service systemd.mask=display-manager.service
+    initrd /boot/initrd-bere.img
+    boot
+fi
 EOF
 else
     echo "gen_grub_cfgstub: UUID lookup unavailable; writing portable /boot search stub" >&2
     if [ -f /usr/share/blazeos/grub-efi-stub.cfg ]; then
         cat /usr/share/blazeos/grub-efi-stub.cfg > "${TMP_CFG}"
     else
-        cat << 'EOF' > "${TMP_CFG}"
+        cat << EOF > "${TMP_CFG}"
 if search --no-floppy --file --set=dev /grub2/grub.cfg; then
-    set prefix=($dev)/grub2
+    set prefix=(\$dev)/grub2
+    export \$prefix
+    configfile \$prefix/grub.cfg
 elif search --no-floppy --file --set=dev /boot/grub2/grub.cfg; then
-    set prefix=($dev)/boot/grub2
+    set prefix=(\$dev)/boot/grub2
+    export \$prefix
+    configfile \$prefix/grub.cfg
+elif search --no-floppy --file --set=bere_dev /BLAZE_RECOVERY_VAULT.json; then
+    insmod gzio
+    insmod part_gpt
+    insmod ext2
+    set root=(\$bere_dev)
+    linux /boot/vmlinuz-bere root=live:${BERE_ROOT_ARG} rd.live.image ro quiet systemd.unit=blaze-recovery-gui.target systemd.mask=sddm.service systemd.mask=display-manager.service
+    initrd /boot/initrd-bere.img
+    boot
 fi
-export $prefix
-configfile $prefix/grub.cfg
 EOF
     fi
 fi

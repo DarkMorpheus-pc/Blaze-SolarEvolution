@@ -537,6 +537,10 @@ impl ForeignToplevelHandler for State {
     }
 
     fn activate(&mut self, wl_surface: WlSurface) {
+        if self.niri.is_surface_on_background(&wl_surface) {
+            self.niri.unminimize_window_by_surface(&wl_surface, true);
+            return;
+        }
         if let Some((mapped, _)) = self.niri.layout.find_window_and_output(&wl_surface) {
             let window = mapped.window.clone();
             self.niri.layout.activate_window(&window);
@@ -592,6 +596,14 @@ impl ForeignToplevelHandler for State {
             let window = mapped.window.clone();
             self.niri.layout.set_maximized(&window, false);
         }
+    }
+
+    fn set_minimized(&mut self, wl_surface: WlSurface) {
+        self.niri.minimize_window_by_surface(&wl_surface);
+    }
+
+    fn unset_minimized(&mut self, wl_surface: WlSurface) {
+        self.niri.unminimize_window_by_surface(&wl_surface, true);
     }
 }
 

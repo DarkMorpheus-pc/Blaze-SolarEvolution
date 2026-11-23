@@ -521,7 +521,6 @@ fn resolve_omnibar_icon(icon_opt: Option<&str>, size: i32) -> Image {
     } else {
         for base in [
             "/usr/share/solarui/icons/living-flow",
-            "/home/darkmorpheus/BlazeFedora/solarui/data/icons/living-flow",
             "/usr/share/icons/hicolor/128x128/apps",
             "/usr/share/icons/hicolor/256x256/apps",
             "/usr/share/icons/hicolor/64x64/apps",
@@ -814,12 +813,15 @@ fn generate_omnibar_items(raw_query: &str, apps: &[AppInfo]) -> Vec<OmnibarItem>
     let cfg = solar_common::SolarConfig::load();
     let toggle_shell_cmd = match cfg.shell.engine {
         solar_common::ShellEngine::Noctalia => "solar-shell switch caelestia",
-        solar_common::ShellEngine::Caelestia | solar_common::ShellEngine::End4Pc => "solar-shell switch noctalia",
+        solar_common::ShellEngine::Caelestia
+        | solar_common::ShellEngine::End4Pc
+        | solar_common::ShellEngine::We10x => "solar-shell switch noctalia",
     };
     let toggle_shell_desc = match cfg.shell.engine {
         solar_common::ShellEngine::Noctalia => "Aktif: Noctalia • Tıkla -> Caelestia kabuğuna geç",
         solar_common::ShellEngine::Caelestia => "Aktif: Caelestia • Tıkla -> Noctalia kabuğuna geri dön",
         solar_common::ShellEngine::End4Pc => "Aktif: end4-pC • Tıkla -> Noctalia kabuğuna geri dön",
+        solar_common::ShellEngine::We10x => "Aktif: We10X • Tıkla -> Noctalia kabuğuna geri dön",
     };
 
     let sys_commands = [
@@ -836,6 +838,7 @@ fn generate_omnibar_items(raw_query: &str, apps: &[AppInfo]) -> Vec<OmnibarItem>
         ("noctalia", "Noctalia v5 Masaüstü Kabuğuna Geç", "Saf C++23 yüksek performanslı Noctalia kabuğuna dön", "solar-shell switch noctalia", "preferences-desktop-theme"),
         ("caelestia", "Caelestia Masaüstü Kabuğuna Geç", "Quickshell QML tabanlı Caelestia kabuğunu etkinleştir", "solar-shell switch caelestia", "preferences-desktop-theme"),
         ("end4", "end4-pC Masaüstü Kabuğuna Geç", "Material 3 Expressive Quickshell kabuğunu etkinleştir", "solar-shell switch end4-pc", "preferences-desktop-theme"),
+        ("we10x", "We10X (Tanıdık Klasik Düzen) Masaüstü Kabuğuna Geç", "Windows 10 alışkanlıklarıyla Başlat menüsü, görev çubuğu ve masaüstü simgelerini etkinleştir", "solar-shell switch we10x", "preferences-desktop-theme"),
         ("launcher", "Aktif Kabuğun Kendi Uygulama Menüsünü Aç", "Seçili kabuk motorunun (Noctalia / Caelestia) yerel başlatıcısını aç", "solar-shell route launcher", "view-app-grid-symbolic"),
         ("settings", "SolarUI ve Masaüstü Ayarları", "Görev çubuğu, tema, ekran ve sistem tercihlerini yönet", "solar-shell settings", "preferences-system"),
         ("ekran", "Ekran Çözünürlüğü ve Bağımsız DPI Ölçeği", "Çoklu monitör ve arayüz boyutlandırma ayarları", "solar-shell settings", "video-display"),
@@ -930,14 +933,39 @@ fn evaluate_simple_math(expr: &str) -> Option<f64> {
     // Check functions like sqrt(X)
     if clean.starts_with("sqrt(") && clean.ends_with(')') {
         let inner = &clean[5..clean.len() - 1];
-        let val = inner.parse::<f64>().ok()?;
-        return Some(val.sqrt());
+        let val = inner.parse::<f64>().ok().or_else(|| evaluate_simple_math(inner))?;
+        let res = val.sqrt();
+        return if res.is_finite() { Some(res) } else { None };
     }
 
-    // Basic operator scan
-    for op in ['+', '-', '*', '/', '^', '%'] {
-        if let Some(pos) = clean.rfind(op) {
-            if pos == 0 {
+    // Precedence levels (lowest scanned first, right-to-left for left-associativity)
+    let bytes = clean.as_bytes();
+    for ops in [&['+', '-'][..], &['*', '/', '%'][..], &['^'][..]] {
+        let mut paren_depth: i32 = 0;
+        for pos in (0..bytes.len()).rev() {
+            let b = bytes[pos];
+            if b == b')' {
+                paren_depth += 1;
+                continue;
+            }
+            if b == b'(' {
+                paren_depth -= 1;
+                continue;
+            }
+            if paren_depth != 0 {
+                continue;
+            }
+            let ch = b as char;
+            if !ops.contains(&ch) {
+                continue;
+            }
+            // Skip unary +/- at start or after another operator
+            if (ch == '+' || ch == '-')
+                && (pos == 0 || matches!(bytes[pos - 1], b'+' | b'-' | b'*' | b'/' | b'%' | b'^' | b'('))
+            {
+                continue;
+            }
+            if pos == 0 || pos + 1 >= bytes.len() {
                 continue;
             }
             let left_str = &clean[..pos];
@@ -945,19 +973,20 @@ fn evaluate_simple_math(expr: &str) -> Option<f64> {
             let left = left_str.parse::<f64>().ok().or_else(|| evaluate_simple_math(left_str))?;
             let right = right_str.parse::<f64>().ok().or_else(|| evaluate_simple_math(right_str))?;
 
-            return match op {
-                '+' => Some(left + right),
-                '-' => Some(left - right),
-                '*' => Some(left * right),
-                '/' => if right != 0.0 { Some(left / right) } else { None },
-                '^' => Some(left.powf(right)),
-                '%' => Some(left % right),
-                _ => None,
+            let res = match ch {
+                '+' => left + right,
+                '-' => left - right,
+                '*' => left * right,
+                '/' => if right != 0.0 { left / right } else { return None; },
+                '^' => left.powf(right),
+                '%' => if right != 0.0 { left % right } else { return None; },
+                _ => return None,
             };
+            return if res.is_finite() { Some(res) } else { None };
         }
     }
 
-    clean.parse::<f64>().ok()
+    clean.parse::<f64>().ok().filter(|v| v.is_finite())
 }
 
 fn evaluate_units(query: &str) -> Option<(String, String)> {
@@ -1131,6 +1160,10 @@ mod tests {
         assert_eq!(evaluate_simple_math("sqrt(144)"), Some(12.0));
         assert_eq!(evaluate_simple_math("100 / 4 + 15"), Some(40.0));
         assert_eq!(evaluate_simple_math("2 ^ 8"), Some(256.0));
+        assert_eq!(evaluate_simple_math("10 * 3 % 2"), Some(0.0));
+        assert_eq!(evaluate_simple_math("sqrt(-4)"), None);
+        assert_eq!(evaluate_simple_math("100 % 0"), None);
+        assert_eq!(evaluate_simple_math("100 / 0"), None);
     }
 
     #[test]

@@ -132,12 +132,13 @@ class SetupAPIHandler(SimpleHTTPRequestHandler):
                 "tr-f": {"idx": 1, "xkb_layout": "tr", "xkb_variant": "f", "console": "trf"},
                 "us": {"idx": 2, "xkb_layout": "us", "xkb_variant": "", "console": "us"},
                 "de": {"idx": 3, "xkb_layout": "de", "xkb_variant": "", "console": "de"},
-                "fr": {"idx": 4, "xkb_layout": "fr", "xkb_variant": "", "console": "fr"},
+                "fr": {"idx": 3, "xkb_layout": "fr", "xkb_variant": "", "console": "fr"},
             }
             info = keymap_data.get(km, keymap_data["tr"])
             idx = info["idx"]
 
-            # 1. Switch active Niri compositor layout live
+            # Keep active Niri within XKB's 4-group limit (swap slot 3 between de and fr in runtime KDL copy)
+            rt_cfg = os.path.join(os.environ.get("XDG_RUNTIME_DIR", ""), "blaze-oobe-niri.kdl")
             niri_env = os.environ.copy()
             if "NIRI_SOCKET" not in niri_env:
                 for pat in ["/run/user/*/niri.*.sock", f"{niri_env.get('XDG_RUNTIME_DIR', '/run/user/1000')}/niri.*.sock"]:
@@ -145,6 +146,16 @@ class SetupAPIHandler(SimpleHTTPRequestHandler):
                     if found_socks:
                         niri_env["NIRI_SOCKET"] = found_socks[0]
                         break
+            if rt_cfg and os.path.isfile(rt_cfg):
+                try:
+                    kdl_txt = open(rt_cfg, "r", encoding="utf-8").read()
+                    target_layouts = 'layout "tr,tr,us,fr"' if km == "fr" else 'layout "tr,tr,us,de"'
+                    updated_txt = re.sub(r'layout\s+"tr,tr,us,(?:de|fr)"', target_layouts, kdl_txt, count=1)
+                    if updated_txt != kdl_txt:
+                        open(rt_cfg, "w", encoding="utf-8").write(updated_txt)
+                        subprocess.run(["niri", "msg", "action", "load-config-file"], env=niri_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception:
+                    pass
             subprocess.run(["niri", "msg", "action", "switch-layout", str(idx)], env=niri_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
             # 2. Update system-wide configuration via localectl
@@ -392,7 +403,7 @@ class SetupAPIHandler(SimpleHTTPRequestHandler):
             if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", username):
                 return {"status": "error", "message": "Geçersiz kullanıcı adı"}
             layout = str(data.get("layout", "noctalia")).strip().lower()
-            if layout not in ["noctalia", "caelestia", "end4-pc"]:
+            if layout not in ["noctalia", "caelestia", "end4-pc", "we10x"]:
                 layout = "noctalia"
             raw_theme = str(data.get("theme", "solar_amber")).strip()
             theme = re.sub(r"[^a-zA-Z0-9_#-]", "", raw_theme) or "solar_amber"
@@ -404,6 +415,7 @@ class SetupAPIHandler(SimpleHTTPRequestHandler):
             print(f"[BLAZE-SETUP] Saving desktop config: user={username}, engine={layout}, appearance={appearance}, theme={theme}")
 
             theme_mode = "auto" if appearance == "auto" else ("light" if appearance == "light" else "dark")
+            we10x_mode = "light" if appearance == "light" else "dark"
             gtk_theme = "Adwaita" if appearance == "light" else "Adwaita-dark"
             color_scheme = "prefer-light" if appearance == "light" else "prefer-dark"
 
@@ -416,6 +428,7 @@ class SetupAPIHandler(SimpleHTTPRequestHandler):
                 cfg_content = f"""# BlazeOS User Configuration
 [shell]
 engine = "{layout}"
+we10x_theme_mode = "{we10x_mode}"
 
 [taskbar]
 enabled = false
@@ -510,17 +523,22 @@ volume = 0.6
                         privileged_run(["cp", "-a", "/etc/skel/.config/quickshell/caelestia", os.path.join(user_home, ".config/quickshell/")])
 
 
-                # 2. GTK 3 & GTK 4 Configuration for User
-                for gtk_ver in ["gtk-3.0", "gtk-4.0"]:
-                    gtk_dir = os.path.join(user_home, f".config/{gtk_ver}")
-                    privileged_run(["mkdir", "-p", gtk_dir])
-                    gtk_ini = f"""[Settings]
+                # 2. GTK 3 & GTK 4 Configuration + We10X Initial Profile Provisioning
+                if layout == "we10x":
+                    # Provision clean stock PreWe10xSnapshot + We10X niri.kdl + sharp GTK CSS + We10X settings.ini
+                    # so first login boots straight into We10X AND switching later restores stock Papirus-Dark/SolarUI!
+                    privileged_run(["/usr/bin/solar-shell", "we10x-config", "provision-user", user_home, we10x_mode])
+                else:
+                    for gtk_ver in ["gtk-3.0", "gtk-4.0"]:
+                        gtk_dir = os.path.join(user_home, f".config/{gtk_ver}")
+                        privileged_run(["mkdir", "-p", gtk_dir])
+                        gtk_ini = f"""[Settings]
 gtk-theme-name={gtk_theme}
 gtk-application-prefer-dark-theme={'false' if appearance == 'light' else 'true'}
 gtk-icon-theme-name=Papirus-Dark
 gtk-font-name=Inter 10
 """
-                    privileged_write(os.path.join(gtk_dir, "settings.ini"), gtk_ini)
+                        privileged_write(os.path.join(gtk_dir, "settings.ini"), gtk_ini)
 
                 # 3. User profile env
                 bashrc_path = os.path.join(user_home, ".bashrc")
@@ -531,7 +549,7 @@ gtk-font-name=Inter 10
                 # Set user ownership
                 privileged_run(["chown", "-R", f"{username}:{username}", user_home])
 
-            # 4. System-wide dconf override for GNOME/GTK apps & future sessions
+            # 4. System-wide dconf stock baseline (per-user We10X overrides are managed & reverted by SolarUI)
             dconf_dir = "/etc/dconf/db/local.d"
             privileged_run(["mkdir", "-p", dconf_dir])
             dconf_content = f"""[org/gnome/desktop/interface]
@@ -550,7 +568,7 @@ icon-theme='Papirus-Dark'
             hostname = str(data.get("hostname", "blazeos")).strip().lower() or "blazeos"
             autologin = bool(data.get("autologin", False))
             layout = str(data.get("layout", "noctalia")).strip().lower()
-            if layout not in ["noctalia", "caelestia", "end4-pc"]:
+            if layout not in ["noctalia", "caelestia", "end4-pc", "we10x"]:
                 layout = "noctalia"
 
             selected_desktop = "solarui.desktop"
@@ -613,17 +631,39 @@ icon-theme='Papirus-Dark'
                 privileged_rm(COMPLETED_FLAG)
                 return {"status": "error", "message": "Geçici kurulum oturumu temizlenemedi; yeniden deneyin"}
 
-            privileged_run(["systemctl", "start", "--no-block", "blazeos-oobe-hygiene.service"])
+            # Schedule post-OOBE hygiene + SDDM reload in an independent transient unit
+            # BEFORE 99-blaze-setup sudoers is removed so start_desktop transitions cleanly
+            # into autologin (if enabled) or the clean SDDM greeter with the new user!
+            transition_script = (
+                "/usr/libexec/blazeos-oobe-hygiene; "
+                f"printf '[Last]\\nSession={selected_desktop}\\nUser={username}\\n' > /var/lib/sddm/state.conf; "
+                "systemctl restart sddm.service"
+            )
+            privileged_run([
+                "systemd-run",
+                "--unit=blaze-oobe-transition",
+                "--on-active=2s",
+                "/bin/sh",
+                "-c",
+                transition_script,
+            ])
 
             return {"status": "ok"}
 
         elif action == "start_desktop":
             print("[BLAZE-SETUP] Setup finished! Launching desktop session...")
-            # Niri quit -> SDDM display manager oturumun kapatildigini algilar
-            # ve otomatik olarak yeni greeter oturumu acar (restart gerekmez).
-            subprocess.run(["niri", "msg", "action", "quit", "--skip-confirmation"], stderr=subprocess.DEVNULL)
-            # Terminate this script after short delay
-            threading.Thread(target=lambda: (time.sleep(0.5), os._exit(0))).start()
+            niri_env = os.environ.copy()
+            if "NIRI_SOCKET" not in niri_env:
+                for pat in ["/run/user/*/niri.*.sock", f"{niri_env.get('XDG_RUNTIME_DIR', '/run/user/961')}/niri.*.sock"]:
+                    found_socks = glob.glob(pat)
+                    if found_socks:
+                        niri_env["NIRI_SOCKET"] = found_socks[0]
+                        break
+            def _exit_oobe():
+                time.sleep(0.4)
+                subprocess.run(["niri", "msg", "action", "quit", "--skip-confirmation"], env=niri_env, stderr=subprocess.DEVNULL)
+                os._exit(0)
+            threading.Thread(target=_exit_oobe, daemon=True).start()
             return {"status": "ok"}
 
         return {"status": "unknown_action"}
@@ -691,6 +731,8 @@ def launch_gui(url):
     if os.getuid() == 0:
         os.environ["WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS"] = "1"
     os.environ["WEBKIT_DISABLE_DMABUF_RENDERER"] = "1"
+    os.environ["WEBKIT_DISABLE_COMPOSITING_MODE"] = "1"
+    os.environ.setdefault("GTK_THEME", "Adwaita:dark")
     rt_base = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
     if not os.path.isdir(rt_base):
         rt_base = f"/tmp/blaze-setup-{os.getuid()}"
@@ -703,9 +745,46 @@ def launch_gui(url):
     os.environ["XDG_DATA_HOME"] = data_dir
 
     # Wayland soketi veya X11 hazır olana kadar bekle
-    wait_for_display(10.0)
+    wait_for_display(12.0)
 
-    # Native GTK3 + WebKit2 4.1 (Stable, zero-lag, instant start)
+    # 1. Native GTK4 + WebKit 6.0
+    try:
+        import gi
+        gi.require_version("Gtk", "4.0")
+        gi.require_version("WebKit", "6.0")
+        from gi.repository import Gtk, WebKit, GLib
+
+        GLib.set_prgname("blaze-setup")
+        GLib.set_application_name("Blaze Setup Assistant")
+
+        app = Gtk.Application(application_id="org.blazeos.setup")
+
+        def on_activate(application):
+            win = Gtk.ApplicationWindow(application=application, title="Blaze Setup Assistant")
+            win.set_default_size(1280, 800)
+            win.connect("close-request", lambda *_: not os.path.exists(COMPLETED_FLAG))
+            win.fullscreen()
+
+            settings = WebKit.Settings()
+            if hasattr(settings, "set_hardware_acceleration_policy"):
+                settings.set_hardware_acceleration_policy(WebKit.HardwareAccelerationPolicy.NEVER)
+            if hasattr(settings, "set_enable_developer_extras"):
+                settings.set_enable_developer_extras(False)
+            if hasattr(settings, "set_enable_smooth_scrolling"):
+                settings.set_enable_smooth_scrolling(True)
+
+            wv = WebKit.WebView(settings=settings)
+            wv.load_uri(url)
+            win.set_child(wv)
+            win.present()
+
+        app.connect("activate", on_activate)
+        app.run(None)
+        return
+    except Exception as e:
+        print(f"[BLAZE-SETUP] GTK4 WebKit 6.0 launch failed: {e}. Trying GTK3 WebKit2...")
+
+    # 2. Native GTK3 + WebKit2 4.1
     try:
         import gi
         gi.require_version("Gtk", "3.0")
@@ -724,6 +803,8 @@ def launch_gui(url):
         win.fullscreen()
 
         settings = WebKit2.Settings()
+        if hasattr(settings, "set_hardware_acceleration_policy"):
+            settings.set_hardware_acceleration_policy(WebKit2.HardwareAccelerationPolicy.NEVER)
         settings.set_enable_developer_extras(False)
         settings.set_enable_smooth_scrolling(True)
 

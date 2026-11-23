@@ -9,6 +9,7 @@ Zero emojis, maximum reliability, offline capable.
 import atexit
 import ctypes
 import glob
+import hashlib
 import json
 import os
 import re
@@ -52,15 +53,15 @@ def strip_btrfs_source(dev):
     return (dev or "").split("[")[0].strip()
 
 
-def detect_root_info():
-    """Return (is_btrfs, root_dev, active_fsroot, fstype) for '/'."""
+def detect_mount_info(mount_point="/"):
+    """Return (is_btrfs, root_dev, active_fsroot, fstype) for mount_point."""
     is_btrfs = False
     root_dev = ""
     active_fsroot = "root"
     fstype = "unknown"
     try:
         out = subprocess.check_output(
-            ["findmnt", "-n", "-o", "FSTYPE,SOURCE,FSROOT", "/"],
+            ["findmnt", "-n", "-o", "FSTYPE,SOURCE,FSROOT", mount_point],
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
@@ -79,24 +80,221 @@ def detect_root_info():
     return is_btrfs, root_dev, active_fsroot, fstype
 
 
-def has_factory_image():
+def detect_root_info():
+    """Return (is_btrfs, root_dev, active_fsroot, fstype) for active target OS root."""
+    _, is_btrfs, root_dev, active_fsroot, fstype, _ = resolve_target_context(auto_mount=True)
+    return is_btrfs, root_dev, active_fsroot, fstype
+
+
+def _parse_blkid_export():
+    blocks = []
+    try:
+        raw = subprocess.check_output(["blkid", "-o", "export"], text=True, stderr=subprocess.DEVNULL)
+        for chunk in raw.strip().split("\n\n"):
+            info = {}
+            for ln in chunk.splitlines():
+                if "=" in ln:
+                    k, v = ln.split("=", 1)
+                    info[k.strip()] = v.strip()
+            if info.get("DEVNAME") and info.get("TYPE"):
+                blocks.append(info)
+    except Exception:
+        pass
+    return blocks
+
+
+def is_protected_recovery_device(dev):
+    """Return True if `dev` is the immutable BLAZE_REC partition or a parent disk containing BLAZE_REC."""
+    if not dev:
+        return False
+    dev = strip_btrfs_source(dev)
+    try:
+        out = subprocess.check_output(
+            ["lsblk", "-J", "-o", "NAME,PATH,LABEL", dev],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        data = json.loads(out)
+
+        def has_vault(nodes):
+            for n in nodes or []:
+                if (n.get("label") or "").strip() == "BLAZE_REC":
+                    return True
+                if has_vault(n.get("children")):
+                    return True
+            return False
+
+        return has_vault(data.get("blockdevices"))
+    except Exception:
+        return False
+
+
+def _mount_companion_boot_and_esp(blocks, target_mp):
+    boot_mp = os.path.join(target_mp, "boot")
+    for b in blocks:
+        dev = b.get("DEVNAME", "")
+        fstype = b.get("TYPE", "")
+        label = b.get("LABEL", "")
+        if fstype not in ("ext4", "xfs") or label in ("Blaze-SE-5", "BLAZE_REC") or dev.startswith("/dev/loop"):
+            continue
+        probe = "/mnt/bere_boot_probe"
+        os.makedirs(probe, exist_ok=True)
+        if subprocess.run(["mount", dev, probe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+            is_boot = os.path.isdir(os.path.join(probe, "grub2")) or os.path.isdir(os.path.join(probe, "loader"))
+            subprocess.run(["umount", probe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if is_boot:
+                os.makedirs(boot_mp, exist_ok=True)
+                subprocess.run(["mount", dev, boot_mp], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                break
+
+    efi_mp = os.path.join(target_mp, "boot", "efi")
+    for b in blocks:
+        dev = b.get("DEVNAME", "")
+        fstype = b.get("TYPE", "")
+        label = b.get("LABEL", "")
+        if fstype != "vfat" or label in ("Blaze-SE-5", "BLAZE_REC") or dev.startswith("/dev/loop"):
+            continue
+        probe = "/mnt/bere_esp_probe"
+        os.makedirs(probe, exist_ok=True)
+        if subprocess.run(["mount", "-o", "shortname=winnt", dev, probe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+            is_esp = os.path.isdir(os.path.join(probe, "EFI")) or os.path.isdir(os.path.join(probe, "efi"))
+            subprocess.run(["umount", probe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if is_esp:
+                os.makedirs(efi_mp, exist_ok=True)
+                subprocess.run(["mount", "-o", "shortname=winnt", dev, efi_mp], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                break
+
+
+def resolve_target_context(auto_mount=True):
+    """
+    Return (target_root, is_btrfs, root_dev, active_fsroot, fstype, is_live_ram_only).
+    When BERE is booted from Live ISO ('overlay' / 'LiveOS_rootfs'), auto-detects and
+    mounts the installed BlazeOS disk at /mnt/bere_target (+ /home, /boot, /boot/efi).
+    """
+    is_btrfs, root_dev, active_fsroot, fstype = detect_mount_info("/")
+    ephemeral = (
+        os.path.exists("/etc/initrd-release")
+        or fstype in ("overlay", "rootfs", "tmpfs", "iso9660", "squashfs")
+        or root_dev == "LiveOS_rootfs"
+    )
+    if not ephemeral:
+        return "/", is_btrfs, root_dev, active_fsroot, fstype, False
+
+    target_mp = "/mnt/bere_target"
+    t_btrfs, t_dev, t_fsroot, t_fstype = detect_mount_info(target_mp)
+    if t_dev and t_dev != root_dev and t_fstype not in ("unknown", "overlay", "tmpfs", "rootfs"):
+        if t_btrfs and not os.path.ismount(os.path.join(target_mp, "home")):
+            try:
+                sv_list = subprocess.check_output(
+                    ["btrfs", "subvolume", "list", target_mp],
+                    text=True,
+                    stderr=subprocess.DEVNULL,
+                )
+                has_home_sv = any(
+                    ln.split("path ")[-1].strip().lstrip("/") == "home"
+                    for ln in sv_list.splitlines()
+                    if "path " in ln
+                )
+                if has_home_sv:
+                    home_mp = os.path.join(target_mp, "home")
+                    os.makedirs(home_mp, exist_ok=True)
+                    subprocess.run(
+                        ["mount", "-o", "subvol=home", t_dev, home_mp],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+            except Exception:
+                pass
+        if not os.path.ismount(os.path.join(target_mp, "boot")) or not os.path.ismount(os.path.join(target_mp, "boot", "efi")):
+            try:
+                _mount_companion_boot_and_esp(_parse_blkid_export(), target_mp)
+            except Exception:
+                pass
+        return target_mp, t_btrfs, t_dev, t_fsroot, t_fstype, False
+
+    if not auto_mount:
+        return "/", False, root_dev, active_fsroot, fstype, True
+
+    blocks = _parse_blkid_export()
+
+    # 1. Prefer Btrfs installed system
+    for b in blocks:
+        dev = b.get("DEVNAME", "")
+        if b.get("TYPE") != "btrfs" or b.get("LABEL") == "Blaze-SE-5" or dev.startswith("/dev/loop"):
+            continue
+        probe = "/mnt/bere_btrfs_probe"
+        os.makedirs(probe, exist_ok=True)
+        if subprocess.run(["mount", "-o", "subvolid=5", dev, probe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+            chosen_sv = None
+            for cand in ("root", "@", "@_active"):
+                if os.path.isdir(os.path.join(probe, cand)):
+                    chosen_sv = cand
+                    break
+            has_home = os.path.isdir(os.path.join(probe, "home"))
+            subprocess.run(["umount", probe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            os.makedirs(target_mp, exist_ok=True)
+            mount_cmd = ["mount", "-o", f"subvol={chosen_sv}", dev, target_mp] if chosen_sv else ["mount", dev, target_mp]
+            if subprocess.run(mount_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+                if has_home:
+                    home_mp = os.path.join(target_mp, "home")
+                    os.makedirs(home_mp, exist_ok=True)
+                    subprocess.run(["mount", "-o", "subvol=home", dev, home_mp], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                _mount_companion_boot_and_esp(blocks, target_mp)
+                return target_mp, True, dev, (chosen_sv or "root"), "btrfs", False
+
+    # 2. Fallback: ext4 / xfs installed OS root partition
+    for b in blocks:
+        dev = b.get("DEVNAME", "")
+        b_fs = b.get("TYPE", "")
+        if b_fs not in ("ext4", "xfs") or b.get("LABEL") in ("Blaze-SE-5", "BLAZE_REC") or dev.startswith("/dev/loop"):
+            continue
+        probe = "/mnt/bere_ext_probe"
+        os.makedirs(probe, exist_ok=True)
+        if subprocess.run(["mount", dev, probe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+            looks_like_boot = (
+                (os.path.isdir(os.path.join(probe, "grub2")) or os.path.isdir(os.path.join(probe, "loader")))
+                and not os.path.isdir(os.path.join(probe, "usr"))
+                and not os.path.isdir(os.path.join(probe, "home"))
+            )
+            subprocess.run(["umount", probe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if looks_like_boot:
+                continue
+            os.makedirs(target_mp, exist_ok=True)
+            if subprocess.run(["mount", dev, target_mp], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+                _mount_companion_boot_and_esp(blocks, target_mp)
+                return target_mp, False, dev, "root", b_fs, False
+
+    return "/", False, root_dev, active_fsroot, fstype, True
+
+
+def target_join(target_root, rel_path):
+    clean = rel_path.lstrip("/")
+    if not clean:
+        return target_root
+    return os.path.join(target_root, clean)
+
+
+def has_factory_image(target_root="/"):
     """Return True if a standalone BERE squashfs or factory Btrfs snapshot exists."""
     return (
-        os.path.exists("/boot/bere/recovery.squashfs")
-        or os.path.exists("/.blaze-snapshots/factory-initial")
-        or os.path.exists("/.snapshots/factory-initial")
-        or os.path.exists("/@factory_reset")
-        or os.path.exists("/@golden_rootfs")
+        os.path.exists(target_join(target_root, "/boot/bere/recovery.squashfs"))
+        or os.path.exists(target_join(target_root, "/.blaze-snapshots/factory-initial"))
+        or os.path.exists(target_join(target_root, "/.snapshots/factory-initial"))
+        or os.path.exists(target_join(target_root, "/@factory_reset"))
+        or os.path.exists(target_join(target_root, "/@golden_rootfs"))
     )
 
 
-def clear_boot_triggers():
+def clear_boot_triggers(target_root="/"):
     """Clear all GRUB and filesystem recovery triggers and boot counters."""
-    if os.path.exists("/boot/grub2/grubenv") and shutil.which("grub2-editenv"):
+    grubenv_path = target_join(target_root, "/boot/grub2/grubenv")
+    if os.path.exists(grubenv_path) and shutil.which("grub2-editenv"):
         for args in [
-            ["grub2-editenv", "/boot/grub2/grubenv", "set", "boot_counter=0"],
-            ["grub2-editenv", "/boot/grub2/grubenv", "set", "blaze_recovery=-"],
-            ["grub2-editenv", "/boot/grub2/grubenv", "unset", "blaze_recovery"],
+            ["grub2-editenv", grubenv_path, "set", "boot_counter=0"],
+            ["grub2-editenv", grubenv_path, "set", "boot_success=1"],
+            ["grub2-editenv", grubenv_path, "set", "blaze_recovery=-"],
+            ["grub2-editenv", grubenv_path, "unset", "blaze_recovery"],
         ]:
             try:
                 subprocess.run(args, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
@@ -111,27 +309,194 @@ def clear_boot_triggers():
         "/etc/blaze_recovery_alert",
         "/run/blaze_recovery_alert",
     ]:
-        if os.path.exists(trigger):
+        p = target_join(target_root, trigger)
+        if os.path.exists(p):
             try:
-                os.remove(trigger)
+                os.remove(p)
             except Exception:
                 pass
 
-    if os.path.isdir("/var/lib/blaze") or os.path.exists("/var/lib/blaze/berp-counter"):
+    blaze_lib = target_join(target_root, "/var/lib/blaze")
+    berp_cnt = os.path.join(blaze_lib, "berp-counter")
+    if os.path.isdir(blaze_lib) or os.path.exists(berp_cnt):
         try:
-            os.makedirs("/var/lib/blaze", mode=0o700, exist_ok=True)
-            with open("/var/lib/blaze/berp-counter", "w", encoding="utf-8") as f:
+            os.makedirs(blaze_lib, mode=0o700, exist_ok=True)
+            with open(berp_cnt, "w", encoding="utf-8") as f:
                 f.write("0\n")
         except Exception:
             pass
 
 
-def wipe_human_users():
+def _sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            buf = f.read(1048576)
+            if not buf:
+                break
+            h.update(buf)
+    return h.hexdigest()
+
+
+def inspect_blaze_rec_vault(verify_hashes=False):
+    """Locate, read metadata from, and optionally SHA-256 verify the immutable BLAZE_REC vault."""
+    try:
+        vault_dev = subprocess.check_output(["blkid", "-L", "BLAZE_REC"], text=True, stderr=subprocess.DEVNULL).strip()
+    except Exception:
+        vault_dev = ""
+    if not vault_dev or not os.path.exists(vault_dev):
+        return {"present": False, "full_os_embedded": False}
+
+    try:
+        vault_uuid = subprocess.check_output(
+            ["blkid", "-s", "UUID", "-o", "value", vault_dev], text=True, stderr=subprocess.DEVNULL
+        ).strip()
+    except Exception:
+        vault_uuid = ""
+
+    existing_mp = ""
+    try:
+        existing_mp = subprocess.check_output(
+            ["findmnt", "-n", "-o", "TARGET", "-S", vault_dev], text=True, stderr=subprocess.DEVNULL
+        ).splitlines()[0].strip()
+    except Exception:
+        existing_mp = ""
+
+    did_mount = False
+    vault_mp = existing_mp
+    if not vault_mp:
+        vault_mp = "/run/bere_vault_ro"
+        os.makedirs(vault_mp, exist_ok=True)
+        if subprocess.run(["mount", "-o", "ro", vault_dev, vault_mp], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
+            return {"present": True, "device": vault_dev, "uuid": vault_uuid, "full_os_embedded": False, "error": "BLAZE_REC bağlanamadı."}
+        did_mount = True
+
+    try:
+        manifest_path = os.path.join(vault_mp, "BLAZE_RECOVERY_VAULT.json")
+        manifest = {}
+        if os.path.isfile(manifest_path):
+            try:
+                with open(manifest_path, "r", encoding="utf-8") as mf:
+                    manifest = json.load(mf)
+            except Exception:
+                manifest = {}
+
+        sq_path = os.path.join(vault_mp, "LiveOS/squashfs.img")
+        vm_path = os.path.join(vault_mp, "boot/vmlinuz-bere")
+        in_path = os.path.join(vault_mp, "boot/initrd-bere.img")
+        sq_mb = int(os.path.getsize(sq_path) / (1024 * 1024)) if os.path.isfile(sq_path) else 0
+        full_os = bool(manifest.get("full_os_embedded")) or sq_mb >= 2500
+
+        hash_verified = False
+        tamper_error = None
+        if verify_hashes:
+            if not (os.path.isfile(sq_path) and os.path.isfile(vm_path) and os.path.isfile(in_path)):
+                tamper_error = "BLAZE_REC içinde gerekli önyükleme veya SquashFS dosyaları eksik."
+            else:
+                expected = manifest.get("sha256") or {}
+                checks = [("squashfs", sq_path), ("vmlinuz", vm_path), ("initrd", in_path)]
+                for key, fpath in checks:
+                    exp_hex = (expected.get(key) or "").strip().lower()
+                    if exp_hex:
+                        actual_hex = _sha256_file(fpath).lower()
+                        if actual_hex != exp_hex:
+                            tamper_error = f"Güvenlik İhlali: BLAZE_REC '{key}' SHA-256 imzası uyuşmuyor!"
+                            break
+                if tamper_error is None:
+                    hash_verified = bool(expected)
+
+        return {
+            "present": True,
+            "device": vault_dev,
+            "uuid": vault_uuid,
+            "mountpoint": vault_mp,
+            "did_mount": did_mount,
+            "mode": manifest.get("mode") or ("full" if full_os else "minimal"),
+            "full_os_embedded": full_os,
+            "squashfs_mb": sq_mb,
+            "kernel_ready": os.path.isfile(vm_path) and os.path.isfile(in_path),
+            "hash_verified": hash_verified,
+            "tamper_error": tamper_error,
+        }
+    finally:
+        if not verify_hashes and did_mount:
+            subprocess.run(["umount", vault_mp], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _boot_blaze_rec_vault_kexec(target_root, is_live_ram_only, profile="install", copy_to_ram=False):
+    if not shutil.which("kexec"):
+        return {"status": "error", "message": "kexec aracı bu kurtarma ortamında bulunamadı."}
+
+    info = inspect_blaze_rec_vault(verify_hashes=True)
+    vault_mp = info.get("mountpoint")
+    did_mount = bool(info.get("did_mount"))
+    try:
+        if not info.get("present"):
+            return {"status": "error", "message": "Dahili BLAZE_REC zırhlı kurtarma kasası bulunamadı."}
+        if info.get("tamper_error"):
+            return {"status": "error", "message": info["tamper_error"]}
+        if not info.get("kernel_ready"):
+            return {"status": "error", "message": "BLAZE_REC içinde çekirdek veya initrd bulunamadı."}
+
+        vm_path = os.path.join(vault_mp, "boot/vmlinuz-bere")
+        in_path = os.path.join(vault_mp, "boot/initrd-bere.img")
+        root_spec = f"UUID={info['uuid']}" if info.get("uuid") else "LABEL=BLAZE_REC"
+        extra_flags = ["quiet"]
+        if profile == "safe_graphics":
+            extra_flags.extend(["nomodeset", "plymouth.enable=0"])
+        else:
+            extra_flags.append("rhgb")
+        if profile == "install":
+            extra_flags.append("blaze.autoinstaller=1")
+        elif profile == "check":
+            extra_flags.append("rd.live.check")
+
+        ram_arg = " rd.live.ram=1" if copy_to_ram else ""
+        kexec_kargs = f'root=live:{root_spec} rd.live.image{ram_arg} {" ".join(extra_flags)}'
+        kp = subprocess.run(
+            ["kexec", "-l", vm_path, f"--initrd={in_path}", f"--command-line={kexec_kargs}"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=25,
+        )
+        if kp.returncode != 0:
+            return {"status": "error", "message": f"kexec yüklemesi başarısız oldu: {kp.stdout.strip() or 'çekirdek kilitli'}"}
+    finally:
+        if did_mount and vault_mp:
+            subprocess.run(["umount", vault_mp], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    if not is_live_ram_only:
+        clear_boot_triggers(target_root)
+    os.sync()
+
+    def do_vault_kexec():
+        time.sleep(0.8)
+        os.sync()
+        if os.path.isdir("/mnt/bere_target"):
+            subprocess.run(["umount", "-R", "/mnt/bere_target"], stderr=subprocess.DEVNULL)
+        if subprocess.run(["systemctl", "kexec"], stderr=subprocess.DEVNULL).returncode != 0:
+            subprocess.run(["kexec", "-e"], stderr=subprocess.DEVNULL)
+
+    threading.Thread(target=do_vault_kexec, daemon=True).start()
+    return {
+        "status": "ok",
+        "engine_used": "kexec",
+        "auto_transition": True,
+        "hash_verified": info.get("hash_verified", False),
+        "copy_to_ram": copy_to_ram,
+        "profile": profile,
+        "message": "BLAZE_REC SHA-256 doğrulandı; kexec ile USB gerektirmeden BlazeOS başlatılıyor...",
+    }
+
+
+def wipe_human_users(target_root="/"):
     """Remove all human user accounts (1000 <= uid < 60000) cleanly via userdel -rf and fallback db cleanup."""
     human_users = set()
+    passwd_p = target_join(target_root, "/etc/passwd")
     try:
-        if os.path.exists("/etc/passwd"):
-            with open("/etc/passwd", "r", encoding="utf-8") as f:
+        if os.path.exists(passwd_p):
+            with open(passwd_p, "r", encoding="utf-8") as f:
                 for line in f:
                     parts = line.strip().split(":")
                     if len(parts) >= 3:
@@ -146,67 +511,157 @@ def wipe_human_users():
 
     for u in human_users:
         try:
-            subprocess.run(["userdel", "-rf", u], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if target_root == "/":
+                subprocess.run(["userdel", "-rf", u], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                shutil.rmtree(target_join(target_root, f"/home/{u}"), ignore_errors=True)
         except Exception:
             pass
         for extra in [f"/etc/sudoers.d/{u}", f"/var/lib/AccountsService/users/{u}"]:
-            if os.path.exists(extra):
+            ep = target_join(target_root, extra)
+            if os.path.exists(ep):
                 try:
-                    os.remove(extra)
+                    os.remove(ep)
                 except Exception:
                     pass
 
     if human_users:
         for db_file in ["/etc/passwd", "/etc/shadow", "/etc/group", "/etc/gshadow", "/etc/subuid", "/etc/subgid"]:
-            if os.path.exists(db_file):
+            dp = target_join(target_root, db_file)
+            if os.path.exists(dp):
                 try:
-                    with open(db_file, "r", encoding="utf-8") as f:
+                    with open(dp, "r", encoding="utf-8") as f:
                         lines = f.readlines()
                     filtered = [ln for ln in lines if ln.split(":", 1)[0].strip() not in human_users]
-                    with open(db_file, "w", encoding="utf-8") as f:
+                    with open(dp, "w", encoding="utf-8") as f:
                         f.writelines(filtered)
                 except Exception:
                     pass
 
 
-def prepare_oobe_reset():
+def prepare_oobe_reset(target_root="/"):
     """Restore OOBE first-boot state, sudoers rule (0440), and SDDM autologin."""
     for marker in [
         "/etc/blazeos-setup-completed",
         "/etc/blaze-firstboot-done",
         "/var/lib/solar-firstboot/done",
     ]:
-        if os.path.exists(marker):
+        mp = target_join(target_root, marker)
+        if os.path.exists(mp):
             try:
-                os.remove(marker)
+                os.remove(mp)
             except Exception:
                 pass
 
-    os.makedirs("/etc/sudoers.d", exist_ok=True)
-    sudoers_path = "/etc/sudoers.d/99-blaze-setup"
+    sudoers_dir = target_join(target_root, "/etc/sudoers.d")
+    os.makedirs(sudoers_dir, exist_ok=True)
+    sudoers_path = os.path.join(sudoers_dir, "99-blaze-setup")
     with open(sudoers_path, "w", encoding="utf-8") as f:
         f.write("blaze-setup ALL=(ALL) NOPASSWD: ALL\n")
     os.chmod(sudoers_path, 0o440)
 
-    os.makedirs("/etc/sddm.conf.d", exist_ok=True)
-    autologin_cfg = "[Autologin]\nUser=blaze-setup\nSession=blaze-oobe.desktop\nRelogin=false\n"
-    for conf_name in ["autologin.conf", "00-blaze-oobe.conf"]:
-        with open(os.path.join("/etc/sddm.conf.d", conf_name), "w", encoding="utf-8") as f:
-            f.write(autologin_cfg)
+    sddm_dir = target_join(target_root, "/etc/sddm.conf.d")
+    os.makedirs(sddm_dir, exist_ok=True)
+    for stale in [os.path.join(sddm_dir, "autologin.conf"), target_join(target_root, "/var/lib/sddm/state.conf")]:
+        if os.path.exists(stale):
+            try:
+                os.remove(stale)
+            except Exception:
+                pass
+    oobe_cfg = (
+        "[Autologin]\n"
+        "User=blaze-setup\n"
+        "Session=blaze-oobe.desktop\n"
+        "Relogin=false\n\n"
+        "[Users]\n"
+        "MinimumUid=900\n"
+        "RememberLastUser=false\n"
+        "RememberLastSession=false\n"
+    )
+    with open(os.path.join(sddm_dir, "00-blaze-oobe.conf"), "w", encoding="utf-8") as f:
+        f.write(oobe_cfg)
 
-    oobe_template = "/usr/share/blaze-setup/blaze-oobe.desktop"
-    oobe_session = "/usr/share/wayland-sessions/blaze-oobe.desktop"
+    setup_home = target_join(target_root, "/var/lib/blaze-setup")
+    os.makedirs(setup_home, mode=0o755, exist_ok=True)
+    try:
+        os.chown(setup_home, 961, 961)
+    except Exception:
+        pass
+
+    # Restore blaze-setup shell (/bin/bash), /etc/shadow entry, and seat/GPU group memberships
+    passwd_p = target_join(target_root, "/etc/passwd")
+    if os.path.isfile(passwd_p):
+        try:
+            pw_lines = []
+            for ln in open(passwd_p, encoding="utf-8"):
+                if ln.startswith("blaze-setup:"):
+                    cols = ln.rstrip("\n").split(":")
+                    if len(cols) >= 7:
+                        cols[6] = "/bin/bash"
+                        ln = ":".join(cols) + "\n"
+                pw_lines.append(ln)
+            with open(passwd_p, "w", encoding="utf-8") as f:
+                f.writelines(pw_lines)
+        except Exception:
+            pass
+
+    shadow_p = target_join(target_root, "/etc/shadow")
+    if os.path.isfile(shadow_p):
+        try:
+            orig_m = os.stat(shadow_p).st_mode & 0o7777
+            os.chmod(shadow_p, 0o600)
+            sh_lines = open(shadow_p, encoding="utf-8").readlines()
+            found_bs = False
+            new_sh = []
+            for ln in sh_lines:
+                if ln.startswith("blaze-setup:"):
+                    found_bs = True
+                    new_sh.append("blaze-setup::20726::::::\n")
+                else:
+                    new_sh.append(ln)
+            if not found_bs:
+                new_sh.append("blaze-setup::20726::::::\n")
+            with open(shadow_p, "w", encoding="utf-8") as f:
+                f.writelines(new_sh)
+            os.chmod(shadow_p, orig_m)
+        except Exception:
+            pass
+
+    group_p = target_join(target_root, "/etc/group")
+    if os.path.isfile(group_p):
+        try:
+            gr_lines = []
+            for ln in open(group_p, encoding="utf-8"):
+                cols = ln.rstrip("\n").split(":")
+                if len(cols) == 4 and cols[0] in ("wheel", "video", "audio", "input", "render"):
+                    mems = [m for m in cols[3].split(",") if m]
+                    if "blaze-setup" not in mems:
+                        mems.append("blaze-setup")
+                    cols[3] = ",".join(mems)
+                    ln = ":".join(cols) + "\n"
+                gr_lines.append(ln)
+            with open(group_p, "w", encoding="utf-8") as f:
+                f.writelines(gr_lines)
+        except Exception:
+            pass
+
+    oobe_template = target_join(target_root, "/usr/share/blaze-setup/blaze-oobe.desktop")
+    if not os.path.isfile(oobe_template) and os.path.isfile("/usr/share/blaze-setup/blaze-oobe.desktop"):
+        oobe_template = "/usr/share/blaze-setup/blaze-oobe.desktop"
+    oobe_session = target_join(target_root, "/usr/share/wayland-sessions/blaze-oobe.desktop")
     if os.path.isfile(oobe_template):
         os.makedirs(os.path.dirname(oobe_session), exist_ok=True)
         shutil.copy2(oobe_template, oobe_session)
 
-    if subprocess.run(["id", "-u", "blaze-setup"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
-        subprocess.run(
-            ["useradd", "--system", "--create-home", "--home-dir", "/var/lib/blaze-setup", "--shell", "/bin/bash", "blaze-setup"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    subprocess.run(["systemctl", "enable", "sddm.service"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if target_root == "/":
+        if subprocess.run(["id", "-u", "blaze-setup"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
+            subprocess.run(
+                ["useradd", "--system", "--uid", "961", "--create-home", "--home-dir", "/var/lib/blaze-setup", "--shell", "/bin/bash", "blaze-setup"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        subprocess.run(["usermod", "-s", "/bin/bash", "-aG", "wheel,video,audio,input,render", "blaze-setup"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["systemctl", "enable", "sddm.service"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def preserve_nested_snapshot_containers(old_subvol_path, target_subvol):
@@ -231,6 +686,13 @@ def preserve_nested_snapshot_containers(old_subvol_path, target_subvol):
             for entry in os.listdir(old_nested):
                 src_e = os.path.join(old_nested, entry)
                 dst_e = os.path.join(new_nested, entry)
+                # Btrfs snapshots create empty stub directories for nested subvolumes; remove stub before moving real subvolume
+                if os.path.isdir(dst_e):
+                    try:
+                        if not os.listdir(dst_e):
+                            os.rmdir(dst_e)
+                    except Exception:
+                        pass
                 if not os.path.exists(dst_e):
                     try:
                         os.rename(src_e, dst_e)
@@ -249,16 +711,28 @@ def resolve_btrfs_snapshot_source(top_mount, active_subvol, old_subvol_path, sna
         os.path.join(old_subvol_path, snap_rel),
         os.path.join(top_mount, snap_rel),
         os.path.join(top_mount, stripped_rel),
-        snap_path,
     ]
+    for old_cand in sorted(glob.glob(os.path.join(top_mount, "*_old_*")), reverse=True):
+        candidates.append(os.path.join(old_cand, stripped_rel))
+    candidates.append(snap_path)
+
+    def is_non_empty_dir(p):
+        try:
+            return os.path.isdir(p) and bool(os.listdir(p))
+        except Exception:
+            return False
+
+    for c in candidates:
+        if is_non_empty_dir(c):
+            return c
     for c in candidates:
         if os.path.exists(c):
             return c
     return candidates[0]
 
 
-def perform_btrfs_root_rollback(root_dev, active_fsroot, snap_path):
-    """Roll back active root subvolume on top-level Btrfs mount (subvolid=5) to snap_path."""
+def perform_btrfs_root_rollback(root_dev, active_fsroot, snap_path, restore_home=True):
+    """Roll back active root (and optional companion home) subvolume on top-level Btrfs mount (subvolid=5)."""
     top_mount = "/mnt/bere_btrfs_top"
     os.makedirs(top_mount, exist_ok=True)
     mount_p = subprocess.run(
@@ -270,6 +744,7 @@ def perform_btrfs_root_rollback(root_dev, active_fsroot, snap_path):
     if mount_p.returncode != 0:
         return False, f"Btrfs top-level bağlanamadı: {mount_p.stdout}"
 
+    ts = int(time.time())
     try:
         active_subvol = active_fsroot.strip("/")
         if not active_subvol or "/" in active_subvol or not os.path.exists(os.path.join(top_mount, active_subvol)):
@@ -281,7 +756,7 @@ def perform_btrfs_root_rollback(root_dev, active_fsroot, snap_path):
                 active_subvol = "root"
 
         target_subvol = os.path.join(top_mount, active_subvol)
-        old_subvol_name = f"{active_subvol}_old_{int(time.time())}"
+        old_subvol_name = f"{active_subvol}_old_{ts}"
         old_subvol_path = os.path.join(top_mount, old_subvol_name)
 
         renamed = False
@@ -320,20 +795,54 @@ def perform_btrfs_root_rollback(root_dev, active_fsroot, snap_path):
         if renamed:
             preserve_nested_snapshot_containers(old_subvol_path, target_subvol)
 
+        # Also roll back companion <name>_home snapshot if present
+        snap_base = os.path.basename(snap_path.rstrip("/"))
+        if restore_home and snap_base.endswith("_root"):
+            home_snap_name = snap_base[:-5] + "_home"
+            home_sub = os.path.join(top_mount, "home")
+            if os.path.isdir(home_sub):
+                old_home = os.path.join(top_mount, f"home_old_{ts}")
+                os.rename(home_sub, old_home)
+                moved_home_snap = resolve_btrfs_snapshot_source(
+                    top_mount, "home", old_home, f"/.snapshots/{home_snap_name}"
+                )
+                if os.path.isdir(moved_home_snap):
+                    h_res = subprocess.run(
+                        ["btrfs", "subvolume", "snapshot", moved_home_snap, home_sub],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                    )
+                    if h_res.returncode == 0:
+                        subprocess.run(
+                            ["btrfs", "property", "set", "-ts", home_sub, "ro", "false"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                        preserve_nested_snapshot_containers(old_home, home_sub)
+                    else:
+                        os.rename(old_home, home_sub)
+                else:
+                    os.rename(old_home, home_sub)
+
         return True, "ok"
     finally:
         subprocess.run(["umount", top_mount], stderr=subprocess.DEVNULL)
 
 
-def sync_bere_to_boot():
-    """Ensure BERE runtime and recovery tools exist on /boot partition for survival."""
+def sync_bere_to_boot(target_root="/"):
+    """Ensure BERE runtime, death screen, and standalone BERP exist on /boot/bere for survival."""
     try:
-        boot_bere = "/boot/bere"
+        boot_bere = target_join(target_root, "/boot/bere")
         os.makedirs(boot_bere, exist_ok=True)
-        if os.path.exists("/usr/bin/berp-recovery-gui"):
-            shutil.copy2("/usr/bin/berp-recovery-gui", os.path.join(boot_bere, "berp-recovery-gui"))
-        if os.path.exists("/usr/bin/blaze-death-screen"):
-            shutil.copy2("/usr/bin/blaze-death-screen", os.path.join(boot_bere, "blaze-death-screen"))
+        for bin_name in ("berp-recovery-gui", "blaze-death-screen", "blaze-recovery"):
+            src_bin = f"/usr/bin/{bin_name}"
+            if not os.path.exists(src_bin):
+                src_bin = target_join(target_root, f"/usr/bin/{bin_name}")
+            if os.path.exists(src_bin):
+                dst_bin = os.path.join(boot_bere, bin_name)
+                shutil.copy2(src_bin, dst_bin)
+                os.chmod(dst_bin, 0o755)
         if os.path.isdir(STATIC_DIR):
             dst_static = os.path.join(boot_bere, "static")
             os.makedirs(dst_static, exist_ok=True)
@@ -349,11 +858,171 @@ def sync_bere_to_boot():
         print(f"[BERE] Warning syncing to /boot: {e}")
 
 
-def remount_filesystems_rw():
-    """Ensure root and standard partitions are read-write for recovery operations."""
-    for mp in ["/", "/home", "/boot", "/boot/efi"]:
+def ensure_target_initramfs_has_death_screen(target_root="/"):
+    """
+    Append a minimal newc cpio.zst segment containing blaze-death-screen, blaze-recovery,
+    and emergency drop-in overrides onto any installed /boot/initramfs-*.img that does not
+    yet embed blaze-death-screen. Linux's initramfs unpacker natively unpacks concatenated
+    cpio(.zst) segments in order, ensuring Hard Reset ALWAYS lands on BlazeOS's crash guard.
+    """
+    boot_dir = target_join(target_root, "/boot")
+    if not os.path.isdir(boot_dir):
+        return
+    death_src = "/usr/bin/blaze-death-screen"
+    if not os.path.isfile(death_src):
+        death_src = target_join(target_root, "/usr/bin/blaze-death-screen")
+    if not os.path.isfile(death_src):
+        return
+
+    initrds = [
+        p for p in glob.glob(os.path.join(boot_dir, "initramfs-*.img"))
+        if os.path.isfile(p) and "0-rescue" not in os.path.basename(p)
+    ]
+    if not initrds or not shutil.which("cpio"):
+        return
+
+    marker_magic = b"BLAZE_BERE_DEATH_GUARD_V3"
+    to_patch = []
+    for img in initrds:
         try:
-            subprocess.run(["mount", "-o", "remount,rw", mp], stderr=subprocess.DEVNULL)
+            with open(img, "rb") as fh:
+                # Check tail 2 MiB for our appended segment marker or lsinitrd
+                fh.seek(0, os.SEEK_END)
+                sz = fh.tell()
+                fh.seek(max(0, sz - 2 * 1024 * 1024))
+                tail = fh.read()
+            if marker_magic in tail:
+                continue
+            to_patch.append(img)
+        except Exception:
+            continue
+
+    if not to_patch:
+        return
+
+    stage = tempfile.mkdtemp(prefix="bere-initrd-guard-")
+    try:
+        os.makedirs(os.path.join(stage, "usr/bin"), exist_ok=True)
+        shutil.copy2(death_src, os.path.join(stage, "usr/bin/blaze-death-screen"))
+        os.chmod(os.path.join(stage, "usr/bin/blaze-death-screen"), 0o755)
+
+        berp_src = "/usr/bin/blaze-recovery"
+        if not os.path.isfile(berp_src):
+            berp_src = target_join(target_root, "/usr/bin/blaze-recovery")
+        if os.path.isfile(berp_src):
+            shutil.copy2(berp_src, os.path.join(stage, "usr/bin/blaze-recovery"))
+            os.chmod(os.path.join(stage, "usr/bin/blaze-recovery"), 0o755)
+
+        for b_tool in ("lsblk", "chvt", "du"):
+            host_b = shutil.which(b_tool)
+            if host_b and os.path.isfile(host_b):
+                shutil.copy2(host_b, os.path.join(stage, "usr/bin", b_tool))
+                os.chmod(os.path.join(stage, "usr/bin", b_tool), 0o755)
+
+        dropin_body = (
+            "[Service]\n"
+            "ExecStartPre=-/usr/bin/plymouth --wait quit\n"
+            "ExecStartPre=-/usr/bin/chvt 1\n"
+            "ExecStart=\n"
+            "ExecStart=-/usr/bin/blaze-death-screen\n"
+            "StandardInput=tty-force\n"
+            "StandardOutput=tty\n"
+            "StandardError=tty\n"
+            "TTYPath=/dev/tty1\n"
+        )
+        for unit in ("emergency.service.d", "dracut-emergency.service.d", "rescue.service.d"):
+            udir = os.path.join(stage, "etc/systemd/system", unit)
+            os.makedirs(udir, exist_ok=True)
+            with open(os.path.join(udir, "99-blaze-death-screen.conf"), "w", encoding="utf-8") as f:
+                f.write(dropin_body)
+
+        hook_dir = os.path.join(stage, "var/lib/dracut/hooks/emergency")
+        os.makedirs(hook_dir, exist_ok=True)
+        hook_file = os.path.join(hook_dir, "00-blaze-death-screen.sh")
+        with open(hook_file, "w", encoding="utf-8") as f:
+            f.write("#!/usr/bin/sh\n/usr/bin/blaze-death-screen </dev/tty1 >/dev/tty1 2>&1\n")
+        os.chmod(hook_file, 0o755)
+
+        os.makedirs(os.path.join(stage, "etc"), exist_ok=True)
+        with open(os.path.join(stage, "etc/blaze-bere-guard"), "wb") as f:
+            f.write(marker_magic + b"\n")
+
+        rel_files = []
+        for root_d, dirs, files in os.walk(stage):
+            for d in dirs:
+                rel_files.append(os.path.relpath(os.path.join(root_d, d), stage))
+            for fn in files:
+                rel_files.append(os.path.relpath(os.path.join(root_d, fn), stage))
+        rel_files.sort()
+
+        cpio_p = subprocess.Popen(
+            ["cpio", "-o", "-H", "newc", "--quiet"],
+            cwd=stage,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+        )
+        cpio_bytes, _ = cpio_p.communicate(("\n".join(rel_files) + "\n").encode("utf-8"))
+        if cpio_p.returncode != 0 or not cpio_bytes:
+            return
+
+        # Keep uncompressed newc cpio (+ marker) or zstd if available; uncompressed cpio is universally
+        # unpacked by every Linux kernel regardless of initramfs compression config and is ~980 KB!
+        segment = cpio_bytes
+        for img in to_patch:
+            try:
+                with open(img, "ab") as fh:
+                    # 4-byte align before appending next newc cpio archive per kernel initramfs spec
+                    pos = fh.tell()
+                    pad = (4 - (pos % 4)) % 4
+                    if pad:
+                        fh.write(b"\x00" * pad)
+                    fh.write(segment)
+            except Exception as e:
+                print(f"[BERE] Warning patching {img}: {e}")
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+
+
+def run_in_target(target_root, cmd):
+    """Execute cmd directly if target_root == '/', else inside a bind-mounted chroot."""
+    if target_root == "/":
+        return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+    binds = [
+        ("/dev", os.path.join(target_root, "dev")),
+        ("/dev/pts", os.path.join(target_root, "dev/pts")),
+        ("/proc", os.path.join(target_root, "proc")),
+        ("/sys", os.path.join(target_root, "sys")),
+        ("/run", os.path.join(target_root, "run")),
+    ]
+    if os.path.isdir("/sys/firmware/efi/efivars"):
+        binds.append(("/sys/firmware/efi/efivars", os.path.join(target_root, "sys/firmware/efi/efivars")))
+
+    mounted = []
+    try:
+        for src, dst in binds:
+            if os.path.exists(src):
+                os.makedirs(dst, exist_ok=True)
+                if subprocess.run(["mount", "--bind", src, dst], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+                    mounted.append(dst)
+        return subprocess.run(["chroot", target_root] + cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    finally:
+        for dst in reversed(mounted):
+            subprocess.run(["umount", "-l", dst], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def remount_filesystems_rw():
+    """Ensure root and standard partitions are mounted and read-write for recovery operations."""
+    try:
+        subprocess.run(["mount", "-o", "remount,rw", "/"], stderr=subprocess.DEVNULL)
+        if not os.path.exists("/run/initramfs/live"):
+            subprocess.run(["mount", "-a"], stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+    for mp in ["/", "/home", "/boot", "/boot/efi", "/mnt/bere_target", "/mnt/bere_target/home", "/mnt/bere_target/boot", "/mnt/bere_target/boot/efi"]:
+        try:
+            if os.path.exists(mp):
+                subprocess.run(["mount", "-o", "remount,rw", mp], stderr=subprocess.DEVNULL)
         except Exception:
             pass
 
@@ -365,6 +1034,8 @@ def clean_path_contents(path):
     try:
         with os.scandir(path) as it:
             for entry in it:
+                if entry.name in (".snapshots", ".blaze-snapshots", ".blaze-isos", "lost+found"):
+                    continue
                 try:
                     if entry.is_symlink() or entry.is_file():
                         os.unlink(entry.path)
@@ -374,6 +1045,343 @@ def clean_path_contents(path):
                     print(f"[BERE] Warning cleaning {entry.path}: {e}")
     except Exception as e:
         print(f"[BERE] Warning scanning {path}: {e}")
+
+
+ISO_PULL_LOCK = threading.Lock()
+ISO_PULL_STATE = {
+    "active": False,
+    "cancel": False,
+    "status": "idle",
+    "filename": "",
+    "src_path": "",
+    "dest_path": "",
+    "bytes_done": 0,
+    "bytes_total": 0,
+    "percent": 0,
+    "speed_mbps": 0.0,
+    "message": "",
+}
+
+
+def _inspect_mounted_tree(mount_dir, cd_label="", base_name="", size_mb=0):
+    """Inspect an already-mounted ISO/media root directory for kernel, initrd, and distro family."""
+    info = {
+        "supported": False,
+        "distro_family": "unknown",
+        "distro_label": "Bilinmeyen Kalıp",
+        "kernel_path": "",
+        "initrd_path": "",
+        "cd_label": cd_label,
+        "size_mb": size_mb,
+        "supports_ram_boot": True,
+    }
+    if not mount_dir or not os.path.isdir(mount_dir):
+        return info
+
+    # 1. BlazeOS / Fedora (dmsquash-live)
+    for k_cand, i_cand in [
+        ("/boot/x86_64/loader/linux", "/boot/x86_64/loader/initrd"),
+        ("/images/pxeboot/vmlinuz", "/images/pxeboot/initrd.img"),
+    ]:
+        if os.path.isfile(mount_dir + k_cand) and os.path.isfile(mount_dir + i_cand):
+            info["supported"] = True
+            info["distro_family"] = "fedora"
+            is_blaze = "blaze" in cd_label.lower() or "blaze" in base_name.lower()
+            info["distro_label"] = "BlazeOS Live / Kurulum" if is_blaze else "Fedora Live / Kurulum"
+            info["kernel_path"] = k_cand
+            info["initrd_path"] = i_cand
+            return info
+
+    # 2. Ubuntu / Linux Mint / Pop!_OS (casper)
+    casper_k = sorted(glob.glob(os.path.join(mount_dir, "casper/vmlinuz*")))
+    casper_i = sorted(glob.glob(os.path.join(mount_dir, "casper/initrd*")))
+    if casper_k and casper_i:
+        info["supported"] = True
+        info["distro_family"] = "ubuntu"
+        info["distro_label"] = "Ubuntu / Mint / Casper Live"
+        info["kernel_path"] = "/" + os.path.relpath(casper_k[0], mount_dir)
+        info["initrd_path"] = "/" + os.path.relpath(casper_i[0], mount_dir)
+        return info
+
+    # 3. Arch / CachyOS / EndeavourOS (archiso)
+    arch_k = sorted(glob.glob(os.path.join(mount_dir, "arch/boot/x86_64/vmlinuz*")))
+    arch_i = sorted(glob.glob(os.path.join(mount_dir, "arch/boot/x86_64/initramfs*.img")))
+    if arch_k and arch_i:
+        info["supported"] = True
+        info["distro_family"] = "arch"
+        info["distro_label"] = "Arch / Archiso Live"
+        info["kernel_path"] = "/" + os.path.relpath(arch_k[0], mount_dir)
+        info["initrd_path"] = "/" + os.path.relpath(arch_i[0], mount_dir)
+        return info
+
+    # 4. Debian Live (live-boot)
+    deb_k = sorted(glob.glob(os.path.join(mount_dir, "live/vmlinuz*")))
+    deb_i = sorted(glob.glob(os.path.join(mount_dir, "live/initrd*")))
+    if deb_k and deb_i:
+        info["supported"] = True
+        info["distro_family"] = "debian"
+        info["distro_label"] = "Debian Live"
+        info["kernel_path"] = "/" + os.path.relpath(deb_k[0], mount_dir)
+        info["initrd_path"] = "/" + os.path.relpath(deb_i[0], mount_dir)
+        return info
+
+    return info
+
+
+def _get_block_size_bytes(dev_path):
+    try:
+        out = subprocess.check_output(["blockdev", "--getsize64", dev_path], text=True, stderr=subprocess.DEVNULL).strip()
+        if out.isdigit():
+            return int(out)
+    except Exception:
+        pass
+    try:
+        with open(dev_path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            return f.tell()
+    except Exception:
+        return 0
+
+
+def inspect_iso_image(iso_path):
+    """
+    Inspect an ISO file or mounted live medium (`media:///dev/...`) via read-only mount + blkid.
+    Detects distro family (blazeos/fedora, ubuntu, arch, debian), kernel/initrd paths, and CDLABEL.
+    """
+    info = {
+        "supported": False,
+        "distro_family": "unknown",
+        "distro_label": "Bilinmeyen Kalıp",
+        "kernel_path": "",
+        "initrd_path": "",
+        "cd_label": "",
+        "size_mb": 0,
+        "supports_ram_boot": True,
+    }
+    if not iso_path:
+        return info
+
+    if isinstance(iso_path, str) and iso_path.startswith("media://"):
+        dev_path = iso_path[len("media://"):].strip()
+        if not re.fullmatch(r"/dev/[A-Za-z0-9._-]+", dev_path) or not os.path.exists(dev_path):
+            return info
+        cd_label = ""
+        try:
+            cd_label = subprocess.check_output(
+                ["blkid", "-p", "-s", "LABEL", "-o", "value", dev_path],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        except Exception:
+            pass
+        sz_bytes = _get_block_size_bytes(dev_path)
+        sz_mb = int(sz_bytes / (1024 * 1024)) if sz_bytes else 0
+        mp, _ = ensure_usb_mounted_readonly(dev_path)
+        if not mp:
+            return info
+        return _inspect_mounted_tree(mp, cd_label=cd_label, base_name=cd_label or os.path.basename(dev_path), size_mb=sz_mb)
+
+    if not os.path.isfile(iso_path):
+        return info
+    try:
+        info["size_mb"] = int(os.path.getsize(iso_path) / (1024 * 1024))
+    except Exception:
+        pass
+    try:
+        info["cd_label"] = subprocess.check_output(
+            ["blkid", "-p", "-s", "LABEL", "-o", "value", iso_path],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        pass
+
+    loop_mp = tempfile.mkdtemp(prefix="bere-iso-probe-")
+    mounted = False
+    try:
+        m_res = subprocess.run(
+            ["mount", "-o", "loop,ro", iso_path, loop_mp],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+        )
+        if m_res.returncode == 0:
+            mounted = True
+            return _inspect_mounted_tree(
+                loop_mp,
+                cd_label=info["cd_label"],
+                base_name=os.path.basename(iso_path),
+                size_mb=info["size_mb"],
+            )
+    finally:
+        if mounted:
+            subprocess.run(["umount", "-l", loop_mp], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        shutil.rmtree(loop_mp, ignore_errors=True)
+
+    return info
+
+
+def ensure_usb_mounted_readonly(dev):
+    """Mount external/USB partition `dev` strictly read-only if not already mounted, returning mountpoint."""
+    if not dev or not os.path.exists(dev) or is_protected_recovery_device(dev):
+        return "", "Geçersiz veya korumalı aygıt."
+    try:
+        mps = [
+            m.strip()
+            for m in subprocess.check_output(["lsblk", "-no", "MOUNTPOINTS", dev], text=True, stderr=subprocess.DEVNULL).splitlines()
+            if m.strip() and m.strip() != "[SWAP]"
+        ]
+        if mps:
+            return mps[0], ""
+        fstype = subprocess.check_output(["lsblk", "-no", "FSTYPE", dev], text=True, stderr=subprocess.DEVNULL).strip().lower()
+        mp = os.path.join("/run/bere_usb", re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(dev)))
+        os.makedirs(mp, exist_ok=True)
+        for mod in ("exfat", "ntfs3", "vfat", "isofs", "udf"):
+            subprocess.run(["modprobe", mod], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        cmds = [["mount", "-o", "ro", dev, mp]]
+        if fstype == "ntfs":
+            cmds.insert(0, ["mount", "-t", "ntfs3", "-o", "ro", dev, mp])
+        elif fstype in ("exfat", "vfat", "ext4", "btrfs", "xfs", "iso9660", "udf"):
+            cmds.insert(0, ["mount", "-t", fstype, "-o", "ro", dev, mp])
+        last_err = ""
+        for cmd in cmds:
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=12)
+            if res.returncode == 0:
+                return mp, ""
+            last_err = res.stdout.strip()
+        return "", last_err or "Aygıt salt-okunur bağlanamadı."
+    except Exception as e:
+        return "", str(e)
+
+
+_CRYPT_LOCK = threading.Lock()
+_AUTH_LOCK = threading.Lock()
+_AUTH_STATE = {"unlocked": False, "unlocked_user": ""}
+_LIBCRYPT = None
+
+
+def _get_libcrypt():
+    global _LIBCRYPT
+    if _LIBCRYPT is not None:
+        return _LIBCRYPT
+    for soname in ("libcrypt.so.2", "libcrypt.so.1"):
+        try:
+            lib = ctypes.CDLL(soname)
+            lib.crypt.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+            lib.crypt.restype = ctypes.c_char_p
+            _LIBCRYPT = lib
+            return lib
+        except Exception:
+            continue
+    return None
+
+
+def verify_crypt_password(password, shadow_hash):
+    if not password or not shadow_hash or shadow_hash.startswith(("!", "*")):
+        return False
+    lib = _get_libcrypt()
+    if lib is None:
+        return False
+    try:
+        pw_b = password.encode("utf-8")
+        salt_b = shadow_hash.encode("utf-8")
+        with _CRYPT_LOCK:
+            res = lib.crypt(pw_b, salt_b)
+        if not res:
+            return False
+        return secrets.compare_digest(res.decode("utf-8", errors="ignore"), shadow_hash)
+    except Exception:
+        return False
+
+
+def get_target_admin_hashes(auto_mount=True):
+    """
+    Collect active shadow password hashes for `root` and `wheel` administrators
+    from the installed target OS (`/mnt/bere_target` or `/`).
+    Returns (entries, auth_required, admin_usernames) where entries is [(user, hash)].
+    """
+    target_root, _, _, _, _, is_live_ram_only = resolve_target_context(auto_mount=auto_mount)
+    if is_live_ram_only:
+        return [], False, []
+
+    shadow_path = target_join(target_root, "/etc/shadow")
+    group_path = target_join(target_root, "/etc/group")
+    passwd_path = target_join(target_root, "/etc/passwd")
+    if not os.path.isfile(shadow_path):
+        return [], False, []
+
+    admin_users = {"root"}
+    wheel_gid = None
+    try:
+        with open(group_path, "r", encoding="utf-8", errors="ignore") as gf:
+            for line in gf:
+                parts = line.strip().split(":")
+                if len(parts) >= 4 and parts[0] == "wheel":
+                    wheel_gid = parts[2].strip()
+                    for member in parts[3].split(","):
+                        m = member.strip()
+                        if m:
+                            admin_users.add(m)
+    except Exception:
+        pass
+
+    if wheel_gid and os.path.isfile(passwd_path):
+        try:
+            with open(passwd_path, "r", encoding="utf-8", errors="ignore") as pf:
+                for line in pf:
+                    parts = line.strip().split(":")
+                    if len(parts) >= 4 and parts[3].strip() == wheel_gid and parts[0]:
+                        admin_users.add(parts[0].strip())
+        except Exception:
+            pass
+
+    entries = []
+    seen_users = []
+    try:
+        with open(shadow_path, "r", encoding="utf-8", errors="ignore") as sf:
+            for line in sf:
+                parts = line.strip().split(":")
+                if len(parts) < 2:
+                    continue
+                user = parts[0].strip()
+                pw_hash = parts[1].strip()
+                if user in admin_users and pw_hash and not pw_hash.startswith(("!", "*", "x")):
+                    entries.append((user, pw_hash))
+                    seen_users.append(user)
+    except Exception:
+        pass
+
+    return entries, bool(entries), seen_users
+
+
+def verify_target_admin_password(password, entries=None):
+    if not isinstance(password, str) or not password:
+        return ""
+    if entries is None:
+        entries, _, _ = get_target_admin_hashes(auto_mount=True)
+    for user, pw_hash in entries:
+        if verify_crypt_password(password, pw_hash):
+            return user
+    return ""
+
+
+def _require_action_password(data):
+    entries, auth_required, _ = get_target_admin_hashes(auto_mount=True)
+    if not auth_required:
+        return True, None
+    pw = data.get("password") if isinstance(data, dict) else ""
+    if not isinstance(pw, str) or not pw:
+        return False, {
+            "status": "error",
+            "message": "Güvenlik doğrulaması: Bu işlem için Yetkili Kullanıcı (wheel) veya Root parolası zorunludur.",
+        }
+    if not verify_target_admin_password(pw, entries):
+        time.sleep(0.35)
+        return False, {
+            "status": "error",
+            "message": "Hatalı yetkili kullanıcı / root parolası.",
+        }
+    return True, None
 
 
 class ReusableHTTPServer(HTTPServer):
@@ -440,6 +1448,67 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
             super().do_GET()
 
     def handle_api(self, endpoint, data):
+        if endpoint == "auth_status":
+            _, required, admin_users = get_target_admin_hashes(auto_mount=True)
+            with _AUTH_LOCK:
+                unlocked = bool(_AUTH_STATE["unlocked"]) or not required
+                unlocked_user = _AUTH_STATE["unlocked_user"]
+            return {
+                "status": "ok",
+                "auth_required": required,
+                "unlocked": unlocked,
+                "unlocked_user": unlocked_user,
+                "admin_users": admin_users,
+            }
+
+        if endpoint == "auth_unlock":
+            entries, required, admin_users = get_target_admin_hashes(auto_mount=True)
+            if not required:
+                with _AUTH_LOCK:
+                    _AUTH_STATE["unlocked"] = True
+                    _AUTH_STATE["unlocked_user"] = "live"
+                return {
+                    "status": "ok",
+                    "auth_required": False,
+                    "unlocked": True,
+                    "unlocked_user": "live",
+                    "admin_users": admin_users,
+                }
+            pw = data.get("password") if isinstance(data, dict) else ""
+            matched_user = verify_target_admin_password(pw, entries)
+            if not matched_user:
+                time.sleep(0.35)
+                return {
+                    "status": "error",
+                    "auth_required": True,
+                    "unlocked": False,
+                    "message": "Hatalı yetkili kullanıcı (wheel) veya root parolası.",
+                    "_http_status": 403,
+                }
+            with _AUTH_LOCK:
+                _AUTH_STATE["unlocked"] = True
+                _AUTH_STATE["unlocked_user"] = matched_user
+            return {
+                "status": "ok",
+                "auth_required": True,
+                "unlocked": True,
+                "unlocked_user": matched_user,
+                "admin_users": admin_users,
+            }
+
+        # Enforce startup authentication lock across all operational endpoints
+        _, required, _ = get_target_admin_hashes(auto_mount=True)
+        with _AUTH_LOCK:
+            session_unlocked = bool(_AUTH_STATE["unlocked"])
+        if required and not session_unlocked:
+            return {
+                "status": "locked",
+                "auth_required": True,
+                "unlocked": False,
+                "message": "BERE kilitli: Devam etmek için Yetkili Kullanıcı (wheel) veya Root parolası girin.",
+                "_http_status": 401,
+            }
+
         if endpoint == "status" or endpoint == "telemetry":
             cpu = 0
             try:
@@ -467,46 +1536,621 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
             return {"status": "ok", "cpu": cpu, "ram": ram}
 
         elif endpoint == "info":
-            is_btrfs, root_dev, active_fsroot, fstype = detect_root_info()
+            target_root, is_btrfs, root_dev, active_fsroot, fstype, is_live_ram_only = resolve_target_context(auto_mount=True)
             return {
                 "status": "ok",
+                "target_root": target_root,
+                "live_ram_only": is_live_ram_only,
                 "root_btrfs": is_btrfs,
                 "root_fstype": fstype,
                 "root_device": root_dev,
                 "root_subvol": active_fsroot,
                 "uefi": os.path.exists("/sys/firmware/efi"),
-                "has_factory_image": (
-                    os.path.exists("/boot/bere/recovery.squashfs")
-                    or os.path.exists("/.blaze-snapshots/factory-initial")
-                ),
+                "has_factory_image": has_factory_image(target_root),
             }
 
         elif endpoint == "isos":
             isos = []
-            search_patterns = [
-                "/home/*/Downloads/*.iso",
-                "/home/*/*.iso",
-                "/run/media/*/*/*.iso",
-                "/run/media/*/*.iso",
-                "/mnt/*.iso",
-                "/mnt/*/*.iso",
-                "/*.iso",
+            target_root = resolve_target_context(auto_mount=True)[0]
+            try:
+                ram_kb = int(
+                    next(ln.split()[1] for ln in open("/proc/meminfo", encoding="utf-8") if ln.startswith("MemTotal:"))
+                )
+                total_ram_mb = ram_kb // 1024
+            except Exception:
+                total_ram_mb = 4096
+
+            found_realpaths = set()
+
+            def append_iso_file(match_path, source_hint="disk"):
+                if not os.path.isfile(match_path) or match_path.endswith(".part"):
+                    return
+                rp = os.path.realpath(match_path)
+                if rp in found_realpaths:
+                    return
+                found_realpaths.add(rp)
+                try:
+                    sz_mb = int(os.path.getsize(rp) / (1024 * 1024))
+                    is_usb_src = source_hint == "usb" or rp.startswith("/run/bere_usb/") or rp.startswith("/run/media/")
+                    managed = "/.blaze-isos/" in rp
+                    src_kind = "usb" if is_usb_src else ("vault" if managed else source_hint)
+                    isos.append({
+                        "name": os.path.basename(rp),
+                        "display_name": os.path.basename(rp),
+                        "path": rp,
+                        "size_mb": sz_mb,
+                        "managed": managed,
+                        "can_pull": is_usb_src,
+                        "kind": "iso",
+                        "source": src_kind,
+                    })
+                except Exception:
+                    pass
+
+            def scan_iso_dir(root_dir, max_depth=3, source_hint="disk"):
+                if not root_dir or not os.path.isdir(root_dir):
+                    return
+                root_real = os.path.realpath(root_dir)
+                base_depth = root_real.rstrip("/").count("/")
+                for cur_root, dirs, files in os.walk(root_real):
+                    cur_depth = cur_root.rstrip("/").count("/") - base_depth
+                    dirs[:] = [
+                        d for d in dirs
+                        if (d == ".blaze-isos" or not d.startswith("."))
+                        and cur_depth < max_depth
+                        and d not in ("proc", "sys", "dev", "run", "tmp", "node_modules")
+                    ]
+                    for fn in files:
+                        if fn.lower().endswith(".iso") and not fn.endswith(".part"):
+                            append_iso_file(os.path.join(cur_root, fn), source_hint=source_hint)
+
+            scan_roots = [
+                ("/.blaze-isos", 1, "vault"),
+                ("/home/.blaze-isos", 1, "vault"),
             ]
-            found_paths = set()
-            for pat in search_patterns:
-                for match in glob.glob(pat):
-                    if match not in found_paths and os.path.isfile(match):
-                        found_paths.add(match)
-                        try:
-                            sz_mb = int(os.path.getsize(match) / (1024 * 1024))
-                            isos.append({
-                                "name": os.path.basename(match),
-                                "path": match,
-                                "size_mb": sz_mb,
+            for store_mp in glob.glob("/mnt/bere_iso_store_*"):
+                scan_roots.append((os.path.join(store_mp, ".blaze-isos"), 1, "vault"))
+                scan_roots.append((os.path.join(store_mp, "home/.blaze-isos"), 1, "vault"))
+
+            for home_base in (["/home"] + ([os.path.join(target_root, "home")] if target_root != "/" else [])):
+                scan_roots.append((os.path.join(home_base, ".blaze-isos"), 1, "vault"))
+                for uh in glob.glob(os.path.join(home_base, "*")):
+                    if os.path.isdir(uh) and os.path.basename(uh) != ".blaze-isos":
+                        scan_roots.append((uh, 1, "disk"))
+                        for subn in ("Downloads", "İndirilenler", "Desktop", "Masaüstü", "Documents", "Belgeler", "ISOs", "ISO"):
+                            scan_roots.append((os.path.join(uh, subn), 3, "disk"))
+
+            if target_root != "/":
+                scan_roots.append((os.path.join(target_root, ".blaze-isos"), 1, "vault"))
+                scan_roots.append((target_root, 1, "disk"))
+            else:
+                scan_roots.append(("/", 1, "disk"))
+
+            for udir in glob.glob("/run/bere_usb/*") + glob.glob("/run/media/*/*"):
+                scan_roots.append((udir, 3, "usb"))
+            for mdir in glob.glob("/mnt/*"):
+                if not os.path.basename(mdir).startswith("bere_"):
+                    scan_roots.append((mdir, 2, "disk"))
+
+            for sdir, depth, src_h in scan_roots:
+                scan_iso_dir(sdir, max_depth=depth, source_hint=src_h)
+
+            # Discover optical / attached Live ISO9660/UDF media (e.g. /dev/sr0 Blaze-SE-5 DVD-ROM or Live USB)
+            try:
+                blk_out = subprocess.check_output(
+                    ["lsblk", "-J", "-b", "-o", "NAME,PATH,TYPE,FSTYPE,SIZE,LABEL,TRAN,RM,HOTPLUG"],
+                    text=True,
+                    stderr=subprocess.DEVNULL,
+                )
+                blk_raw = json.loads(blk_out)
+
+                def walk_live_media(nodes, p_tran="", p_rm=False, p_hot=False):
+                    for n in nodes or []:
+                        nname = n.get("name") or ""
+                        if nname.startswith(("loop", "zram", "fd")):
+                            continue
+                        npath = n.get("path") or f"/dev/{nname}"
+                        ntype = n.get("type") or ""
+                        nfs = (n.get("fstype") or "").lower()
+                        nlbl = (n.get("label") or "").strip()
+                        tran = (n.get("tran") or p_tran or "").lower()
+                        rm = bool(n.get("rm")) or p_rm
+                        hot = bool(n.get("hotplug")) or p_hot
+
+                        if nfs in ("iso9660", "udf") and nlbl != "BLAZE_REC" and npath not in found_realpaths:
+                            found_realpaths.add(npath)
+                            m_info = inspect_iso_image(f"media://{npath}")
+                            if m_info["supported"]:
+                                is_opt = (ntype == "rom")
+                                kind_lbl = "Kurulum Medyası (DVD/ISO)" if is_opt else "Canlı USB Medya"
+                                isos.append({
+                                    "name": f"{nlbl or os.path.basename(npath)}.iso",
+                                    "display_name": f"{m_info['distro_label']} — {nlbl or os.path.basename(npath)} ({kind_lbl})",
+                                    "path": f"media://{npath}",
+                                    "dev_path": npath,
+                                    "size_mb": m_info["size_mb"] or int(int(n.get("size") or 0) / (1024 * 1024)),
+                                    "managed": False,
+                                    "can_pull": True,
+                                    "kind": "media",
+                                    "source": "optical" if is_opt else ("usb" if (tran == "usb" or rm or hot) else "disk"),
+                                })
+                        if n.get("children"):
+                            walk_live_media(n["children"], tran, rm, hot)
+
+                walk_live_media(blk_raw.get("blockdevices", []))
+            except Exception:
+                pass
+
+            vault_info = inspect_blaze_rec_vault(verify_hashes=False)
+            if vault_info.get("present") and vault_info.get("full_os_embedded"):
+                isos.append({
+                    "name": "BLAZE_REC-Armored-Vault.img",
+                    "display_name": "Blaze SolarEvolution — Dahili Zırhlı Kasa (BLAZE_REC · USB Yok)",
+                    "path": "vault://BLAZE_REC",
+                    "dev_path": vault_info.get("device") or "",
+                    "size_mb": vault_info.get("squashfs_mb") or 3100,
+                    "managed": False,
+                    "can_pull": False,
+                    "kind": "vault",
+                    "source": "armored_vault",
+                    "hash_protected": True,
+                })
+
+            rank_map = {"armored_vault": -1, "vault": 0, "optical": 1, "usb": 2, "disk": 3}
+            return {
+                "status": "ok",
+                "isos": sorted(isos, key=lambda x: (rank_map.get(x["source"], 4), x["name"])),
+                "vault": vault_info,
+                "kexec_available": bool(shutil.which("kexec")),
+                "total_ram_mb": total_ram_mb,
+                "recommend_ram_boot": total_ram_mb >= 5500,
+            }
+
+        elif endpoint == "usb_devices":
+            target_root, _, root_dev, _, _, _ = resolve_target_context(auto_mount=True)
+            devices = []
+            try:
+                out = subprocess.check_output(
+                    ["lsblk", "-J", "-b", "-o", "NAME,PATH,PKNAME,TYPE,FSTYPE,SIZE,LABEL,UUID,RM,HOTPLUG,TRAN,MOUNTPOINT,MOUNTPOINTS,MODEL,PARTTYPE"],
+                    text=True,
+                    stderr=subprocess.DEVNULL,
+                )
+                raw = json.loads(out)
+                allowed_fs = {"vfat", "fat", "exfat", "ntfs", "ntfs3", "ext4", "ext3", "btrfs", "xfs", "iso9660", "udf"}
+                esp_guid = "c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
+                root_pk = ""
+                if root_dev:
+                    try:
+                        root_pk = subprocess.check_output(["lsblk", "-no", "PKNAME", root_dev], text=True, stderr=subprocess.DEVNULL).strip().splitlines()[0]
+                    except Exception:
+                        root_pk = ""
+
+                def walk_usb(nodes, parent_tran="", parent_rm=False, parent_hot=False, parent_model="", parent_name=""):
+                    for n in nodes or []:
+                        nname = n.get("name") or ""
+                        if nname.startswith(("loop", "zram", "fd")):
+                            continue
+                        npath = n.get("path") or f"/dev/{nname}"
+                        ntype = n.get("type") or ""
+                        nfs = (n.get("fstype") or "").lower()
+                        nlabel = (n.get("label") or "").strip()
+                        parttype = (n.get("parttype") or "").strip().lower()
+                        tran = (n.get("tran") or parent_tran or "").lower()
+                        rm = bool(n.get("rm")) or parent_rm
+                        hot = bool(n.get("hotplug")) or parent_hot
+                        model = (n.get("model") or parent_model or "").strip()
+                        pk = n.get("pkname") or parent_name
+                        mps = [m for m in (n.get("mountpoints") or []) if m]
+                        if not mps and n.get("mountpoint"):
+                            mps = [n["mountpoint"]]
+
+                        if nlabel == "BLAZE_REC":
+                            continue
+
+                        is_removable_or_secondary = (
+                            tran == "usb"
+                            or rm
+                            or hot
+                            or ntype == "rom"
+                            or (pk and root_pk and pk != root_pk)
+                            or (not root_pk and ntype in ("part", "rom"))
+                        )
+                        is_system_boot_part = (
+                            not (tran == "usb" or rm or hot or ntype == "rom")
+                            and (
+                                parttype == esp_guid
+                                or any(m in ("/boot", "/boot/efi", f"{target_root}/boot", f"{target_root}/boot/efi", "/run/initramfs/live") for m in mps)
+                            )
+                        )
+                        if nfs in allowed_fs and (ntype in ("part", "rom") or (ntype == "disk" and not n.get("children"))) and not is_system_boot_part:
+                            sz_bytes = int(n.get("size") or 0)
+                            sz_gb = round(sz_bytes / (1024 ** 3), 2) if sz_bytes else 0
+                            is_live_media = nfs in ("iso9660", "udf")
+                            if ntype == "rom":
+                                badge = "Kurulum Medyası (DVD/ISO)"
+                            elif tran == "usb" and is_live_media:
+                                badge = "Canlı USB Medyası (ISO)"
+                            elif tran == "usb" or rm or hot:
+                                badge = "USB Bellek"
+                            elif is_removable_or_secondary:
+                                badge = "Harici / İkincil Disk"
+                            else:
+                                badge = "Dahili Veri Bölümü"
+                            devices.append({
+                                "device": npath,
+                                "label": nlabel or os.path.basename(npath),
+                                "fstype": nfs,
+                                "size_gb": sz_gb,
+                                "model": model or badge,
+                                "badge": badge,
+                                "kind": "optical" if ntype == "rom" else ("usb" if (tran == "usb" or rm or hot) else "disk"),
+                                "is_live_media": is_live_media,
+                                "media_ref": f"media://{npath}" if is_live_media else "",
+                                "is_external": bool(ntype == "rom" or tran == "usb" or rm or hot or (pk and root_pk and pk != root_pk)),
+                                "mountpoint": mps[0] if mps else "",
                             })
+                        if n.get("children"):
+                            walk_usb(n["children"], tran, rm, hot, model, nname if ntype == "disk" else pk)
+
+                walk_usb(raw.get("blockdevices", []))
+                devices.sort(key=lambda d: (not d["is_external"], d["device"]))
+            except Exception as e:
+                return {"status": "error", "message": str(e)}
+            return {"status": "ok", "devices": devices}
+
+        elif endpoint == "usb_browse":
+            dev = (data.get("device") or "").strip()
+            subpath = (data.get("subpath") or "").strip().lstrip("/")
+            if not dev or not re.fullmatch(r"/dev/[A-Za-z0-9._-]+", dev):
+                return {"status": "error", "message": "Geçerli bir USB / disk bölümü seçilmedi."}
+            mp, err = ensure_usb_mounted_readonly(dev)
+            if not mp:
+                return {"status": "error", "message": err}
+            mp_real = os.path.realpath(mp)
+            target_dir = os.path.realpath(os.path.join(mp_real, subpath)) if subpath else mp_real
+            if os.path.commonpath([mp_real, target_dir]) != mp_real or not os.path.isdir(target_dir):
+                return {"status": "error", "message": "Geçersiz dizin yolu."}
+
+            rel_cur = "" if target_dir == mp_real else os.path.relpath(target_dir, mp_real)
+            entries = []
+            try:
+                with os.scandir(target_dir) as it:
+                    for e in it:
+                        if e.name.startswith(".") and e.name not in (".blaze-isos",):
+                            continue
+                        try:
+                            if e.is_dir(follow_symlinks=False):
+                                r_p = e.name if not rel_cur else f"{rel_cur}/{e.name}"
+                                entries.append({
+                                    "type": "dir",
+                                    "name": e.name,
+                                    "subpath": r_p,
+                                })
+                            elif e.is_file(follow_symlinks=True) and e.name.lower().endswith(".iso"):
+                                st = e.stat()
+                                r_p = e.name if not rel_cur else f"{rel_cur}/{e.name}"
+                                entries.append({
+                                    "type": "iso",
+                                    "name": e.name,
+                                    "subpath": r_p,
+                                    "full_path": os.path.realpath(e.path),
+                                    "size_mb": int(st.st_size / (1024 * 1024)),
+                                    "size_bytes": st.st_size,
+                                })
                         except Exception:
                             pass
-            return {"status": "ok", "isos": sorted(isos, key=lambda x: x["name"])}
+                entries.sort(key=lambda x: (0 if x["type"] == "dir" else 1, x["name"].lower()))
+            except Exception as e:
+                return {"status": "error", "message": f"Dizin okunamadı: {e}"}
+
+            parent_sub = ""
+            if rel_cur:
+                dn = os.path.dirname(rel_cur)
+                parent_sub = "" if dn == "." else dn
+            return {
+                "status": "ok",
+                "device": dev,
+                "mountpoint": mp_real,
+                "current_subpath": rel_cur,
+                "parent_subpath": parent_sub,
+                "entries": entries,
+            }
+
+        elif endpoint == "iso_targets":
+            target_root, _, root_dev, _, _, is_live_ram_only = resolve_target_context(auto_mount=True)
+            remount_filesystems_rw()
+            targets = []
+            seen_devs = set()
+
+            def add_target(dir_path, title):
+                parent_probe = dir_path
+                while parent_probe != "/" and not os.path.exists(parent_probe):
+                    parent_probe = os.path.dirname(parent_probe)
+                try:
+                    fm = subprocess.check_output(
+                        ["findmnt", "-n", "-P", "-o", "SOURCE,FSTYPE,TARGET", "--target", parent_probe],
+                        text=True,
+                        stderr=subprocess.DEVNULL,
+                    ).strip()
+                    pairs = dict(re.findall(r'([A-Z]+)="([^"]*)"', fm))
+                    fstype = pairs.get("FSTYPE", "")
+                    src = strip_btrfs_source(pairs.get("SOURCE", ""))
+                    if fstype in ("overlay", "tmpfs", "rootfs", "iso9660", "squashfs") or is_protected_recovery_device(src):
+                        return
+                    key = (src, dir_path)
+                    if key in seen_devs:
+                        return
+                    seen_devs.add(key)
+                    st = os.statvfs(parent_probe)
+                    free_mb = int((st.f_bavail * st.f_frsize) / (1024 * 1024))
+                    targets.append({
+                        "dest_dir": dir_path,
+                        "label": f"{title} ({fstype}, Boş: {round(free_mb / 1024, 1)} GB)",
+                        "free_mb": free_mb,
+                        "device": src,
+                        "fstype": fstype,
+                    })
+                except Exception:
+                    pass
+
+            if not is_live_ram_only:
+                home_base = target_join(target_root, "/home")
+                if os.path.isdir(home_base):
+                    add_target(os.path.join(home_base, ".blaze-isos"), "Kullanıcı Veri Bölümü (/home/.blaze-isos — Önerilen)")
+                add_target(target_join(target_root, "/.blaze-isos"), "Sistem Kök Bölümü (/.blaze-isos)")
+
+            # Also discover any other internal ext4/btrfs/xfs partition (useful if OS root was wiped or unpartitioned)
+            for b in _parse_blkid_export():
+                bdev = b.get("DEVNAME", "")
+                bfs = b.get("TYPE", "")
+                blbl = b.get("LABEL", "")
+                if bfs not in ("btrfs", "ext4", "xfs") or blbl in ("Blaze-SE-5", "BLAZE_REC") or bdev.startswith("/dev/loop"):
+                    continue
+                try:
+                    rm_flag = subprocess.check_output(["lsblk", "-dno", "RM,TRAN", bdev], text=True, stderr=subprocess.DEVNULL).strip().lower()
+                    if "1" in rm_flag.split()[:1] or "usb" in rm_flag:
+                        continue
+                    mps = [m.strip() for m in subprocess.check_output(["lsblk", "-no", "MOUNTPOINTS", bdev], text=True, stderr=subprocess.DEVNULL).splitlines() if m.strip()]
+                    if not mps:
+                        auto_mp = f"/mnt/bere_iso_store_{os.path.basename(bdev)}"
+                        os.makedirs(auto_mp, exist_ok=True)
+                        if subprocess.run(["mount", bdev, auto_mp], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+                            mps = [auto_mp]
+                    if mps and mps[0] not in ("/boot", f"{target_root}/boot", "/run/initramfs/live"):
+                        cand_dir = os.path.join(mps[0], "home/.blaze-isos") if os.path.isdir(os.path.join(mps[0], "home")) else os.path.join(mps[0], ".blaze-isos")
+                        add_target(cand_dir, f"Disk Bölümü {bdev} ({blbl or bfs})")
+                except Exception:
+                    pass
+
+            return {"status": "ok", "targets": targets}
+
+        elif endpoint == "iso_pull":
+            src_path = (data.get("src_path") or "").strip()
+            dest_dir = (data.get("dest_dir") or "").strip()
+            is_media_src = src_path.startswith("media://")
+            media_dev = src_path[len("media://"):].strip() if is_media_src else ""
+            if is_media_src:
+                if not re.fullmatch(r"/dev/[A-Za-z0-9._-]+", media_dev) or not os.path.exists(media_dev) or is_protected_recovery_device(media_dev):
+                    return {"status": "error", "message": "Geçerli bir kaynak kurulum medyası seçilmedi."}
+            elif not src_path or not os.path.isfile(src_path) or not src_path.lower().endswith(".iso"):
+                return {"status": "error", "message": "Geçerli bir kaynak ISO dosyası seçilmedi."}
+            if not dest_dir or any(ch in dest_dir for ch in ('"', "'", "$", "`", "\n", "\r", ";", "|", "&")) or ".." in dest_dir:
+                return {"status": "error", "message": "Geçersiz hedef dizin."}
+
+            with ISO_PULL_LOCK:
+                if ISO_PULL_STATE["active"]:
+                    return {"status": "error", "message": "Devam eden bir ISO aktarımı zaten var."}
+
+            remount_filesystems_rw()
+            try:
+                if is_media_src:
+                    src_real = media_dev
+                    total_sz = _get_block_size_bytes(media_dev)
+                    if total_sz <= 0:
+                        return {"status": "error", "message": f"{media_dev} boyutu okunamadı."}
+                    cd_lbl = ""
+                    try:
+                        cd_lbl = subprocess.check_output(["blkid", "-p", "-s", "LABEL", "-o", "value", media_dev], text=True, stderr=subprocess.DEVNULL).strip()
+                    except Exception:
+                        pass
+                    raw_name = cd_lbl or os.path.basename(media_dev)
+                else:
+                    src_real = os.path.realpath(src_path)
+                    total_sz = os.path.getsize(src_real)
+                    raw_name = os.path.basename(src_real)
+
+                os.makedirs(dest_dir, exist_ok=True)
+                fm = subprocess.check_output(
+                    ["findmnt", "-n", "-P", "-o", "SOURCE,FSTYPE", "--target", dest_dir],
+                    text=True,
+                    stderr=subprocess.DEVNULL,
+                ).strip()
+                pairs = dict(re.findall(r'([A-Z]+)="([^"]*)"', fm))
+                dest_fs = pairs.get("FSTYPE", "")
+                dest_dev = strip_btrfs_source(pairs.get("SOURCE", ""))
+                if dest_fs in ("overlay", "tmpfs", "rootfs", "iso9660") or is_protected_recovery_device(dest_dev):
+                    return {"status": "error", "message": "Seçilen hedef kalıcı ve yazılabilir bir dahili bölüm değil."}
+
+                st_vfs = os.statvfs(dest_dir)
+                free_bytes = st_vfs.f_bavail * st_vfs.f_frsize
+                if free_bytes < total_sz + (64 * 1024 * 1024):
+                    return {
+                        "status": "error",
+                        "message": f"Hedef bölümde yeterli boş alan yok (Gereken: {int(total_sz/(1024*1024)) + 64} MB, Boş: {int(free_bytes/(1024*1024))} MB).",
+                    }
+
+                safe_fn = re.sub(r"[^A-Za-z0-9._-]", "_", raw_name)
+                if not safe_fn.lower().endswith(".iso"):
+                    safe_fn += ".iso"
+                final_dest = os.path.join(dest_dir, safe_fn)
+                part_dest = os.path.join(dest_dir, f".{safe_fn}.part")
+
+                if not is_media_src and os.path.realpath(src_real) == os.path.realpath(final_dest):
+                    return {"status": "error", "message": "Kaynak ve hedef ISO zaten aynı dosya."}
+
+                with ISO_PULL_LOCK:
+                    ISO_PULL_STATE.update({
+                        "active": True,
+                        "cancel": False,
+                        "status": "copying",
+                        "filename": safe_fn,
+                        "src_path": src_path,
+                        "dest_path": final_dest,
+                        "bytes_done": 0,
+                        "bytes_total": total_sz,
+                        "percent": 0,
+                        "speed_mbps": 0.0,
+                        "message": f"{safe_fn} bilgisayara çekiliyor...",
+                    })
+
+                def copy_worker():
+                    t0 = time.monotonic()
+                    copied = 0
+                    try:
+                        with open(src_real, "rb") as rf, open(part_dest, "wb") as wf:
+                            while copied < total_sz:
+                                with ISO_PULL_LOCK:
+                                    if ISO_PULL_STATE["cancel"]:
+                                        raise InterruptedError("Kullanıcı tarafından iptal edildi.")
+                                to_read = min(4 * 1024 * 1024, total_sz - copied) if is_media_src else (4 * 1024 * 1024)
+                                buf = rf.read(to_read)
+                                if not buf:
+                                    break
+                                wf.write(buf)
+                                copied += len(buf)
+                                elapsed = max(0.05, time.monotonic() - t0)
+                                spd = round((copied / (1024 * 1024)) / elapsed, 1)
+                                pct = min(99, int((copied * 100) / max(1, total_sz)))
+                                with ISO_PULL_LOCK:
+                                    ISO_PULL_STATE["bytes_done"] = copied
+                                    ISO_PULL_STATE["percent"] = pct
+                                    ISO_PULL_STATE["speed_mbps"] = spd
+                            wf.flush()
+                            os.fsync(wf.fileno())
+
+                        with ISO_PULL_LOCK:
+                            ISO_PULL_STATE["status"] = "verifying"
+                            ISO_PULL_STATE["message"] = "Kopyalanan ISO bütünlüğü ve önyükleme yapısı doğrulanıyor..."
+
+                        if os.path.getsize(part_dest) != total_sz and not is_media_src:
+                            raise RuntimeError("Kopyalanan dosya boyutu kaynak ISO ile eşleşmiyor!")
+                        probe_info = inspect_iso_image(part_dest)
+                        if not probe_info["supported"] and not probe_info["cd_label"]:
+                            # Still check ISO9660 magic 'CD001' at 0x8001 for generic ISOs
+                            with open(part_dest, "rb") as vf:
+                                vf.seek(0x8001)
+                                if vf.read(5) != b"CD001":
+                                    raise RuntimeError("Kopyalanan dosya geçerli bir ISO9660 kalıbı değil!")
+
+                        os.replace(part_dest, final_dest)
+                        os.chmod(final_dest, 0o644)
+                        os.sync()
+                        with ISO_PULL_LOCK:
+                            ISO_PULL_STATE.update({
+                                "active": False,
+                                "status": "done",
+                                "bytes_done": total_sz,
+                                "percent": 100,
+                                "message": f"{safe_fn} başarıyla bilgisayara çekildi ve doğrulandı ({probe_info['distro_label']}).",
+                            })
+                    except InterruptedError as ie:
+                        try:
+                            if os.path.exists(part_dest):
+                                os.unlink(part_dest)
+                        except Exception:
+                            pass
+                        with ISO_PULL_LOCK:
+                            ISO_PULL_STATE.update({
+                                "active": False,
+                                "status": "cancelled",
+                                "message": str(ie),
+                            })
+                    except Exception as ex:
+                        try:
+                            if os.path.exists(part_dest):
+                                os.unlink(part_dest)
+                        except Exception:
+                            pass
+                        with ISO_PULL_LOCK:
+                            ISO_PULL_STATE.update({
+                                "active": False,
+                                "status": "error",
+                                "message": f"Aktarım hatası: {ex}",
+                            })
+
+                threading.Thread(target=copy_worker, daemon=True).start()
+                return {"status": "ok", "dest_path": final_dest, "filename": safe_fn}
+            except Exception as e:
+                with ISO_PULL_LOCK:
+                    ISO_PULL_STATE["active"] = False
+                return {"status": "error", "message": str(e)}
+
+        elif endpoint == "iso_pull_status":
+            with ISO_PULL_LOCK:
+                return {"status": "ok", **dict(ISO_PULL_STATE)}
+
+        elif endpoint == "iso_pull_cancel":
+            with ISO_PULL_LOCK:
+                if ISO_PULL_STATE["active"]:
+                    ISO_PULL_STATE["cancel"] = True
+                    return {"status": "ok", "message": "İptal isteği gönderildi."}
+            return {"status": "ok", "message": "Aktif aktarım yok."}
+
+        elif endpoint == "iso_delete":
+            ok_pw, err_pw = _require_action_password(data)
+            if not ok_pw:
+                return err_pw
+            iso_p = (data.get("path") or "").strip()
+            if not iso_p or not os.path.isfile(iso_p):
+                return {"status": "error", "message": "Silinecek ISO dosyası bulunamadı."}
+            rp = os.path.realpath(iso_p)
+            if "/.blaze-isos/" not in rp or not rp.lower().endswith(".iso"):
+                return {"status": "error", "message": "Güvenlik nedeniyle yalnızca .blaze-isos kasasındaki kalıplar buradan silinebilir."}
+            remount_filesystems_rw()
+            try:
+                os.unlink(rp)
+                return {"status": "ok", "message": f"{os.path.basename(rp)} silindi."}
+            except Exception as e:
+                return {"status": "error", "message": str(e)}
+
+        elif endpoint == "vault_status":
+            return {"status": "ok", **inspect_blaze_rec_vault(verify_hashes=False)}
+
+        elif endpoint == "vault_verify_and_boot":
+            ok_pw, err_pw = _require_action_password(data)
+            if not ok_pw:
+                return err_pw
+            profile = str(data.get("profile") or "install").strip().lower()
+            if profile not in ("live", "install", "safe_graphics", "check"):
+                profile = "install"
+            copy_to_ram = bool(data.get("copy_to_ram", False))
+            target_root, _, _, _, _, is_live_ram_only = resolve_target_context(auto_mount=True)
+            return _boot_blaze_rec_vault_kexec(target_root, is_live_ram_only, profile=profile, copy_to_ram=copy_to_ram)
+
+        elif endpoint == "iso_inspect":
+            iso_p = (data.get("path") or "").strip()
+            if not iso_p:
+                return {"status": "error", "message": "Geçerli bir ISO dosyası bulunamadı."}
+            if iso_p == "vault://BLAZE_REC":
+                vi = inspect_blaze_rec_vault(verify_hashes=False)
+                return {
+                    "status": "ok",
+                    "info": {
+                        "supported": bool(vi.get("present") and vi.get("full_os_embedded")),
+                        "distro_label": "Blaze SolarEvolution (BLAZE_REC Zırhlı Kasa)",
+                        "size_mb": vi.get("squashfs_mb") or 0,
+                        "cd_label": "BLAZE_REC",
+                    },
+                }
+            if iso_p.startswith("media://"):
+                info = inspect_iso_image(iso_p)
+                if not info["supported"]:
+                    return {"status": "error", "message": "Seçilen canlı medya incelenemedi."}
+                return {"status": "ok", "info": info}
+            if not os.path.isfile(iso_p):
+                return {"status": "error", "message": "Geçerli bir ISO dosyası bulunamadı."}
+            info = inspect_iso_image(os.path.realpath(iso_p))
+            return {"status": "ok", "info": info}
 
         elif endpoint in ("iso_boot", "boot_iso"):
             iso_path = data.get("path") or data.get("iso_path") or ""
@@ -517,46 +2161,156 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
             if any(ch in iso_path for ch in ('"', "'", "$", "`", "\n", "\r", "}", "{", ";", "|", "&")):
                 return {"status": "error", "message": "ISO dosya yolunda güvenlik açısından geçersiz karakterler var."}
 
-            if not os.path.isfile(iso_path):
+            profile = str(data.get("profile") or "live").strip().lower()
+            if profile not in ("live", "install", "safe_graphics", "check"):
+                profile = "live"
+            copy_to_ram = bool(data.get("copy_to_ram", False))
+            # Legacy callers without explicit `engine` keep GRUB loopback semantics; UI passes `auto`/`kexec`/`grub`
+            req_engine = str(data.get("engine") or "grub").strip().lower()
+            if req_engine not in ("auto", "kexec", "grub"):
+                req_engine = "grub"
+
+            target_root, _, _, _, _, is_live_ram_only = resolve_target_context(auto_mount=True)
+
+            if iso_path == "vault://BLAZE_REC":
+                if req_engine == "grub":
+                    return {
+                        "status": "error",
+                        "message": "Dahili zırhlı kasa imajı kexec motoruyla başlatılmalıdır.",
+                    }
+                return _boot_blaze_rec_vault_kexec(
+                    target_root,
+                    is_live_ram_only,
+                    profile=profile,
+                    copy_to_ram=copy_to_ram,
+                )
+
+            is_media_boot = iso_path.startswith("media://")
+            media_dev = iso_path[len("media://"):].strip() if is_media_boot else ""
+            if is_media_boot:
+                if not re.fullmatch(r"/dev/[A-Za-z0-9._-]+", media_dev) or not os.path.exists(media_dev):
+                    return {"status": "error", "message": "Geçerli bir kurulum medyası bulunamadı."}
+            elif not os.path.isfile(iso_path):
                 return {"status": "error", "message": "Gecerli bir ISO dosyasi bulunamadi."}
 
             try:
+                if is_media_boot:
+                    if req_engine == "grub":
+                        return {
+                            "status": "error",
+                            "message": "Doğrudan DVD/Canlı medya kexec motoruyla başlatılmalıdır (veya önce 'Bilgisayara Çek' ile diske kaydedin).",
+                        }
+                    media_mp, err_m = ensure_usb_mounted_readonly(media_dev)
+                    if not media_mp:
+                        return {"status": "error", "message": err_m or "Kurulum medyası bağlanamadı."}
+                    iso_info = inspect_iso_image(iso_path)
+                    if not iso_info["supported"]:
+                        return {"status": "error", "message": "Bu medya desteklenen bir Linux Live / Kurulum ortamı değil."}
+                    kernel_path = iso_info["kernel_path"]
+                    initrd_path = iso_info["initrd_path"]
+                    distro_family = iso_info["distro_family"]
+                    iso_label = iso_info["cd_label"]
+
+                    extra_flags = ["quiet"]
+                    if profile == "safe_graphics":
+                        extra_flags.extend(["nomodeset", "plymouth.enable=0"])
+                    else:
+                        extra_flags.append("rhgb")
+                    if profile == "check":
+                        extra_flags.append("rd.live.check" if distro_family == "fedora" else "integrity-check")
+                    if profile == "install" and distro_family == "fedora":
+                        extra_flags.append("blaze.autoinstaller=1")
+
+                    if distro_family == "fedora":
+                        if not iso_label:
+                            return {"status": "error", "message": "BlazeOS/Fedora canlı medya etiketi (CDLABEL) okunamadı."}
+                        ram_arg = " rd.live.ram=1" if copy_to_ram else ""
+                        kexec_kargs = f'root=live:CDLABEL={iso_label} rd.live.image{ram_arg} {" ".join(extra_flags)}'
+                    elif distro_family == "ubuntu":
+                        ram_arg = " toram" if copy_to_ram else ""
+                        inst_arg = " only-ubiquity" if profile == "install" else ""
+                        kexec_kargs = f'boot=casper{ram_arg}{inst_arg} {" ".join(extra_flags)} ---'
+                    elif distro_family == "arch":
+                        ram_arg = " copytoram=y" if copy_to_ram else ""
+                        lbl_karg = f" archisolabel={iso_label}" if iso_label else ""
+                        kexec_kargs = f'archisobasedir=arch{lbl_karg}{ram_arg} {" ".join(extra_flags)}'
+                    else:
+                        ram_arg = " toram" if copy_to_ram else ""
+                        kexec_kargs = f'boot=live{ram_arg} {" ".join(extra_flags)}'
+
+                    if not shutil.which("kexec"):
+                        return {"status": "error", "message": "kexec aracı bu ortamda yüklü değil."}
+                    kp = subprocess.run(
+                        [
+                            "kexec",
+                            "-l",
+                            media_mp + kernel_path,
+                            f"--initrd={media_mp + initrd_path}",
+                            f"--command-line={kexec_kargs}",
+                        ],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        timeout=25,
+                    )
+                    if kp.returncode != 0:
+                        return {"status": "error", "message": f"kexec yüklemesi başarısız oldu: {kp.stdout.strip() or 'çekirdek kilitli'}"}
+                    if not is_live_ram_only:
+                        clear_boot_triggers(target_root)
+                    os.sync()
+
+                    def do_media_kexec_boot():
+                        time.sleep(0.8)
+                        try:
+                            os.sync()
+                        except Exception:
+                            pass
+                        for u_mp in glob.glob("/run/bere_usb/*"):
+                            subprocess.run(["umount", "-l", u_mp], stderr=subprocess.DEVNULL)
+                        if os.path.isdir("/mnt/bere_target"):
+                            subprocess.run(["umount", "-R", "/mnt/bere_target"], stderr=subprocess.DEVNULL)
+                        if subprocess.run(["systemctl", "kexec"], stderr=subprocess.DEVNULL).returncode != 0:
+                            subprocess.run(["kexec", "-e"], stderr=subprocess.DEVNULL)
+
+                    threading.Thread(target=do_media_kexec_boot, daemon=True).start()
+                    return {
+                        "status": "ok",
+                        "engine_used": "kexec",
+                        "auto_transition": True,
+                        "distro": iso_info["distro_label"],
+                        "copy_to_ram": copy_to_ram,
+                        "message": f"kexec ile {iso_info['distro_label']} doğrudan medyadan başlatılıyor...",
+                    }
+
                 iso_path = os.path.realpath(iso_path)
                 if any(ch in iso_path for ch in ('"', "'", "$", "`", "\n", "\r", "}", "{", ";", "|", "&")):
                     return {"status": "error", "message": "ISO gerçek yolunda güvenlik açısından geçersiz karakterler var."}
 
-                def iso_has(path):
-                    check = subprocess.run(
-                        ["xorriso", "-indev", iso_path, "-ls", path],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.DEVNULL,
-                        text=True,
-                        timeout=20,
-                    )
-                    return check.returncode == 0 and path in check.stdout
+                iso_info = inspect_iso_image(iso_path)
+                if not iso_info["supported"]:
+                    return {"status": "error", "message": "Bu kalıp desteklenen bir Linux Live / Kurulum ISO dosyası değil."}
 
-                if iso_has("/boot/x86_64/loader/linux") and iso_has("/boot/x86_64/loader/initrd"):
-                    kernel_path = "/boot/x86_64/loader/linux"
-                    initrd_path = "/boot/x86_64/loader/initrd"
-                elif iso_has("/images/pxeboot/vmlinuz") and iso_has("/images/pxeboot/initrd.img"):
-                    kernel_path = "/images/pxeboot/vmlinuz"
-                    initrd_path = "/images/pxeboot/initrd.img"
-                else:
-                    return {"status": "error", "message": "Bu kalıp desteklenen bir Blaze/Fedora Live ISO değil."}
+                kernel_path = iso_info["kernel_path"]
+                initrd_path = iso_info["initrd_path"]
+                distro_family = iso_info["distro_family"]
+                iso_label = iso_info["cd_label"]
 
                 fm_out = subprocess.check_output(
-                    ["findmnt", "-n", "-P", "-o", "UUID,MOUNTPOINT,FSTYPE,FSROOT,SOURCE", "--target", iso_path],
+                    ["findmnt", "-n", "-P", "-o", "UUID,TARGET,FSTYPE,FSROOT,SOURCE", "--target", iso_path],
                     text=True,
                 ).strip()
                 fm_pairs = dict(re.findall(r'([A-Z]+)="([^"]*)"', fm_out))
                 uuid_out = fm_pairs.get("UUID", "").strip()
-                mount_point = fm_pairs.get("MOUNTPOINT", "").strip()
+                mount_point = fm_pairs.get("TARGET", "").strip()
                 fstype = fm_pairs.get("FSTYPE", "").strip()
                 fsroot = fm_pairs.get("FSROOT", "/").strip()
                 source_dev = strip_btrfs_source(fm_pairs.get("SOURCE", ""))
 
-                if not mount_point:
-                    return {"status": "error", "message": "ISO dosyasının bulunduğu dosya sistemi belirlenemedi."}
+                if not mount_point or fstype in ("overlay", "tmpfs", "rootfs"):
+                    return {
+                        "status": "error",
+                        "message": "ISO kalıbı kalıcı bir disk veya USB bölümünde değil (Canlı RAM alanında). Lütfen kalıcı bir diske kopyalayın.",
+                    }
                 if not uuid_out and source_dev:
                     uuid_out = subprocess.check_output(
                         ["blkid", "-s", "UUID", "-o", "value", source_dev], text=True
@@ -564,9 +2318,9 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
 
                 rel_path = "/" + os.path.relpath(iso_path, mount_point).lstrip("/")
                 if rel_path.startswith("/../") or not uuid_out:
-                    return {"status": "error", "message": "ISO için güvenli GRUB yolu üretilemedi."}
+                    return {"status": "error", "message": "ISO için güvenli bölüm yolu üretilemedi."}
 
-                # On Btrfs, GRUB accesses from top-level subvolid=5, so prepend FSROOT (e.g. /home or /root)
+                # On Btrfs, GRUB and dracut iso-scan access from top-level subvolid=5, so prepend FSROOT (e.g. /home or /root)
                 if fstype == "btrfs" and fsroot and fsroot != "/":
                     clean_fsroot = "/" + fsroot.strip("/")
                     if not rel_path.startswith(clean_fsroot + "/"):
@@ -575,64 +2329,221 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
                 def grub_escape(value):
                     return value.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$")
 
-                iso_label = subprocess.check_output(
-                    ["blkid", "-p", "-s", "LABEL", "-o", "value", iso_path], text=True
-                ).strip()
                 safe_path = grub_escape(rel_path)
                 safe_label = grub_escape(iso_label)
                 safe_name = re.sub(r'[^A-Za-z0-9._ -]', '_', os.path.basename(iso_path))
 
+                # Build distro-specific kernel arguments + profile + copy-to-RAM flags
+                extra_flags = ["quiet"]
+                if profile == "safe_graphics":
+                    extra_flags.extend(["nomodeset", "plymouth.enable=0"])
+                else:
+                    extra_flags.append("rhgb")
+                if profile == "check":
+                    extra_flags.append("rd.live.check" if distro_family == "fedora" else "integrity-check")
+                if profile == "install" and distro_family == "fedora":
+                    extra_flags.append("blaze.autoinstaller=1")
+
+                if distro_family == "fedora":
+                    if not iso_label:
+                        return {"status": "error", "message": "Fedora/BlazeOS ISO birim etiketi (CDLABEL) okunamadı."}
+                    ram_arg = " rd.live.ram=1" if copy_to_ram else ""
+                    grub_kargs = f'iso-scan/filename=$isofile root=live:CDLABEL={safe_label} rd.live.image{ram_arg} {" ".join(extra_flags)}'
+                    kexec_kargs = f'iso-scan/filename={rel_path} root=live:CDLABEL={iso_label} rd.live.image{ram_arg} {" ".join(extra_flags)}'
+                elif distro_family == "ubuntu":
+                    ram_arg = " toram" if copy_to_ram else ""
+                    inst_arg = " only-ubiquity" if profile == "install" else ""
+                    grub_kargs = f'boot=casper iso-scan/filename=$isofile{ram_arg}{inst_arg} {" ".join(extra_flags)} ---'
+                    kexec_kargs = f'boot=casper iso-scan/filename={rel_path}{ram_arg}{inst_arg} {" ".join(extra_flags)} ---'
+                elif distro_family == "arch":
+                    ram_arg = " copytoram=y" if copy_to_ram else ""
+                    lbl_arg = f" archisolabel={safe_label}" if iso_label else ""
+                    lbl_karg = f" archisolabel={iso_label}" if iso_label else ""
+                    grub_kargs = f'img_dev=/dev/disk/by-uuid/{uuid_out} img_loop=$isofile{lbl_arg}{ram_arg} {" ".join(extra_flags)}'
+                    kexec_kargs = f'img_dev=/dev/disk/by-uuid/{uuid_out} img_loop={rel_path}{lbl_karg}{ram_arg} {" ".join(extra_flags)}'
+                else:  # debian live-boot
+                    ram_arg = " toram" if copy_to_ram else ""
+                    grub_kargs = f'boot=live findiso=$isofile{ram_arg} {" ".join(extra_flags)}'
+                    kexec_kargs = f'boot=live findiso={rel_path}{ram_arg} {" ".join(extra_flags)}'
+
                 iso_entry = f"""# BlazeOS Loopback ISO Boot
 menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
+    if [ x$feature_all_video_module = xy ]; then
+        insmod all_video
+    else
+        insmod efi_gop
+        insmod efi_uga
+    fi
+    set gfxpayload=keep
+    insmod gzio
     insmod part_gpt
     insmod part_msdos
     insmod lvm
+    insmod fat
+    insmod exfat
+    insmod ntfs
+    insmod iso9660
+    insmod loopback
     insmod ext2
     insmod btrfs
     insmod xfs
     search --no-floppy --fs-uuid --set=root {uuid_out}
     set isofile="{safe_path}"
     loopback loop ($root)$isofile
-    linux (loop){kernel_path} iso-scan/filename=$isofile root=live:CDLABEL={safe_label} rd.live.image quiet
+    linux (loop){kernel_path} {grub_kargs}
     initrd (loop){initrd_path}
 }}
 """
-                target_cfg = "/boot/grub2/custom.cfg"
-                begin = "# BEGIN BERP ISO BOOT"
-                end = "# END BERP ISO BOOT"
-                previous = ""
-                if os.path.exists(target_cfg):
-                    with open(target_cfg, "r", encoding="utf-8") as f:
-                        previous = f.read()
-                previous = re.sub(
-                    rf"(?s){re.escape(begin)}.*?{re.escape(end)}\n?", "", previous
-                ).rstrip()
-                tmp_cfg = target_cfg + ".tmp"
-                with open(tmp_cfg, "w", encoding="utf-8") as f:
-                    if previous:
-                        f.write(previous + "\n\n")
-                    f.write(f"{begin}\n{iso_entry}{end}\n")
-                os.chmod(tmp_cfg, 0o600)
-                os.replace(tmp_cfg, target_cfg)
+                grub_configured = False
+                grub_err = ""
+                if not is_live_ram_only:
+                    try:
+                        remount_filesystems_rw()
+                        grub2_dir = target_join(target_root, "/boot/grub2")
+                        os.makedirs(grub2_dir, exist_ok=True)
+                        target_cfg = os.path.join(grub2_dir, "custom.cfg")
+                        begin = "# BEGIN BERP ISO BOOT"
+                        end = "# END BERP ISO BOOT"
+                        previous = ""
+                        if os.path.exists(target_cfg):
+                            with open(target_cfg, "r", encoding="utf-8") as f:
+                                previous = f.read()
+                        previous = re.sub(
+                            rf"(?s){re.escape(begin)}.*?{re.escape(end)}\n?", "", previous
+                        ).rstrip()
+                        tmp_cfg = target_cfg + ".tmp"
+                        with open(tmp_cfg, "w", encoding="utf-8") as f:
+                            if previous:
+                                f.write(previous + "\n\n")
+                            f.write(f"{begin}\n{iso_entry}{end}\n")
+                        os.chmod(tmp_cfg, 0o600)
+                        os.replace(tmp_cfg, target_cfg)
 
-                if shutil.which("grub2-reboot"):
-                    subprocess.run(["grub2-reboot", "blaze_iso_boot"], check=True)
-                else:
-                    return {"status": "error", "message": "grub2-reboot bulunamadı."}
+                        main_grub_cfg = os.path.join(grub2_dir, "grub.cfg")
+                        if os.path.isfile(main_grub_cfg):
+                            with open(main_grub_cfg, "r", encoding="utf-8", errors="replace") as f:
+                                gtxt = f.read()
+                            changed_g = False
+                            if "next_entry" not in gtxt:
+                                env_hook = (
+                                    "if [ -s $prefix/grubenv ]; then\n"
+                                    "  load_env\n"
+                                    "fi\n"
+                                    "if [ \"${next_entry}\" ] ; then\n"
+                                    "   set default=\"${next_entry}\"\n"
+                                    "   set next_entry=\n"
+                                    "   save_env next_entry\n"
+                                    "fi\n\n"
+                                )
+                                gtxt = env_hook + gtxt
+                                changed_g = True
+                            if "custom.cfg" not in gtxt:
+                                gtxt = gtxt.rstrip() + "\n\nif [ -f $prefix/custom.cfg ]; then\n  source $prefix/custom.cfg\nfi\n"
+                                changed_g = True
+                            if changed_g:
+                                with open(main_grub_cfg, "w", encoding="utf-8") as f:
+                                    f.write(gtxt)
 
-                clear_boot_triggers()
-                return {"status": "ok", "message": "ISO baslatma yapilandirildi."}
+                        grubenv_path = os.path.join(grub2_dir, "grubenv")
+                        if shutil.which("grub2-editenv"):
+                            if not os.path.exists(grubenv_path):
+                                subprocess.run(["grub2-editenv", grubenv_path, "create"], check=True)
+                            subprocess.run(["grub2-editenv", grubenv_path, "set", "next_entry=blaze_iso_boot"], check=True)
+                            grub_configured = True
+                        elif target_root == "/" and shutil.which("grub2-reboot"):
+                            subprocess.run(["grub2-reboot", "blaze_iso_boot"], check=True)
+                            grub_configured = True
+                    except Exception as ge:
+                        grub_err = str(ge)
+
+                # Direct kexec engine: boots immediately without relying on GRUB/UEFI USB drivers (works on Limine & Hard-Reset systems!)
+                if req_engine in ("kexec", "auto") and shutil.which("kexec"):
+                    k_loop = tempfile.mkdtemp(prefix="bere-kexec-iso-")
+                    k_mounted = False
+                    kexec_loaded = False
+                    kexec_err = ""
+                    try:
+                        if subprocess.run(["mount", "-o", "loop,ro", iso_path, k_loop], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15).returncode == 0:
+                            k_mounted = True
+                            kp = subprocess.run(
+                                [
+                                    "kexec",
+                                    "-l",
+                                    k_loop + kernel_path,
+                                    f"--initrd={k_loop + initrd_path}",
+                                    f"--command-line={kexec_kargs}",
+                                ],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT,
+                                text=True,
+                                timeout=20,
+                            )
+                            if kp.returncode == 0:
+                                kexec_loaded = True
+                            else:
+                                kexec_err = kp.stdout.strip()
+                    finally:
+                        if k_mounted:
+                            subprocess.run(["umount", "-l", k_loop], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        shutil.rmtree(k_loop, ignore_errors=True)
+
+                    if kexec_loaded:
+                        if not is_live_ram_only:
+                            clear_boot_triggers(target_root)
+                        os.sync()
+
+                        def do_kexec_boot():
+                            time.sleep(0.8)
+                            try:
+                                os.sync()
+                            except Exception:
+                                pass
+                            for u_mp in glob.glob("/run/bere_usb/*"):
+                                subprocess.run(["umount", "-l", u_mp], stderr=subprocess.DEVNULL)
+                            if os.path.isdir("/mnt/bere_target"):
+                                subprocess.run(["umount", "-R", "/mnt/bere_target"], stderr=subprocess.DEVNULL)
+                            if subprocess.run(["systemctl", "kexec"], stderr=subprocess.DEVNULL).returncode != 0:
+                                subprocess.run(["kexec", "-e"], stderr=subprocess.DEVNULL)
+
+                        threading.Thread(target=do_kexec_boot, daemon=True).start()
+                        return {
+                            "status": "ok",
+                            "engine_used": "kexec",
+                            "auto_transition": True,
+                            "distro": iso_info["distro_label"],
+                            "copy_to_ram": copy_to_ram,
+                            "message": f"kexec ile {iso_info['distro_label']} belleğe yüklendi; anında geçiş yapılıyor...",
+                        }
+                    elif req_engine == "kexec":
+                        return {"status": "error", "message": f"kexec yüklemesi başarısız oldu: {kexec_err or 'çekirdek kilitli'}"}
+
+                if not grub_configured:
+                    return {
+                        "status": "error",
+                        "message": grub_err or "Kurulu bir önyükleme bölümü (/boot/grub2) bulunamadı; bu ortamda 'kexec Hızlı Geçiş' motorunu kullanın.",
+                    }
+
+                clear_boot_triggers(target_root)
+                os.sync()
+                return {
+                    "status": "ok",
+                    "engine_used": "grub",
+                    "auto_transition": False,
+                    "distro": iso_info["distro_label"],
+                    "copy_to_ram": copy_to_ram,
+                    "message": "ISO başlatma yapılandırıldı (next_entry=blaze_iso_boot).",
+                }
             except Exception as e:
                 return {"status": "error", "message": str(e)}
 
         elif endpoint == "snapshots":
             snapshots = []
             seen_realpaths = set()
-            _, _, active_fsroot, _ = detect_root_info()
+            target_root, is_btrfs, _, active_fsroot, _, _ = resolve_target_context(auto_mount=True)
             fsroot_prefix = active_fsroot.strip("/") + "/" if active_fsroot.strip("/") else ""
 
-            def add_snapshot_candidate(raw_path):
-                norm = "/" + raw_path.lstrip("/")
+            def add_snapshot_candidate(logical_path):
+                norm = "/" + logical_path.lstrip("/")
                 # Never offer /home snapshots or container subvolumes as root rollback targets
                 if (
                     norm in ("/.snapshots", "/.blaze-snapshots", "/home", "/home/.snapshots")
@@ -640,12 +2551,13 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                     or norm.endswith("_home")
                 ):
                     return
-                canon = os.path.realpath(norm) if os.path.exists(norm) else norm
+                disk_p = target_join(target_root, norm)
+                canon = os.path.realpath(disk_p) if os.path.exists(disk_p) else norm
                 if canon in seen_realpaths:
                     return
                 seen_realpaths.add(canon)
                 try:
-                    mtime = os.path.getmtime(norm) if os.path.exists(norm) else time.time()
+                    mtime = os.path.getmtime(disk_p) if os.path.exists(disk_p) else time.time()
                     date_str = time.strftime("%Y-%m-%d %H:%M", time.localtime(mtime))
                 except Exception:
                     date_str = time.strftime("%Y-%m-%d %H:%M")
@@ -655,29 +2567,31 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                     "date": date_str,
                 })
 
-            try:
-                out = subprocess.check_output(
-                    ["btrfs", "subvolume", "list", "/"], stderr=subprocess.DEVNULL, text=True
-                )
-                for line in out.splitlines():
-                    if "snapshots" in line or "backup" in line:
-                        parts = line.split("path ")
-                        if len(parts) > 1:
-                            sub_path = parts[1].strip().lstrip("/")
-                            if fsroot_prefix and sub_path.startswith(fsroot_prefix):
-                                sub_path = sub_path[len(fsroot_prefix):]
-                            if sub_path.startswith("home/"):
-                                continue
-                            add_snapshot_candidate("/" + sub_path)
-            except Exception:
-                pass
+            if is_btrfs:
+                try:
+                    out = subprocess.check_output(
+                        ["btrfs", "subvolume", "list", target_root], stderr=subprocess.DEVNULL, text=True
+                    )
+                    for line in out.splitlines():
+                        if "snapshots" in line or "backup" in line:
+                            parts = line.split("path ")
+                            if len(parts) > 1:
+                                sub_path = parts[1].strip().lstrip("/")
+                                if fsroot_prefix and sub_path.startswith(fsroot_prefix):
+                                    sub_path = sub_path[len(fsroot_prefix):]
+                                if sub_path.startswith("home/"):
+                                    continue
+                                add_snapshot_candidate("/" + sub_path)
+                except Exception:
+                    pass
 
             for snap_dir in ["/.blaze-snapshots", "/.snapshots"]:
-                if os.path.isdir(snap_dir):
-                    for item in sorted(os.listdir(snap_dir)):
-                        full = os.path.join(snap_dir, item)
+                disk_sdir = target_join(target_root, snap_dir)
+                if os.path.isdir(disk_sdir):
+                    for item in sorted(os.listdir(disk_sdir)):
+                        full = os.path.join(disk_sdir, item)
                         if os.path.isdir(full):
-                            add_snapshot_candidate(full)
+                            add_snapshot_candidate(f"{snap_dir}/{item}")
 
             return {"status": "ok", "snapshots": snapshots}
 
@@ -691,22 +2605,38 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
             snap_root = data.get("root", True)
             snap_home = data.get("home", True)
 
+            target_root, is_btrfs, _, _, _, is_live_ram_only = resolve_target_context(auto_mount=True)
+            if is_live_ram_only or not is_btrfs:
+                return {
+                    "status": "error",
+                    "message": "Kurulu bir Btrfs kök dosya sistemi bulunamadı (Canlı ISO RAM ortamında Btrfs anlık görüntüsü alınamaz).",
+                }
+
+            remount_filesystems_rw()
             try:
                 if snap_root:
-                    os.makedirs("/.snapshots", exist_ok=True)
-                    target = f"/.snapshots/{name}_root"
-                    subprocess.run(["btrfs", "subvolume", "snapshot", "-r", "/", target], check=True)
-                if snap_home and os.path.exists("/home"):
-                    os.makedirs("/home/.snapshots", exist_ok=True)
-                    target_h = f"/home/.snapshots/{name}_home"
-                    subprocess.run(["btrfs", "subvolume", "snapshot", "-r", "/home", target_h], check=True)
+                    sdir = target_join(target_root, "/.snapshots")
+                    os.makedirs(sdir, exist_ok=True)
+                    target = os.path.join(sdir, f"{name}_root")
+                    subprocess.run(["btrfs", "subvolume", "snapshot", "-r", target_root, target], check=True)
+                home_dir = target_join(target_root, "/home")
+                if snap_home and os.path.exists(home_dir):
+                    hdir = os.path.join(home_dir, ".snapshots")
+                    os.makedirs(hdir, exist_ok=True)
+                    target_h = os.path.join(hdir, f"{name}_home")
+                    subprocess.run(["btrfs", "subvolume", "snapshot", "-r", home_dir, target_h], check=True)
                 return {"status": "ok", "message": "Anlik goruntu basariyla olusturuldu.", "name": name}
             except Exception as e:
                 return {"status": "error", "message": f"Snapshot alinamadi: {e}"}
 
         elif endpoint == "restore_snapshot":
+            ok_pw, err_pw = _require_action_password(data)
+            if not ok_pw:
+                return err_pw
             snap_path = data.get("snapshot")
-            if not snap_path or not os.path.exists(snap_path):
+            target_root, is_btrfs, root_dev, active_fsroot, _, _ = resolve_target_context(auto_mount=True)
+            disk_snap = target_join(target_root, snap_path) if snap_path else ""
+            if not snap_path or (not os.path.exists(disk_snap) and not is_btrfs):
                 return {"status": "error", "message": "Yedek yolu bulunamadi."}
 
             if "/home/.snapshots" in snap_path or snap_path.endswith("_home"):
@@ -717,14 +2647,22 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
 
             remount_filesystems_rw()
             try:
-                is_btrfs, root_dev, active_fsroot, _ = detect_root_info()
-
                 if is_btrfs and root_dev:
-                    ok, err_msg = perform_btrfs_root_rollback(root_dev, active_fsroot, snap_path)
+                    ok, err_msg = perform_btrfs_root_rollback(
+                        root_dev,
+                        active_fsroot,
+                        snap_path,
+                        restore_home=bool(data.get("restore_home", True)),
+                    )
                     if not ok:
                         return {"status": "error", "message": err_msg}
+                    # If mounted at /mnt/bere_target, refresh mount onto the newly created subvolumes
+                    if target_root == "/mnt/bere_target":
+                        subprocess.run(["umount", "-R", "/mnt/bere_target"], stderr=subprocess.DEVNULL)
+                        resolve_target_context(auto_mount=True)
                 else:
                     # Ext4 / XFS veya dizin bazlı snapshot rollback (rsync fallback)
+                    dst_root = "/" if target_root == "/" else f"{target_root.rstrip('/')}/"
                     rsync_cmd = [
                         "rsync",
                         "-aHAX",
@@ -737,14 +2675,14 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                         "--exclude=/mnt",
                         "--exclude=/tmp",
                         "--exclude=/var/tmp",
-                        f"{snap_path.rstrip('/')}/",
-                        "/",
+                        f"{disk_snap.rstrip('/')}/",
+                        dst_root,
                     ]
                     res = subprocess.run(rsync_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                     if res.returncode != 0:
                         return {"status": "error", "message": f"Rsync geri yükleme başarısız: {res.stdout}"}
 
-                clear_boot_triggers()
+                clear_boot_triggers(target_root)
                 return {
                     "status": "ok",
                     "message": f"{os.path.basename(snap_path)} başarıyla geri yüklendi. Sistem yeniden başlatılıyor...",
@@ -752,64 +2690,422 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
             except Exception as e:
                 return {"status": "error", "message": f"Geri yükleme hatası: {e}"}
 
+        elif endpoint == "delete_snapshot":
+            ok_pw, err_pw = _require_action_password(data)
+            if not ok_pw:
+                return err_pw
+            snap_path = (data.get("snapshot") or "").strip()
+            if not snap_path or not (snap_path.startswith("/.snapshots/") or snap_path.startswith("/.blaze-snapshots/")):
+                return {"status": "error", "message": "Silinecek geçerli bir yedek yolu belirtilmedi."}
+            if ".." in snap_path:
+                return {"status": "error", "message": "Geçersiz yedek yolu."}
+
+            target_root, is_btrfs, _, _, _, _ = resolve_target_context(auto_mount=True)
+            disk_snap = target_join(target_root, snap_path)
+            if not os.path.exists(disk_snap):
+                return {"status": "error", "message": "Yedek bulunamadı."}
+
+            remount_filesystems_rw()
+            try:
+                if is_btrfs:
+                    subprocess.run(["btrfs", "property", "set", "-ts", disk_snap, "ro", "false"], stderr=subprocess.DEVNULL)
+                    subprocess.run(["btrfs", "subvolume", "delete", disk_snap], check=True)
+                    base_n = os.path.basename(snap_path.rstrip("/"))
+                    if base_n.endswith("_root"):
+                        comp_home = target_join(target_root, f"/home/.snapshots/{base_n[:-5]}_home")
+                        if os.path.isdir(comp_home):
+                            subprocess.run(["btrfs", "property", "set", "-ts", comp_home, "ro", "false"], stderr=subprocess.DEVNULL)
+                            subprocess.run(["btrfs", "subvolume", "delete", comp_home], stderr=subprocess.DEVNULL)
+                else:
+                    shutil.rmtree(disk_snap)
+                return {"status": "ok", "message": f"{os.path.basename(snap_path)} silindi."}
+            except Exception as e:
+                return {"status": "error", "message": f"Yedek silinemedi: {e}"}
+
         elif endpoint == "partitions":
             parts = []
+            disks = []
             try:
                 out = subprocess.check_output(
-                    ["lsblk", "-J", "-o", "NAME,FSTYPE,SIZE,MOUNTPOINT,LABEL"], stderr=subprocess.DEVNULL
+                    ["lsblk", "-J", "-o", "NAME,PATH,PKNAME,PARTN,TYPE,FSTYPE,SIZE,MOUNTPOINT,MOUNTPOINTS,LABEL,MODEL,PTTYPE"],
+                    stderr=subprocess.DEVNULL,
                 ).decode("utf-8")
                 raw = json.loads(out)
 
-                def parse_devs(dev_list):
+                def collect_mounts(node):
+                    mps = [m for m in (node.get("mountpoints") or []) if m]
+                    if not mps and node.get("mountpoint"):
+                        mps = [node["mountpoint"]]
+                    return mps
+
+                def any_child_busy(node):
+                    if collect_mounts(node):
+                        return True
+                    for ch in node.get("children") or []:
+                        if any_child_busy(ch):
+                            return True
+                    return False
+
+                def parse_devs(dev_list, parent_name=""):
                     for d in dev_list:
+                        dname = d.get("name", "")
+                        if dname.startswith("fd"):
+                            continue
+                        dtype = d.get("type", "")
+                        dpath = d.get("path") or f"/dev/{dname}"
+                        mps = collect_mounts(d)
+                        mp_str = ", ".join(mps)
+                        is_vault = (d.get("label") or "").strip() == "BLAZE_REC"
+                        has_vault_child = any((ch.get("label") or "").strip() == "BLAZE_REC" for ch in (d.get("children") or []))
+                        if dtype == "disk" and not dname.startswith(("loop", "zram", "sr", "fd")):
+                            disks.append({
+                                "name": dpath,
+                                "size": d.get("size") or "-",
+                                "model": (d.get("model") or "Disk").strip(),
+                                "pttype": d.get("pttype") or "none",
+                                "busy": any_child_busy(d),
+                                "has_vault": has_vault_child,
+                            })
+                        protected = (
+                            is_vault
+                            or dname.startswith(("loop", "zram", "sr", "fd"))
+                            or dtype == "disk"
+                            or any(m in ("/", "/run/initramfs/live", "/run/rootfsbase", "[SWAP]") for m in mps)
+                        )
                         parts.append({
-                            "name": "/dev/" + d.get("name", ""),
-                            "fstype": d.get("fstype", ""),
-                            "size": d.get("size", ""),
-                            "mountpoint": d.get("mountpoint", ""),
+                            "name": dpath,
+                            "type": dtype,
+                            "pkname": f"/dev/{d.get('pkname')}" if d.get("pkname") else (f"/dev/{parent_name}" if parent_name else ""),
+                            "partn": str(d.get("partn") or ""),
+                            "fstype": d.get("fstype") or "",
+                            "label": d.get("label") or "",
+                            "size": d.get("size") or "",
+                            "mountpoint": "[ZIRHLI KURTARMA KASASI — SALT OKUNUR]" if is_vault else mp_str,
+                            "protected": protected,
+                            "vault_protected": is_vault,
                         })
-                        if "children" in d:
-                            parse_devs(d["children"])
+                        if d.get("children"):
+                            parse_devs(d["children"], dname)
 
                 parse_devs(raw.get("blockdevices", []))
             except Exception:
                 pass
 
-            smart_info = "SMART bilgisi okunamadı; sağlık durumu doğrulanmadı."
-            try:
-                nvme_check = subprocess.check_output(["nvme", "list"], stderr=subprocess.DEVNULL).decode("utf-8")
-                if nvme_check.strip():
-                    smart_info = nvme_check
-            except Exception:
-                pass
+            smart_lines = []
+            if shutil.which("nvme"):
+                try:
+                    nvme_check = subprocess.check_output(["nvme", "list"], stderr=subprocess.DEVNULL, text=True).strip()
+                    if nvme_check and len(nvme_check.splitlines()) > 2:
+                        smart_lines.append(nvme_check)
+                except Exception:
+                    pass
+            if shutil.which("smartctl"):
+                for dk in disks:
+                    try:
+                        sm = subprocess.run(
+                            ["smartctl", "-i", "-H", dk["name"]],
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            text=True,
+                            timeout=6,
+                        ).stdout
+                        kept = [
+                            ln.strip() for ln in sm.splitlines()
+                            if any(k in ln for k in ("Model", "Device", "Serial", "User Capacity", "SMART overall-health", "SMART Health Status", "SMART support"))
+                        ]
+                        if kept:
+                            smart_lines.append(f"[{dk['name']} — {dk['size']} | Tablo: {dk['pttype'].upper()}]\n  " + "\n  ".join(kept))
+                        else:
+                            smart_lines.append(f"[{dk['name']} — {dk['model']} ({dk['size']}) | Tablo: {dk['pttype'].upper()}] Sanal/KVM blok aygıtı (fiziksel SMART passthrough yok, G/Ç erişilebilir).")
+                    except Exception:
+                        pass
 
-            return {"status": "ok", "partitions": parts, "smart_info": smart_info}
+            smart_info = "\n\n".join(smart_lines) if smart_lines else "SMART bilgisi okunamadı; fiziksel disk bulunamadı."
+            return {"status": "ok", "disks": disks, "partitions": parts, "smart_info": smart_info}
 
         elif endpoint == "mount_toggle":
-            dev = data.get("device")
+            ok_pw, err_pw = _require_action_password(data)
+            if not ok_pw:
+                return err_pw
+            dev = (data.get("device") or "").strip()
             action = data.get("action")
-            if not dev:
-                return {"status": "error", "message": "Aygit secilmedi."}
+            if not dev or not re.fullmatch(r"/dev/[A-Za-z0-9._-]+", dev):
+                return {"status": "error", "message": "Geçerli bir aygıt seçilmedi."}
+            if is_protected_recovery_device(dev):
+                return {"status": "error", "message": "Güvenlik Kilidi: Zırhlı BLAZE_REC kurtarma kasası yazılamaz veya ayrılamaz."}
             try:
                 if action == "mount":
                     mp = f"/mnt/{os.path.basename(dev)}"
                     os.makedirs(mp, exist_ok=True)
-                    subprocess.run(["mount", dev, mp], check=True)
+                    p = subprocess.run(["mount", dev, mp], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    if p.returncode != 0:
+                        return {"status": "error", "message": p.stdout.strip() or "Bağlama başarısız."}
+                    return {"status": "ok", "mountpoint": mp, "output": f"{dev} -> {mp} bağlandı."}
                 else:
-                    subprocess.run(["umount", dev], check=True)
-                return {"status": "ok"}
+                    p = subprocess.run(["umount", dev], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    if p.returncode != 0:
+                        return {"status": "error", "message": p.stdout.strip() or "Ayırma başarısız."}
+                    return {"status": "ok", "output": f"{dev} ayrıldı."}
+            except Exception as e:
+                return {"status": "error", "message": str(e)}
+
+        elif endpoint == "disk_mklabel":
+            ok_pw, err_pw = _require_action_password(data)
+            if not ok_pw:
+                return err_pw
+            disk = (data.get("disk") or "").strip()
+            label_type = (data.get("label_type") or "gpt").strip().lower()
+            if not re.fullmatch(r"/dev/(sd[a-z]+|vd[a-z]+|nvme[0-9]+n[0-9]+)", disk) or not os.path.exists(disk):
+                return {"status": "error", "message": f"Geçersiz hedef disk: {disk}"}
+            if is_protected_recovery_device(disk):
+                return {"status": "error", "message": f"Güvenlik Kilidi: {disk} diski zırhlı BLAZE_REC kurtarma bölümünü barındırıyor; bölüm tablosu sıfırlanamaz!"}
+            if label_type not in ("gpt", "msdos"):
+                return {"status": "error", "message": "Bölüm tablosu türü yalnızca 'gpt' veya 'msdos' olabilir."}
+            mps = subprocess.check_output(["lsblk", "-n", "-o", "MOUNTPOINTS", disk], text=True, stderr=subprocess.DEVNULL).strip()
+            if mps:
+                return {"status": "error", "message": f"{disk} üzerinde bağlı bölüm(ler) var ({mps}). Önce ayırın."}
+            try:
+                subprocess.run(["wipefs", "-a", disk], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                p = subprocess.run(["parted", "-s", disk, "mklabel", label_type], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                if p.returncode != 0:
+                    return {"status": "error", "message": p.stdout.strip() or "Bölüm tablosu oluşturulamadı."}
+                subprocess.run(["partprobe", disk], stderr=subprocess.DEVNULL)
+                subprocess.run(["udevadm", "settle"], stderr=subprocess.DEVNULL)
+                return {"status": "ok", "output": f"{disk} üzerinde yeni {label_type.upper()} bölüm tablosu oluşturuldu."}
+            except Exception as e:
+                return {"status": "error", "message": str(e)}
+
+        elif endpoint == "part_create":
+            ok_pw, err_pw = _require_action_password(data)
+            if not ok_pw:
+                return err_pw
+            disk = (data.get("disk") or "").strip()
+            fstype = (data.get("fstype") or "ext4").strip().lower()
+            raw_size = str(data.get("size_mb") or "").strip()
+            label = re.sub(r"[^A-Za-z0-9_-]", "", str(data.get("label") or "").strip())[:16]
+            if label.upper() == "BLAZE_REC":
+                return {"status": "error", "message": "BLAZE_REC etiketi zırhlı sistem kurtarma kasası için ayrılmıştır."}
+            if not re.fullmatch(r"/dev/(sd[a-z]+|vd[a-z]+|nvme[0-9]+n[0-9]+)", disk) or not os.path.exists(disk):
+                return {"status": "error", "message": f"Geçersiz hedef disk: {disk}"}
+            if fstype not in ("btrfs", "ext4", "xfs", "vfat", "swap", "raw"):
+                return {"status": "error", "message": f"Desteklenmeyen dosya sistemi: {fstype}"}
+            size_mb = 0
+            if raw_size and raw_size not in ("0", "100%", "all", "full"):
+                if not raw_size.isdigit() or int(raw_size) < 16:
+                    return {"status": "error", "message": "Bölüm boyutu en az 16 MB olmalı veya tüm boş alan için boş bırakılmalıdır."}
+                size_mb = int(raw_size)
+
+            try:
+                # Ensure disk has a partition table (initialize GPT automatically if unlabelled)
+                pt = subprocess.check_output(["lsblk", "-dn", "-o", "PTTYPE", disk], text=True, stderr=subprocess.DEVNULL).strip().lower()
+                if not pt:
+                    subprocess.run(["parted", "-s", disk, "mklabel", "gpt"], check=True)
+                    subprocess.run(["udevadm", "settle"], stderr=subprocess.DEVNULL)
+                    pt = "gpt"
+
+                before_parts = set(
+                    ln.strip() for ln in subprocess.check_output(["lsblk", "-ln", "-o", "PATH,TYPE", disk], text=True).splitlines()
+                    if ln.strip().endswith(" part")
+                )
+
+                if pt == "gpt":
+                    if fstype == "vfat":
+                        p_type = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
+                    elif fstype == "swap":
+                        p_type = "0657FD6D-A4AB-43C4-84E5-0933C84B4F4F"
+                    else:
+                        p_type = "0FC63DAF-8483-4772-8E79-3D69D8477DE4"
+                else:
+                    p_type = "ef" if fstype == "vfat" else ("82" if fstype == "swap" else "83")
+
+                sfdisk_line = f"size={size_mb}M, type={p_type}\n" if size_mb > 0 else f"type={p_type}\n"
+                sf = subprocess.run(
+                    ["sfdisk", "--append", "--no-reread", disk],
+                    input=sfdisk_line,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                if sf.returncode != 0:
+                    return {"status": "error", "message": f"Bölüm oluşturulamadı: {sf.stdout.strip()}"}
+
+                subprocess.run(["partprobe", disk], stderr=subprocess.DEVNULL)
+                subprocess.run(["udevadm", "settle"], stderr=subprocess.DEVNULL)
+                time.sleep(0.3)
+
+                after_parts = set(
+                    ln.strip() for ln in subprocess.check_output(["lsblk", "-ln", "-o", "PATH,TYPE", disk], text=True).splitlines()
+                    if ln.strip().endswith(" part")
+                )
+                diff = sorted(after_parts - before_parts)
+                if not diff:
+                    return {"status": "error", "message": "Yeni bölüm düğümü algılanamadı."}
+                new_dev = diff[-1].split()[0]
+
+                fmt_log = ""
+                if fstype != "raw":
+                    subprocess.run(["wipefs", "-a", new_dev], stderr=subprocess.DEVNULL)
+                    if fstype == "btrfs":
+                        cmd = ["mkfs.btrfs", "-f"] + (["-L", label] if label else []) + [new_dev]
+                    elif fstype == "ext4":
+                        cmd = ["mkfs.ext4", "-F"] + (["-L", label] if label else []) + [new_dev]
+                    elif fstype == "xfs":
+                        cmd = ["mkfs.xfs", "-f"] + (["-L", label[:12]] if label else []) + [new_dev]
+                    elif fstype == "vfat":
+                        cmd = ["mkfs.vfat", "-F", "32"] + (["-n", label[:11].upper()] if label else []) + [new_dev]
+                    elif fstype == "swap":
+                        cmd = ["mkswap"] + (["-L", label] if label else []) + [new_dev]
+                    fp = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    if fp.returncode != 0:
+                        return {"status": "error", "message": f"{new_dev} oluşturuldu ancak biçimlendirilemedi: {fp.stdout}"}
+                    fmt_log = fp.stdout.strip()
+                    subprocess.run(["udevadm", "settle"], stderr=subprocess.DEVNULL)
+
+                return {
+                    "status": "ok",
+                    "device": new_dev,
+                    "output": f"Yeni bölüm oluşturuldu: {new_dev} ({fstype})\n{fmt_log}".strip(),
+                }
+            except Exception as e:
+                return {"status": "error", "message": str(e)}
+
+        elif endpoint == "part_format":
+            ok_pw, err_pw = _require_action_password(data)
+            if not ok_pw:
+                return err_pw
+            dev = (data.get("device") or "").strip()
+            fstype = (data.get("fstype") or "ext4").strip().lower()
+            label = re.sub(r"[^A-Za-z0-9_-]", "", str(data.get("label") or "").strip())[:16]
+            if label.upper() == "BLAZE_REC":
+                return {"status": "error", "message": "BLAZE_REC etiketi zırhlı sistem kurtarma kasası için ayrılmıştır."}
+            if not re.fullmatch(r"/dev/(sd[a-z]+[0-9]+|vd[a-z]+[0-9]+|nvme[0-9]+n[0-9]+p[0-9]+)", dev) or not os.path.exists(dev):
+                return {"status": "error", "message": f"Geçersiz bölüm aygıtı: {dev}"}
+            if is_protected_recovery_device(dev):
+                return {"status": "error", "message": f"Güvenlik Kilidi: {dev} zırhlı BLAZE_REC kurtarma bölümüdür; biçimlendirilemez!"}
+            if fstype not in ("btrfs", "ext4", "xfs", "vfat", "swap"):
+                return {"status": "error", "message": f"Desteklenmeyen dosya sistemi: {fstype}"}
+            mps = subprocess.check_output(["lsblk", "-n", "-o", "MOUNTPOINTS", dev], text=True, stderr=subprocess.DEVNULL).strip()
+            if mps:
+                return {"status": "error", "message": f"{dev} şu anda bağlı ({mps}). Biçimlendirmeden önce ayırın."}
+            try:
+                subprocess.run(["wipefs", "-a", dev], stderr=subprocess.DEVNULL)
+                if fstype == "btrfs":
+                    cmd = ["mkfs.btrfs", "-f"] + (["-L", label] if label else []) + [dev]
+                elif fstype == "ext4":
+                    cmd = ["mkfs.ext4", "-F"] + (["-L", label] if label else []) + [dev]
+                elif fstype == "xfs":
+                    cmd = ["mkfs.xfs", "-f"] + (["-L", label[:12]] if label else []) + [dev]
+                elif fstype == "vfat":
+                    cmd = ["mkfs.vfat", "-F", "32"] + (["-n", label[:11].upper()] if label else []) + [dev]
+                else:
+                    cmd = ["mkswap"] + (["-L", label] if label else []) + [dev]
+                fp = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                if fp.returncode != 0:
+                    return {"status": "error", "message": fp.stdout.strip() or "Biçimlendirme başarısız."}
+                subprocess.run(["udevadm", "settle"], stderr=subprocess.DEVNULL)
+                return {"status": "ok", "output": f"{dev} başarıyla {fstype} olarak biçimlendirildi.\n{fp.stdout.strip()}"}
+            except Exception as e:
+                return {"status": "error", "message": str(e)}
+
+        elif endpoint == "part_delete":
+            ok_pw, err_pw = _require_action_password(data)
+            if not ok_pw:
+                return err_pw
+            dev = (data.get("device") or "").strip()
+            if not re.fullmatch(r"/dev/(sd[a-z]+[0-9]+|vd[a-z]+[0-9]+|nvme[0-9]+n[0-9]+p[0-9]+)", dev) or not os.path.exists(dev):
+                return {"status": "error", "message": f"Geçersiz bölüm aygıtı: {dev}"}
+            if is_protected_recovery_device(dev):
+                return {"status": "error", "message": f"Güvenlik Kilidi: {dev} zırhlı BLAZE_REC kurtarma bölümüdür; silinemez!"}
+            mps = subprocess.check_output(["lsblk", "-n", "-o", "MOUNTPOINTS", dev], text=True, stderr=subprocess.DEVNULL).strip()
+            if mps:
+                return {"status": "error", "message": f"{dev} şu anda bağlı ({mps}). Silmeden önce ayırın."}
+            try:
+                pkname = subprocess.check_output(["lsblk", "-no", "PKNAME", dev], text=True).splitlines()[0].strip()
+                partn = subprocess.check_output(["lsblk", "-no", "PARTN", dev], text=True).splitlines()[0].strip()
+                if not pkname or not partn.isdigit():
+                    return {"status": "error", "message": f"{dev} için üst disk veya bölüm numarası çözümlenemedi."}
+                parent_disk = f"/dev/{pkname}"
+                subprocess.run(["wipefs", "-a", dev], stderr=subprocess.DEVNULL)
+                dp = subprocess.run(
+                    ["sfdisk", "--delete", "--no-reread", parent_disk, partn],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                if dp.returncode != 0:
+                    return {"status": "error", "message": dp.stdout.strip() or "Bölüm silinemedi."}
+                subprocess.run(["partprobe", parent_disk], stderr=subprocess.DEVNULL)
+                subprocess.run(["udevadm", "settle"], stderr=subprocess.DEVNULL)
+                return {"status": "ok", "output": f"{dev} ({parent_disk} bölüm #{partn}) silindi."}
+            except Exception as e:
+                return {"status": "error", "message": str(e)}
+
+        elif endpoint == "part_fsck":
+            ok_pw, err_pw = _require_action_password(data)
+            if not ok_pw:
+                return err_pw
+            dev = (data.get("device") or "").strip()
+            if not re.fullmatch(r"/dev/[A-Za-z0-9._-]+", dev) or not os.path.exists(dev):
+                return {"status": "error", "message": f"Geçersiz aygıt: {dev}"}
+            try:
+                fstype = subprocess.check_output(["lsblk", "-no", "FSTYPE", dev], text=True).splitlines()[0].strip().lower()
+                mps = [m.strip() for m in subprocess.check_output(["lsblk", "-no", "MOUNTPOINTS", dev], text=True).splitlines() if m.strip()]
+                if fstype == "btrfs":
+                    if mps:
+                        p1 = subprocess.run(["btrfs", "scrub", "start", "-B", mps[0]], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=60)
+                        p2 = subprocess.run(["btrfs", "device", "stats", mps[0]], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=15)
+                        ok = p1.returncode == 0 and p2.returncode == 0
+                        out = (p1.stdout + "\n" + p2.stdout).strip()
+                    else:
+                        p1 = subprocess.run(["btrfs", "check", "--readonly", dev], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=60)
+                        ok = p1.returncode == 0
+                        out = p1.stdout.strip()
+                elif fstype in ("ext4", "ext3", "ext2"):
+                    if mps:
+                        p1 = subprocess.run(["e2fsck", "-fn", dev], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=60)
+                        ok = p1.returncode in (0, 1)
+                        out = "[Bağlı bölüm — salt okunur denetim (-fn)]\n" + p1.stdout.strip()
+                    else:
+                        p1 = subprocess.run(["e2fsck", "-fy", dev], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=60)
+                        ok = p1.returncode in (0, 1, 2)
+                        out = p1.stdout.strip()
+                elif fstype in ("vfat", "fat", "msdos"):
+                    if mps:
+                        return {"status": "error", "message": f"{dev} bağlı ({mps[0]}); FAT32 onarımı için önce ayırın."}
+                    p1 = subprocess.run(["fsck.vfat", "-a", dev], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=60)
+                    ok = p1.returncode in (0, 1)
+                    out = p1.stdout.strip()
+                elif fstype == "xfs":
+                    if mps:
+                        p1 = subprocess.run(["xfs_repair", "-n", dev], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=60)
+                        ok = p1.returncode == 0
+                        out = "[Bağlı XFS — salt okunur denetim (-n)]\n" + p1.stdout.strip()
+                    else:
+                        p1 = subprocess.run(["xfs_repair", dev], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=60)
+                        ok = p1.returncode == 0
+                        out = p1.stdout.strip()
+                else:
+                    return {"status": "error", "message": f"{dev} üzerinde desteklenen bir dosya sistemi algılanamadı ({fstype or 'boş'})."}
+
+                if not ok:
+                    return {"status": "error", "output": out, "message": f"{dev} dosya sistemi denetimi hata bildirdi."}
+                return {"status": "ok", "output": f"[{dev} ({fstype}) Denetim/Onarım Tamamlandı]\n{out}"}
             except Exception as e:
                 return {"status": "error", "message": str(e)}
 
         elif endpoint == "wipe":
+            ok_pw, err_pw = _require_action_password(data)
+            if not ok_pw:
+                return err_pw
             cleared = []
             lang = data.get("lang", "tr")
+            target_root, is_btrfs, root_dev, active_fsroot, _, is_live_ram_only = resolve_target_context(auto_mount=True)
             remount_filesystems_rw()
             try:
                 if data.get("system_cache"):
-                    clean_path_contents("/var/cache/dnf")
-                    clean_path_contents("/var/cache/flatpak")
-                    clean_path_contents("/var/tmp")
+                    clean_path_contents(target_join(target_root, "/var/cache/dnf"))
+                    clean_path_contents(target_join(target_root, "/var/cache/flatpak"))
+                    clean_path_contents(target_join(target_root, "/var/tmp"))
                     cleared.append(
                         "Sistem ve paket önbellekleri temizlendi"
                         if lang == "tr"
@@ -817,17 +3113,17 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                     )
 
                 if data.get("user_cache"):
-                    for cache_dir in glob.glob("/home/*/.cache"):
+                    for cache_dir in glob.glob(target_join(target_root, "/home/*/.cache")):
                         clean_path_contents(cache_dir)
                     cleared.append(
                         "Kullanıcı önbellekleri temizlendi" if lang == "tr" else "User caches cleared"
                     )
 
                 if data.get("home"):
-                    wipe_human_users()
-                    clean_path_contents("/home")
-                    prepare_oobe_reset()
-                    clear_boot_triggers()
+                    wipe_human_users(target_root)
+                    clean_path_contents(target_join(target_root, "/home"))
+                    prepare_oobe_reset(target_root)
+                    clear_boot_triggers(target_root)
                     cleared.append(
                         "Kullanıcı hesapları silindi, ilk kurulum sihirbazı (OOBE) aktif edildi"
                         if lang == "tr"
@@ -835,14 +3131,23 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                     )
 
                 if data.get("factory"):
-                    wipe_human_users()
-                    clean_path_contents("/home")
-                    clean_path_contents("/var/log")
-                    clean_path_contents("/tmp")
-                    clean_path_contents("/var/cache/dnf")
-                    clean_path_contents("/var/cache/flatpak")
-                    prepare_oobe_reset()
-                    clear_boot_triggers()
+                    factory_btrfs_snap = None
+                    for cand in ("/.blaze-snapshots/factory-initial", "/.snapshots/factory-initial", "/@factory_reset", "/@golden_rootfs"):
+                        if os.path.exists(target_join(target_root, cand)):
+                            factory_btrfs_snap = cand
+                            break
+                    if factory_btrfs_snap and is_btrfs and root_dev:
+                        ok, err_msg = perform_btrfs_root_rollback(root_dev, active_fsroot, factory_btrfs_snap)
+                        if not ok:
+                            return {"status": "error", "message": err_msg}
+                    wipe_human_users(target_root)
+                    clean_path_contents(target_join(target_root, "/home"))
+                    clean_path_contents(target_join(target_root, "/var/log"))
+                    clean_path_contents(target_join(target_root, "/tmp"))
+                    clean_path_contents(target_join(target_root, "/var/cache/dnf"))
+                    clean_path_contents(target_join(target_root, "/var/cache/flatpak"))
+                    prepare_oobe_reset(target_root)
+                    clear_boot_triggers(target_root)
                     cleared.append(
                         "Sistem fabrika ayarlarına sıfırlandı"
                         if lang == "tr"
@@ -851,86 +3156,103 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
 
                 if data.get("hard_reset"):
                     confirm_code = (data.get("confirm") or "SIFIRLA").strip().upper()
-                    if confirm_code not in ("YES", "SIFIRLA", "SIFIRLA", "RESET"):
+                    if confirm_code not in ("YES", "SIFIRLA", "RESET"):
                         return {
                             "status": "error",
                             "message": "Onaylamak için 'SIFIRLA' veya 'YES' yazılmalıdır.",
                         }
 
-                    recovery_root = "/boot/bere/recovery.squashfs"
-                    recovery_initrd = "/boot/bere/recovery-initramfs.img"
-                    factory_btrfs_snap = None
-                    for cand in ("/.blaze-snapshots/factory-initial", "/.snapshots/factory-initial", "/@factory_reset", "/@golden_rootfs"):
-                        if os.path.exists(cand):
-                            factory_btrfs_snap = cand
-                            break
+                    if not is_live_ram_only:
+                        # Real Hard Reset on installed rootfs: preserve /boot (+ initramfs death guard)
+                        # and Btrfs /.snapshots & /.blaze-snapshots, then wipe the OS rootfs so the
+                        # next boot hits kernel/initramfs emergency -> BlazeOS Screen of Death!
+                        sync_bere_to_boot(target_root)
+                        ensure_target_initramfs_has_death_screen(target_root)
+                        clear_boot_triggers(target_root)
 
-                    if os.path.isfile(recovery_root) and os.path.isfile(recovery_initrd):
-                        sync_bere_to_boot()
-                        dirs_to_clean = ["/bin", "/sbin", "/lib", "/lib64", "/usr", "/var", "/etc", "/home", "/root", "/opt", "/srv", "/tmp"]
-                        for d in dirs_to_clean:
-                            clean_path_contents(d)
+                        dirs_to_clean = [
+                            "/bin", "/sbin", "/lib", "/lib64",
+                            "/usr", "/var", "/etc", "/home",
+                            "/root", "/opt", "/srv", "/tmp",
+                        ]
+                        wipe_roots = [target_root]
+                        extra_mp = None
+                        if is_btrfs and root_dev and target_root == "/" and ("_old_" in active_fsroot or "_pre_berp_" in active_fsroot):
+                            sep = "_old_" if "_old_" in active_fsroot else "_pre_berp_"
+                            orig_sub = active_fsroot.strip("/").split(sep)[0]
+                            extra_mp = tempfile.mkdtemp(prefix="bere-hr-subvol-")
+                            if subprocess.run(["mount", "-o", f"subvol={orig_sub}", root_dev, extra_mp], stderr=subprocess.DEVNULL).returncode == 0:
+                                wipe_roots.insert(0, extra_mp)
+                            else:
+                                shutil.rmtree(extra_mp, ignore_errors=True)
+                                extra_mp = None
+
+                        for wr in wipe_roots:
+                            for d in dirs_to_clean:
+                                dp = target_join(wr, d)
+                                if os.path.islink(dp):
+                                    try:
+                                        os.unlink(dp)
+                                    except Exception:
+                                        pass
+                                elif os.path.isdir(dp):
+                                    clean_path_contents(dp)
+                            if extra_mp and wr == extra_mp:
+                                try:
+                                    ctypes.CDLL(None).umount2(extra_mp.encode("utf-8"), 2)
+                                except Exception:
+                                    pass
+                                shutil.rmtree(extra_mp, ignore_errors=True)
+                                extra_mp = None
+
                         cleared.append(
-                            "Tam Sistem Temizliği (Hard Reset) tamamlandı"
+                            "Tam Sistem Temizliği (Hard Reset) tamamlandı; acil durum protokolüne geçiliyor"
                             if lang == "tr"
-                            else "Complete System Wipe (Hard Reset) finished"
+                            else "Complete System Wipe (Hard Reset) finished; entering emergency guard"
                         )
-                    elif factory_btrfs_snap:
-                        is_btrfs, root_dev, active_fsroot, _ = detect_root_info()
-                        if is_btrfs and root_dev:
-                            ok, err_msg = perform_btrfs_root_rollback(root_dev, active_fsroot, factory_btrfs_snap)
-                            if not ok:
-                                return {"status": "error", "message": err_msg}
-                        wipe_human_users()
-                        clean_path_contents("/home")
-                        prepare_oobe_reset()
-                        clear_boot_triggers()
-                        cleared.append(
-                            "Fabrika Btrfs anlık görüntüsü geri yüklendi ve OOBE hazırlandı"
-                            if lang == "tr"
-                            else "Factory Btrfs snapshot restored and OOBE prepared"
-                        )
+
+                        def trigger_recovery_reboot():
+                            time.sleep(1.5)
+                            try:
+                                os.sync()
+                            except Exception:
+                                pass
+                            if target_root != "/":
+                                subprocess.run(["umount", "-R", target_root], stderr=subprocess.DEVNULL)
+                            try:
+                                with open("/proc/sys/kernel/sysrq", "w") as f:
+                                    f.write("1\n")
+                                with open("/proc/sysrq-trigger", "w") as f:
+                                    f.write("b\n")
+                            except Exception:
+                                pass
+                            try:
+                                subprocess.run(["systemctl", "reboot", "--force"], timeout=5)
+                            except Exception:
+                                pass
+                            try:
+                                libc = ctypes.CDLL(None)
+                                libc.reboot(0x1234567)
+                            except Exception:
+                                pass
+
+                        threading.Thread(target=trigger_recovery_reboot, daemon=True).start()
                     else:
-                        # Clean full factory reset + OOBE restoration without destroying /usr
-                        wipe_human_users()
+                        # Diskless Live RAM session: wipe volatile user state and transition straight
+                        # to BlazeOS Screen of Death (emergency.target on tty1) instead of rebooting ISO.
                         clean_path_contents("/home")
-                        clean_path_contents("/var/log")
                         clean_path_contents("/tmp")
-                        clean_path_contents("/var/tmp")
-                        clean_path_contents("/var/cache/dnf")
-                        clean_path_contents("/var/cache/flatpak")
-                        prepare_oobe_reset()
-                        clear_boot_triggers()
                         cleared.append(
-                            "Tam Fabrika Sıfırlaması ve OOBE Kurulum Sihirbazı hazırlandı"
+                            "Canlı oturum verileri temizlendi; BlazeOS Acil Durum Ekranına geçiliyor"
                             if lang == "tr"
-                            else "Full Factory Reset and OOBE Setup Wizard prepared"
+                            else "Live session wiped; entering BlazeOS Emergency Guard"
                         )
 
-                    def trigger_recovery_reboot():
-                        time.sleep(2)
-                        try:
-                            os.sync()
-                        except Exception:
-                            pass
-                        try:
-                            subprocess.run(["systemctl", "reboot"], timeout=5)
-                        except Exception:
-                            pass
-                        try:
-                            with open("/proc/sys/kernel/sysrq", "w") as f:
-                                f.write("1\n")
-                            with open("/proc/sysrq-trigger", "w") as f:
-                                f.write("b\n")
-                        except Exception:
-                            pass
-                        try:
-                            libc = ctypes.CDLL(None)
-                            libc.reboot(0x1234567)
-                        except Exception:
-                            pass
+                        def trigger_live_death_screen():
+                            time.sleep(1.2)
+                            subprocess.run(["systemctl", "isolate", "emergency.target"], stderr=subprocess.DEVNULL)
 
-                    threading.Thread(target=trigger_recovery_reboot, daemon=True).start()
+                        threading.Thread(target=trigger_live_death_screen, daemon=True).start()
 
                 return {"status": "ok", "cleared": cleared}
             except Exception as e:
@@ -938,21 +3260,203 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
 
         elif endpoint == "boot_repair":
             target = data.get("target")
+            if target != "status":
+                ok_pw, err_pw = _require_action_password(data)
+                if not ok_pw:
+                    return err_pw
+            target_root, is_btrfs, root_dev, active_fsroot, _, is_live_ram_only = resolve_target_context(auto_mount=True)
+            if is_live_ram_only:
+                return {
+                    "status": "error",
+                    "message": "Kurulu bir BlazeOS diski bulunamadı; Canlı (Live) ISO RAM ortamında önyükleyici onarımı yapılamaz.",
+                }
+            remount_filesystems_rw()
+            ansi_re = re.compile(r"\x1b\[[0-9;]*m")
             p = None
             out_msg = ""
             try:
-                if target == "grub":
-                    cmd = ["grub2-mkconfig", "-o", "/boot/grub2/grub.cfg"]
-                    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-                    out_msg = p.stdout
-                    if shutil.which("gen_grub_cfgstub") and os.path.isdir("/boot/efi/EFI/fedora"):
-                        stub_p = subprocess.run(
-                            ["gen_grub_cfgstub", "/boot/grub2", "/boot/efi/EFI/fedora"],
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT,
-                            text=True,
+                if target == "status":
+                    bl_tool = "/usr/bin/blaze-bootloader"
+                    sysroot_arg = [] if target_root == "/" else [f"--sysroot={target_root}"]
+                    st_p = subprocess.run([bl_tool, "status"] + sysroot_arg, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    boot_dir = target_join(target_root, "/boot")
+                    kernels = sorted(os.path.basename(k) for k in glob.glob(os.path.join(boot_dir, "vmlinuz-*")))
+                    initrds = sorted(os.path.basename(i) for i in glob.glob(os.path.join(boot_dir, "initramfs-*.img")))
+                    extra = f"\n=== [/boot Çekirdek ve Initramfs Kalıpları] ===\n  Çekirdekler : {', '.join(kernels) or 'Yok'}\n  Initramfs   : {', '.join(initrds) or 'Yok'}"
+                    return {"status": "ok", "output": ansi_re.sub("", st_p.stdout).strip() + extra}
+
+                elif target == "grub":
+                    esp_mp = target_join(target_root, "/boot/efi")
+                    if os.path.exists("/sys/firmware/efi") and os.path.isdir(esp_mp):
+                        efi_fedora = os.path.join(esp_mp, "EFI/fedora")
+                        efi_boot = os.path.join(esp_mp, "EFI/BOOT")
+                        os.makedirs(efi_fedora, exist_ok=True)
+                        os.makedirs(efi_boot, exist_ok=True)
+                        # Restore missing shimx64.efi / grubx64.efi from Live or target /boot/efi
+                        for fn in ("shimx64.efi", "grubx64.efi", "mmx64.efi", "BOOTX64.CSV"):
+                            dst_f = os.path.join(efi_fedora, fn)
+                            if not os.path.isfile(dst_f) and os.path.isfile(f"/boot/efi/EFI/fedora/{fn}"):
+                                shutil.copy2(f"/boot/efi/EFI/fedora/{fn}", dst_f)
+                        for fn in ("fbx64.efi",):
+                            dst_f = os.path.join(efi_boot, fn)
+                            if not os.path.isfile(dst_f) and os.path.isfile(f"/boot/efi/EFI/BOOT/{fn}"):
+                                shutil.copy2(f"/boot/efi/EFI/BOOT/{fn}", dst_f)
+                        fb_efi = os.path.join(efi_boot, "BOOTX64.EFI")
+                        if os.path.isfile(os.path.join(efi_boot, "BOOTX64.EFI.grub-backup")):
+                            shutil.copy2(os.path.join(efi_boot, "BOOTX64.EFI.grub-backup"), fb_efi)
+                        elif os.path.isfile("/boot/efi/EFI/BOOT/BOOTX64.EFI"):
+                            shutil.copy2("/boot/efi/EFI/BOOT/BOOTX64.EFI", fb_efi)
+                        elif not os.path.isfile(fb_efi):
+                            for cand_src in (os.path.join(efi_fedora, "shimx64.efi"), os.path.join(efi_fedora, "grubx64.efi"), "/boot/efi/EFI/fedora/grubx64.efi"):
+                                if os.path.isfile(cand_src):
+                                    shutil.copy2(cand_src, fb_efi)
+                                    break
+                    else:
+                        # Legacy BIOS MBR stage1/stage2 installation
+                        boot_src = ""
+                        try:
+                            boot_src = strip_btrfs_source(
+                                subprocess.check_output(["findmnt", "-n", "-o", "SOURCE", target_join(target_root, "/boot")], text=True, stderr=subprocess.DEVNULL).strip()
+                            )
+                        except Exception:
+                            boot_src = root_dev
+                        if boot_src:
+                            pk = subprocess.check_output(["lsblk", "-no", "PKNAME", boot_src], text=True, stderr=subprocess.DEVNULL).splitlines()[0].strip()
+                            if pk and os.path.exists(f"/dev/{pk}"):
+                                gi_p = run_in_target(target_root, ["grub2-install", "--target=i386-pc", f"/dev/{pk}"])
+                                out_msg += gi_p.stdout + "\n"
+
+                    # Repair / regenerate BootLoaderSpec (/boot/loader/entries/*.conf) entries
+                    boot_dir = target_join(target_root, "/boot")
+                    bls_dir = os.path.join(boot_dir, "loader/entries")
+                    os.makedirs(bls_dir, exist_ok=True)
+                    os.makedirs(target_join(target_root, "/boot/grub2"), exist_ok=True)
+                    try:
+                        root_uuid = ""
+                        if root_dev:
+                            root_uuid = subprocess.check_output(
+                                ["blkid", "-s", "UUID", "-o", "value", root_dev], text=True, stderr=subprocess.DEVNULL
+                            ).strip()
+                        boot_separate = os.path.ismount(boot_dir)
+                        if boot_separate:
+                            bls_prefix = ""
+                        elif is_btrfs and active_fsroot.strip("/"):
+                            bls_prefix = f"/{active_fsroot.strip('/')}/boot"
+                        else:
+                            bls_prefix = "/boot"
+                        subvol_opt = f"rootflags=subvol={active_fsroot.strip('/')} " if (is_btrfs and active_fsroot.strip("/")) else ""
+                        mid_path = target_join(target_root, "/etc/machine-id")
+                        machine_id = "blazeos"
+                        if os.path.isfile(mid_path):
+                            m_val = open(mid_path, encoding="utf-8").read().strip()
+                            if m_val:
+                                machine_id = m_val
+
+                        # Purge broken mock/kiwi or orphaned BLS entries
+                        for cf in glob.glob(os.path.join(bls_dir, "*.conf")):
+                            try:
+                                ctxt = open(cf, encoding="utf-8", errors="replace").read()
+                                if "/var/lib/mock/" in ctxt or "f45-kiwi-build" in ctxt or "0-rescue" in os.path.basename(cf):
+                                    os.unlink(cf)
+                            except Exception:
+                                pass
+
+                        valid_kvers = sorted(
+                            os.path.basename(k)[len("vmlinuz-"):]
+                            for k in glob.glob(os.path.join(boot_dir, "vmlinuz-*"))
+                            if "0-rescue" not in os.path.basename(k)
+                            and os.path.isfile(os.path.join(boot_dir, f"initramfs-{os.path.basename(k)[len('vmlinuz-'):]}.img"))
                         )
-                        out_msg += "\n" + stub_p.stdout
+                        if root_uuid and valid_kvers:
+                            for kv in valid_kvers:
+                                bls_file = os.path.join(bls_dir, f"{machine_id}-{kv}.conf")
+                                bls_body = (
+                                    f"title Blaze SolarEvolution ({kv})\n"
+                                    f"version {kv}\n"
+                                    f"linux {bls_prefix}/vmlinuz-{kv}\n"
+                                    f"initrd {bls_prefix}/initramfs-{kv}.img\n"
+                                    f"options root=UUID={root_uuid} {subvol_opt}ro quiet rhgb splash\n"
+                                    f"grub_users $grub_users\n"
+                                    f"grub_arg --unrestricted\n"
+                                    f"grub_class blazeos\n"
+                                )
+                                with open(bls_file, "w", encoding="utf-8") as bf:
+                                    bf.write(bls_body)
+                            genv_p = os.path.join(boot_dir, "grub2/grubenv")
+                            if shutil.which("grub2-editenv"):
+                                if not os.path.exists(genv_p):
+                                    subprocess.run(["grub2-editenv", genv_p, "create"], stderr=subprocess.DEVNULL)
+                                subprocess.run(
+                                    ["grub2-editenv", genv_p, "set", "saved_entry=0"],
+                                    stderr=subprocess.DEVNULL,
+                                )
+                    except Exception as bls_err:
+                        out_msg += f"[BLS UYARI] {bls_err}\n"
+
+                    fb_cnt_hook = target_join(target_root, "/etc/grub.d/08_fallback_counting")
+                    if os.path.isfile(fb_cnt_hook):
+                        try:
+                            os.chmod(fb_cnt_hook, 0o644)
+                        except Exception:
+                            pass
+                    mk_cmd = ["env", "GRUB_DISABLE_OS_PROBER=true", "grub2-mkconfig", "-o", "/boot/grub2/grub.cfg"]
+                    p = run_in_target(target_root, mk_cmd)
+                    out_msg += p.stdout
+                    efi_fedora = target_join(target_root, "/boot/efi/EFI/fedora")
+                    if os.path.isdir(efi_fedora):
+                        if os.path.isfile(target_join(target_root, "/usr/bin/gen_grub_cfgstub")):
+                            stub_p = run_in_target(target_root, ["gen_grub_cfgstub", "/boot/grub2", "/boot/efi/EFI/fedora"])
+                            out_msg += "\n" + stub_p.stdout
+                        elif shutil.which("gen_grub_cfgstub"):
+                            stub_p = subprocess.run(
+                                ["gen_grub_cfgstub", target_join(target_root, "/boot/grub2"), efi_fedora],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                            )
+                            out_msg += "\n" + stub_p.stdout
+                    try:
+                        os.makedirs(target_join(target_root, "/etc"), exist_ok=True)
+                        with open(target_join(target_root, "/etc/blazeos-bootloader-choice"), "w", encoding="utf-8") as f:
+                            f.write("grub2\n")
+                    except Exception:
+                        pass
+                    if os.path.exists("/sys/firmware/efi") and shutil.which("efibootmgr") and os.path.isdir(esp_mp):
+                        try:
+                            esp_src = strip_btrfs_source(
+                                subprocess.check_output(["findmnt", "-n", "-o", "SOURCE", esp_mp], text=True, stderr=subprocess.DEVNULL).strip()
+                            )
+                            pk = subprocess.check_output(["lsblk", "-no", "PKNAME", esp_src], text=True, stderr=subprocess.DEVNULL).splitlines()[0].strip()
+                            pn = subprocess.check_output(["lsblk", "-no", "PARTN", esp_src], text=True, stderr=subprocess.DEVNULL).splitlines()[0].strip()
+                            if pk and pn:
+                                cur_efi = subprocess.check_output(["efibootmgr"], text=True, stderr=subprocess.DEVNULL)
+                                for ln in cur_efi.splitlines():
+                                    m_b = re.match(r"^Boot([0-9A-Fa-f]{4})\*?\s+BlazeOS(?:\s|\t|$)", ln)
+                                    if m_b:
+                                        subprocess.run(["efibootmgr", "-b", m_b.group(1), "-B"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                ldr = r"\EFI\fedora\shimx64.efi" if os.path.isfile(os.path.join(esp_mp, "EFI/fedora/shimx64.efi")) else r"\EFI\fedora\grubx64.efi"
+                                ep = subprocess.run(
+                                    ["efibootmgr", "--create", "--disk", f"/dev/{pk}", "--part", pn, "--label", "BlazeOS", "--loader", ldr, "--unicode"],
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                )
+                                if ep.returncode == 0:
+                                    out_msg += "\n[UEFI] BlazeOS GRUB2 NVRAM BootOrder başına taşındı."
+                        except Exception:
+                            pass
+
+                elif target == "limine":
+                    bl_tool = "/usr/bin/blaze-bootloader"
+                    if not os.path.isfile(bl_tool):
+                        return {"status": "error", "message": "blaze-bootloader aracı bulunamadı."}
+                    sysroot_arg = [] if target_root == "/" else [f"--sysroot={target_root}"]
+                    p = subprocess.run([bl_tool, "switch-to-limine"] + sysroot_arg, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    out_msg = ansi_re.sub("", p.stdout)
+                    if p.returncode == 0:
+                        try:
+                            os.makedirs(target_join(target_root, "/etc"), exist_ok=True)
+                            with open(target_join(target_root, "/etc/blazeos-bootloader-choice"), "w", encoding="utf-8") as f:
+                                f.write("limine\n")
+                        except Exception:
+                            pass
+
                 elif target == "efi":
                     if not os.path.exists("/sys/firmware/efi"):
                         return {
@@ -961,11 +3465,12 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                         }
                     if not shutil.which("efibootmgr"):
                         return {"status": "error", "message": "efibootmgr aracı sistemde bulunamadı."}
+                    esp_mp = target_join(target_root, "/boot/efi")
                     esp_src = ""
                     try:
                         esp_src = strip_btrfs_source(
                             subprocess.check_output(
-                                ["findmnt", "-n", "-o", "SOURCE", "/boot/efi"],
+                                ["findmnt", "-n", "-o", "SOURCE", esp_mp],
                                 text=True,
                                 stderr=subprocess.DEVNULL,
                             ).strip()
@@ -973,7 +3478,7 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                     except Exception:
                         pass
                     if not esp_src:
-                        return {"status": "error", "message": "/boot/efi bağlı değil veya EFI bölümü bulunamadı."}
+                        return {"status": "error", "message": f"{esp_mp} bağlı değil veya EFI bölümü bulunamadı."}
 
                     pkname = subprocess.check_output(
                         ["lsblk", "-no", "PKNAME", esp_src], text=True, stderr=subprocess.DEVNULL
@@ -984,11 +3489,34 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                     if not pkname or not partn:
                         return {"status": "error", "message": f"EFI diski/bölüm numarası çözümlenemedi ({esp_src})."}
 
-                    loader = r"\EFI\fedora\shimx64.efi"
-                    if not os.path.exists("/boot/efi/EFI/fedora/shimx64.efi") and os.path.exists(
-                        "/boot/efi/EFI/limine/BOOTX64.EFI"
-                    ):
+                    # Remove duplicate stale 'BlazeOS' NVRAM entries before creating fresh one
+                    try:
+                        cur_efi = subprocess.check_output(["efibootmgr"], text=True, stderr=subprocess.DEVNULL)
+                        for ln in cur_efi.splitlines():
+                            m_boot = re.match(r"^Boot([0-9A-Fa-f]{4})\*?\s+BlazeOS(?:\s|\t|$)", ln)
+                            if m_boot:
+                                subprocess.run(["efibootmgr", "-b", m_boot.group(1), "-B"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    except Exception:
+                        pass
+
+                    bl_choice = "grub2"
+                    choice_p = target_join(target_root, "/etc/blazeos-bootloader-choice")
+                    if os.path.isfile(choice_p):
+                        try:
+                            bl_choice = open(choice_p, encoding="utf-8").read().strip().lower()
+                        except Exception:
+                            pass
+
+                    if bl_choice == "limine" and os.path.exists(os.path.join(esp_mp, "EFI/limine/BOOTX64.EFI")):
                         loader = r"\EFI\limine\BOOTX64.EFI"
+                    elif os.path.exists(os.path.join(esp_mp, "EFI/fedora/shimx64.efi")):
+                        loader = r"\EFI\fedora\shimx64.efi"
+                    elif os.path.exists(os.path.join(esp_mp, "EFI/fedora/grubx64.efi")):
+                        loader = r"\EFI\fedora\grubx64.efi"
+                    elif os.path.exists(os.path.join(esp_mp, "EFI/limine/BOOTX64.EFI")):
+                        loader = r"\EFI\limine\BOOTX64.EFI"
+                    else:
+                        loader = r"\EFI\BOOT\BOOTX64.EFI"
 
                     cmd = [
                         "efibootmgr",
@@ -1004,10 +3532,35 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                     ]
                     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                     out_msg = p.stdout
+
                 elif target == "dracut":
-                    cmd = ["dracut", "--regenerate-all", "--force"]
-                    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-                    out_msg = p.stdout
+                    mods_dir = target_join(target_root, "/usr/lib/modules")
+                    kvers = []
+                    if os.path.isdir(mods_dir):
+                        kvers = sorted(
+                            d for d in os.listdir(mods_dir)
+                            if os.path.isdir(os.path.join(mods_dir, d)) and "rescue" not in d
+                        )
+                    if not kvers:
+                        kvers = sorted(
+                            os.path.basename(v)[len("vmlinuz-"):]
+                            for v in glob.glob(target_join(target_root, "/boot/vmlinuz-*"))
+                            if "0-rescue" not in os.path.basename(v)
+                        )
+                    if kvers and os.path.isfile(target_join(target_root, "/usr/bin/dracut")):
+                        logs = []
+                        rc = 0
+                        for kv in kvers:
+                            dp = run_in_target(target_root, ["dracut", "--force", f"/boot/initramfs-{kv}.img", kv])
+                            logs.append(f"[dracut {kv} -> rc={dp.returncode}]\n{dp.stdout}".strip())
+                            if dp.returncode != 0:
+                                rc = dp.returncode
+                        out_msg = "\n".join(logs)
+                        p = subprocess.CompletedProcess(args=["dracut"], returncode=rc, stdout=out_msg)
+                    else:
+                        p = run_in_target(target_root, ["dracut", "--regenerate-all", "--force"])
+                        out_msg = p.stdout
+                    ensure_target_initramfs_has_death_screen(target_root)
                 else:
                     return {
                         "status": "error",
@@ -1019,7 +3572,7 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                     code = p.returncode if p is not None else -1
                     return {"status": "error", "output": out_msg, "message": f"Komut basarisiz (kod: {code})"}
 
-                clear_boot_triggers()
+                clear_boot_triggers(target_root)
                 return {"status": "ok", "output": out_msg}
             except Exception as e:
                 return {"status": "error", "message": str(e)}
@@ -1036,11 +3589,18 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
 
         elif endpoint == "reboot":
             target = data.get("target", "system")
+            target_root = resolve_target_context(auto_mount=False)[0]
             if target != "recovery":
-                clear_boot_triggers()
+                clear_boot_triggers(target_root)
 
             def do_reboot():
                 time.sleep(0.5)
+                try:
+                    os.sync()
+                except Exception:
+                    pass
+                if os.path.isdir("/mnt/bere_target"):
+                    subprocess.run(["umount", "-R", "/mnt/bere_target"], stderr=subprocess.DEVNULL)
                 if target == "uefi":
                     subprocess.run(["systemctl", "reboot", "--firmware-setup"])
                 elif target == "recovery":
@@ -1088,6 +3648,7 @@ def launch_gui(url):
     os.makedirs(data_dir, mode=0o700, exist_ok=True)
 
     os.environ["GDK_BACKEND"] = "wayland,x11,*"
+    os.environ["GTK_THEME"] = "Adwaita:dark"
     os.environ["MOZ_ENABLE_WAYLAND"] = "1"
     os.environ["WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS"] = "1"
     os.environ["WEBKIT_DISABLE_DMABUF_RENDERER"] = "1"

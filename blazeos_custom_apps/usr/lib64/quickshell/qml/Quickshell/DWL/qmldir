@@ -1,0 +1,7 @@
+module Quickshell.DWL
+linktarget quickshell-dwlplugin
+optional plugin quickshell-dwlplugin
+classname Quickshell_DWLPlugin
+typeinfo quickshell-dwl.qmltypes
+prefer :/qt/qml/Quickshell/DWL/
+

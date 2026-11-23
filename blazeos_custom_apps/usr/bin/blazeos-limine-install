@@ -1,0 +1,7 @@
+#!/bin/bash
+# BlazeOS — geriye dönük uyumlu Limine kurulum giriş noktası.
+# Limine ikilileri ISO'daki doğrulanmış resmî upstream paketinden gelir;
+# kurulum sırasında COPR veya başka bir üçüncü taraf depo eklenmez.
+set -euo pipefail
+
+exec /usr/bin/blaze-bootloader switch-to-limine "$@"

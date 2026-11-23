@@ -1,22 +1,105 @@
 // ==============================================================================
 // Blaze Sentinel — Security Posture Inspector & Active Canary / Integrity Daemon
-// v0.3.0 — Unified CLI Posture Inspector (status, policy, verify) and Watchdog
+// v0.3.1 — Unified CLI Posture Inspector (status, policy, verify) and Watchdog
 // ==============================================================================
 
 use anyhow::Result;
 use serde::Serialize;
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
-pub const SENTINEL_VERSION: &str = "0.3.0";
+pub const SENTINEL_VERSION: &str = "0.3.1";
 pub const ROOT_CANARY_DIR: &str = "/var/lib/blaze";
 pub const ROOT_CANARY_PATH: &str = "/var/lib/blaze/.blaze_canary";
-const CANARY_TOKEN: &str = "BLAZE_CANARY_INTEGRITY_TOKEN_2026_VALID";
+const CANARY_PREFIX: &str = "BLAZE_CANARY_V2:";
+
+fn generate_random_canary_token() -> Result<String> {
+    let mut buf = [0u8; 32];
+    let mut f = fs::File::open("/dev/urandom")?;
+    f.read_exact(&mut buf)?;
+    let hex: String = buf.iter().map(|b| format!("{:02x}", b)).collect();
+    Ok(format!("{}{}", CANARY_PREFIX, hex))
+}
+
+fn sha256_hex(data: &[u8]) -> String {
+    const K: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    ];
+    let mut h: [u32; 8] = [
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+    ];
+    let bit_len = (data.len() as u64) * 8;
+    let mut msg = data.to_vec();
+    msg.push(0x80);
+    while msg.len() % 64 != 56 {
+        msg.push(0);
+    }
+    msg.extend_from_slice(&bit_len.to_be_bytes());
+    for chunk in msg.chunks_exact(64) {
+        let mut w = [0u32; 64];
+        for i in 0..16 {
+            w[i] = u32::from_be_bytes([chunk[4*i], chunk[4*i+1], chunk[4*i+2], chunk[4*i+3]]);
+        }
+        for i in 16..64 {
+            let s0 = w[i-15].rotate_right(7) ^ w[i-15].rotate_right(18) ^ (w[i-15] >> 3);
+            let s1 = w[i-2].rotate_right(17) ^ w[i-2].rotate_right(19) ^ (w[i-2] >> 10);
+            w[i] = w[i-16].wrapping_add(s0).wrapping_add(w[i-7]).wrapping_add(s1);
+        }
+        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh] = h;
+        for i in 0..64 {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let ch = (e & f) ^ ((!e) & g);
+            let temp1 = hh.wrapping_add(s1).wrapping_add(ch).wrapping_add(K[i]).wrapping_add(w[i]);
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let temp2 = s0.wrapping_add(maj);
+            hh = g; g = f; f = e; e = d.wrapping_add(temp1);
+            d = c; c = b; b = a; a = temp1.wrapping_add(temp2);
+        }
+        h[0] = h[0].wrapping_add(a); h[1] = h[1].wrapping_add(b);
+        h[2] = h[2].wrapping_add(c); h[3] = h[3].wrapping_add(d);
+        h[4] = h[4].wrapping_add(e); h[5] = h[5].wrapping_add(f);
+        h[6] = h[6].wrapping_add(g); h[7] = h[7].wrapping_add(hh);
+    }
+    h.iter().map(|v| format!("{:08x}", v)).collect()
+}
+
+fn expected_canary_hash_path(canary: &Path) -> PathBuf {
+    let name = canary
+        .file_name()
+        .map(|n| format!("{}.sha256", n.to_string_lossy()))
+        .unwrap_or_else(|| ".blaze_canary.sha256".to_string());
+    canary.with_file_name(name)
+}
+
+/// Fail-closed canary integrity verification: requires both the canary file and
+/// its SHA-256 digest file to exist and match. Missing digest = integrity failure.
+fn is_canary_intact(canary: &Path) -> bool {
+    let Ok(actual) = fs::read_to_string(canary) else {
+        return false;
+    };
+    let Ok(expected_hash) = fs::read_to_string(expected_canary_hash_path(canary)) else {
+        return false;
+    };
+    let actual_trimmed = actual.trim();
+    let expected_trimmed = expected_hash.trim();
+    !actual_trimmed.is_empty()
+        && expected_trimmed.len() == 64
+        && sha256_hex(actual_trimmed.as_bytes()) == expected_trimmed
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SecurityControl {
@@ -128,9 +211,18 @@ impl SentinelEngine {
                     let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
                 }
             }
-            if !p.exists() && fs::write(p, CANARY_TOKEN).is_ok() {
-                let _ = fs::set_permissions(p, fs::Permissions::from_mode(0o600));
-            } else if p.exists() {
+            let hash_path = expected_canary_hash_path(p);
+            if !p.exists() {
+                if let Ok(token) = generate_random_canary_token() {
+                    let digest = sha256_hex(token.as_bytes());
+                    if fs::write(p, &token).is_ok() {
+                        let _ = fs::set_permissions(p, fs::Permissions::from_mode(0o600));
+                        if fs::write(&hash_path, &digest).is_ok() {
+                            let _ = fs::set_permissions(&hash_path, fs::Permissions::from_mode(0o400));
+                        }
+                    }
+                }
+            } else {
                 let _ = fs::set_permissions(p, fs::Permissions::from_mode(0o600));
             }
         }
@@ -159,8 +251,8 @@ impl SentinelEngine {
         // 2. Check Canary integrity (Ransomware / File tampering detection)
         if check_canaries {
             for canary in &self.config.canary_paths {
-                if canary == Path::new(ROOT_CANARY_PATH) && !root && !canary.exists() {
-                    // Non-root caller cannot access /var/lib/blaze/.blaze_canary if not created yet
+                if canary == Path::new(ROOT_CANARY_PATH) && !root {
+                    // Non-root caller cannot read root-only /var/lib/blaze/.blaze_canary (0600)
                     continue;
                 }
                 if !canary.exists() {
@@ -168,13 +260,11 @@ impl SentinelEngine {
                         "RANSOMWARE UYARISI: Güvenlik koruma canarisi silindi: {:?}",
                         canary
                     ));
-                } else if let Ok(c) = fs::read_to_string(canary) {
-                    if !c.contains("BLAZE_CANARY_INTEGRITY_TOKEN") {
-                        alerts.push(format!(
-                            "RANSOMWARE / BOZULMA UYARISI: Güvenlik canarisi tahrif edildi: {:?}",
-                            canary
-                        ));
-                    }
+                } else if !is_canary_intact(canary) {
+                    alerts.push(format!(
+                        "RANSOMWARE / BOZULMA UYARISI: Güvenlik canarisi tahrif edildi: {:?}",
+                        canary
+                    ));
                 }
             }
         }
@@ -496,22 +586,38 @@ fn log_sentinel_event(msg: &str) {
     }
 }
 
+fn parse_cli_args(args: &[String]) -> (bool, Vec<&str>) {
+    let json_mode = args.iter().any(|a| a == "--json" || a == "-j");
+    let positional: Vec<&str> = args
+        .iter()
+        .map(|s| s.as_str())
+        .filter(|&a| a != "--json" && a != "-j")
+        .collect();
+    (json_mode, positional)
+}
+
+fn should_auto_daemonize_on_empty_args() -> bool {
+    std::env::var("INVOCATION_ID").is_ok()
+        && std::os::unix::process::parent_id() == 1
+        && !std::io::IsTerminal::is_terminal(&std::io::stdout())
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let json_mode = args.iter().any(|a| a == "--json" || a == "-j");
+    let (json_mode, positional) = parse_cli_args(&args);
     let engine = SentinelEngine::new();
 
-    if args.iter().any(|a| a == "--help" || a == "-h" || a == "help") {
+    if positional.iter().any(|&a| a == "--help" || a == "-h" || a == "help") {
         print_help();
         return Ok(());
     }
 
-    if args.iter().any(|a| a == "--version" || a == "-V" || a == "version") {
+    if positional.iter().any(|&a| a == "--version" || a == "-V" || a == "version") {
         println!("blaze-sentinel {}", SENTINEL_VERSION);
         return Ok(());
     }
 
-    let first = args.first().map(|s| s.as_str()).unwrap_or("");
+    let first = positional.first().copied().unwrap_or("");
 
     match first {
         "status" | "--status" => {
@@ -573,22 +679,26 @@ fn main() -> Result<()> {
             let sim_canary = if is_root_user() {
                 PathBuf::from(ROOT_CANARY_PATH)
             } else {
-                std::env::temp_dir().join(format!(".blaze_canary_sim_{}", std::process::id()))
+                let sc = std::env::temp_dir().join(format!(".blaze_canary_sim_{}", std::process::id()));
+                if let Ok(tok) = generate_random_canary_token() {
+                    let _ = fs::write(&sc, &tok);
+                    let _ = fs::write(expected_canary_hash_path(&sc), sha256_hex(tok.as_bytes()));
+                }
+                sc
             };
             let _ = fs::write(&sim_canary, "TAMPERED_BY_SIMULATION");
             let mut alerts = engine.scan_integrity(false);
-            if let Ok(c) = fs::read_to_string(&sim_canary) {
-                if !c.contains("BLAZE_CANARY_INTEGRITY_TOKEN") {
-                    alerts.push(format!(
-                        "RANSOMWARE / BOZULMA UYARISI: Güvenlik canarisi tahrif edildi: {:?}",
-                        sim_canary
-                    ));
-                }
+            if !is_canary_intact(&sim_canary) {
+                alerts.push(format!(
+                    "RANSOMWARE / BOZULMA UYARISI: Güvenlik canarisi tahrif edildi: {:?}",
+                    sim_canary
+                ));
             }
             if is_root_user() {
                 engine.init_canaries();
             } else {
                 let _ = fs::remove_file(&sim_canary);
+                let _ = fs::remove_file(expected_canary_hash_path(&sim_canary));
             }
             println!(
                 "[SIMULATION] Canary tamper detected successfully ({} alert(s)).",
@@ -605,9 +715,8 @@ fn main() -> Result<()> {
             return Ok(());
         }
         "" => {
-            // If started by systemd service without args (INVOCATION_ID set), run daemon;
-            // otherwise show security posture status so CLI invocations never hang.
-            if std::env::var("INVOCATION_ID").is_ok() {
+            // Only auto-daemonize when launched directly by PID 1 systemd without a TTY.
+            if should_auto_daemonize_on_empty_args() {
                 engine.run_daemon();
             } else {
                 let report = evaluate_security_posture(&engine, false);
@@ -663,5 +772,70 @@ mod tests {
                 "fs.protected_symlinks"
             ]
         );
+    }
+
+    #[test]
+    fn test_canary_is_fail_closed_and_sha256_verified() {
+        let dir = std::env::temp_dir().join(format!("blaze_canary_test_{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let canary = dir.join(".blaze_canary");
+        let digest_file = expected_canary_hash_path(&canary);
+
+        // 1. Missing both -> fail-closed
+        assert!(!is_canary_intact(&canary));
+
+        // 2. Valid token + matching SHA-256 -> intact
+        let token = generate_random_canary_token().expect("urandom available");
+        fs::write(&canary, &token).unwrap();
+        fs::write(&digest_file, sha256_hex(token.as_bytes())).unwrap();
+        assert!(is_canary_intact(&canary));
+
+        // 3. Tampered canary -> fails
+        fs::write(&canary, "BLAZE_CANARY_V2:0000").unwrap();
+        assert!(!is_canary_intact(&canary));
+
+        // 4. Restore token, delete digest file -> MUST fail-closed
+        fs::write(&canary, &token).unwrap();
+        let _ = fs::remove_file(&digest_file);
+        assert!(!is_canary_intact(&canary));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn canary_rejects_malformed_hash_lengths_and_empty_canary() {
+        let dir = std::env::temp_dir().join(format!("blaze_canary_edge_{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let canary = dir.join(".blaze_canary");
+        let digest = expected_canary_hash_path(&canary);
+
+        // Empty canary must fail closed even with matching SHA-256 of ""
+        fs::write(&canary, "   \n").unwrap();
+        fs::write(&digest, sha256_hex(b"")).unwrap();
+        assert!(!is_canary_intact(&canary));
+
+        // Valid canary with 63-char or 65-char digest must fail closed
+        let tok = "BLAZE_CANARY_V2:abcd";
+        let h = sha256_hex(tok.as_bytes());
+        fs::write(&canary, tok).unwrap();
+        fs::write(&digest, &h[..63]).unwrap();
+        assert!(!is_canary_intact(&canary));
+        fs::write(&digest, format!("{}0", h)).unwrap();
+        assert!(!is_canary_intact(&canary));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn json_flag_accepted_before_or_after_subcommand() {
+        let args_before = vec!["--json".to_string(), "status".to_string()];
+        let (json_b, pos_b) = parse_cli_args(&args_before);
+        assert!(json_b);
+        assert_eq!(pos_b, vec!["status"]);
+
+        let args_after = vec!["status".to_string(), "--json".to_string()];
+        let (json_a, pos_a) = parse_cli_args(&args_after);
+        assert!(json_a);
+        assert_eq!(pos_a, vec!["status"]);
     }
 }

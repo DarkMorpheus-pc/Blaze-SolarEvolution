@@ -3,16 +3,16 @@
 %global _build_id_links none
 # Binary repack of artefacts built from the repositories listed in SOURCES.md
 Name:           blaze-house
-Version:        2.0.0
+Version:        2.1.0
 Release:        1%{?dist}
 Summary:        BlazeHouse system control center
 License:        GPL-3.0-or-later
-URL:            https://github.com/DarkMorpheus-pc/Blaze-Galaxy
+URL:            https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
 Source0:        %{name}-%{version}.tar
 ExclusiveArch:  x86_64
 
 %description
-Iced based system control center (displays, storage, optimization, ZRAM, battery, network, bluetooth, sound, security, users, accessibility, language).
+Tauri v2 system control center (displays, storage, optimization, ZRAM, GitHub update channel and major release upgrades).
 
 %prep
 %setup -q -c
@@ -30,5 +30,7 @@ rm -f %{buildroot}/%{name}-%{version}.tar
 /usr/share/icons/hicolor/*/apps/blaze-house.png
 
 %changelog
+* Mon Nov 23 2026 Blaze Release <release@blazeos.com.tr> - 2.1.0-1
+- Add GitHub update channel integration and major Fedora release upgrade workflow
 * Mon Oct 26 2026 Blaze Release <release@blazeos.com.tr> - 2.0.0-1
 - Initial RPM packaging of blaze-house for the Blaze repository

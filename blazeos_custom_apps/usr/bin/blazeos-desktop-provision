@@ -1,0 +1,327 @@
+#!/bin/bash
+# Install an optional desktop after graphical boot is already available.
+set -euo pipefail
+
+LOG=/var/log/blazeos-desktop-provision.log
+STATE_DIR=/var/lib/blazeos
+PENDING="$STATE_DIR/desktop-provision-pending"
+DONE="$STATE_DIR/desktop-provisioned"
+exec >>"$LOG" 2>&1
+
+echo "=== BlazeOS desktop provision: $(date --iso-8601=seconds) ==="
+if [ "${BLAZEOS_FORCE_PROVISION:-0}" != 1 ] && {
+   grep -qE 'rd\.live\.image|root=live:' /proc/cmdline 2>/dev/null ||
+   [ -d /run/initramfs/live ] || [ -f /run/liveuser ];
+}; then exit 0; fi
+[ -e "$PENDING" ] || exit 0
+
+DESKTOP=$(sed -n 's/^desktop=//p' "$PENDING" | head -n1)
+PROFILE=$(sed -n 's/^profile=//p' "$PENDING" | head -n1)
+USAGE_PROFILE=$(sed -n 's/^usage_profile=//p' "$PENDING" | head -n1)
+REMOVE_SOLARUI=$(sed -n 's/^remove_solarui=//p' "$PENDING" | head -n1)
+case "$PROFILE" in minimal|full) ;; *) PROFILE=minimal ;; esac
+case "$USAGE_PROFILE" in light|daily|office|gaming|standard|developer) ;; *) USAGE_PROFILE=standard ;; esac
+case "$REMOVE_SOLARUI" in yes|no) ;; *) REMOVE_SOLARUI=no ;; esac
+
+DNF=$(command -v dnf5 || command -v dnf || true)
+[ -n "$DNF" ] || { echo "DNF is unavailable"; exit 1; }
+has_network() {
+    if command -v nm-online >/dev/null 2>&1; then
+        nm-online -q --timeout=3 && return 0
+    fi
+    ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1 && return 0
+    getent hosts fedoraproject.org >/dev/null 2>&1 && return 0
+    return 1
+}
+
+wait_for_network() {
+    local attempts=0 max_attempts=20
+    if [ "${BLAZEOS_FORCE_PROVISION:-0}" = 1 ]; then
+        max_attempts=3
+    fi
+    while (( attempts < max_attempts )); do
+        if has_network; then return 0; fi
+        (( attempts++ ))
+        sleep 3
+    done
+    return 1
+}
+
+if [ "$DESKTOP" != solarui ] || [ "$USAGE_PROFILE" != light ]; then
+    if ! wait_for_network; then
+        echo "Network is not reachable at this stage; provisioning queued for first boot."
+        exit 2
+    fi
+fi
+# Fedora 45 has no updates-testing-modular repository. Supplying that obsolete
+# id makes dnf5 abort before it installs the selected desktop.
+DNF_STABLE=(--setopt=updates-testing.enabled=0)
+install_environment() { timeout 45m "$DNF" "${DNF_STABLE[@]}" environment install -y "$1"; }
+install_minimal() { timeout 30m "$DNF" "${DNF_STABLE[@]}" install -y --setopt=install_weak_deps=False "$@"; }
+install_standard() { timeout 30m "$DNF" "${DNF_STABLE[@]}" install -y "$@"; }
+upgrade_required() { timeout 30m "$DNF" "${DNF_STABLE[@]}" upgrade -y "$@"; }
+install_optional() {
+    timeout 30m "$DNF" "${DNF_STABLE[@]}" install -y --skip-unavailable "$@" ||
+        echo "Optional profile packages could not all be installed: $*"
+}
+remove_optional() {
+    local installed=() package
+    for package in "$@"; do rpm -q "$package" >/dev/null 2>&1 && installed+=("$package"); done
+    ((${#installed[@]} == 0)) || timeout 20m "$DNF" remove -y \
+        --setopt=clean_requirements_on_remove=False "${installed[@]}"
+}
+
+echo "Installing desktop=$DESKTOP profile=$PROFILE usage_profile=$USAGE_PROFILE"
+case "$DESKTOP:$PROFILE" in
+    kde:minimal)
+        install_minimal plasma-desktop plasma-workspace kwin dolphin konsole \
+            plasma-systemsettings plasma-nm plasma-pa \
+            xdg-desktop-portal-kde sddm-breeze
+        install_standard plasma-lookandfeel-fedora arc-kde materia-kde \
+            papirus-icon-theme kvantum ;;
+    kde:full)
+        # Install core desktop first so plasma.desktop is guaranteed immediately
+        install_minimal plasma-desktop plasma-workspace kwin dolphin konsole \
+            plasma-systemsettings plasma-nm plasma-pa \
+            xdg-desktop-portal-kde sddm-breeze
+        install_standard plasma-lookandfeel-fedora arc-kde materia-kde papirus-icon-theme kvantum
+        # Install extra full environment group with skip-unavailable so optional map/font mirrors never block session
+        install_optional @kde-desktop-environment || true ;;
+    gnome:minimal)
+        # The remastered Fedora beta image contains prerelease GNOME schemas.
+        # dnf5 install leaves already-installed prerelease packages untouched,
+        # while current Mutter/GNOME Shell requires the final schema keys.
+        upgrade_required gsettings-desktop-schemas gnome-desktop3 gnome-desktop4
+        install_minimal gnome-shell gnome-session gnome-session-wayland-session gnome-control-center \
+            gnome-settings-daemon mutter nautilus ptyxis gnome-keyring gnome-keyring-pam \
+            xdg-desktop-portal xdg-desktop-portal-gnome dbus-daemon \
+            python3-gobject python3-cairo gtk4 libadwaita
+        install_standard gnome-shell-extension-dash-to-dock \
+            gnome-shell-extension-dash-to-panel gnome-shell-extension-apps-menu \
+            papirus-icon-theme arc-theme ;;
+    gnome:full)
+        upgrade_required gsettings-desktop-schemas gnome-desktop3 gnome-desktop4
+        install_minimal gnome-shell gnome-session gnome-session-wayland-session gnome-control-center \
+            mutter nautilus ptyxis gnome-settings-daemon gnome-keyring gnome-keyring-pam \
+            xdg-desktop-portal-gnome python3-gobject python3-cairo gtk4 libadwaita
+        install_standard gnome-shell-extension-dash-to-dock \
+            gnome-shell-extension-dash-to-panel gnome-shell-extension-apps-menu \
+            papirus-icon-theme arc-theme
+        install_optional @workstation-product-environment || true ;;
+    cosmic:minimal)
+        install_minimal cosmic-session cosmic-files cosmic-term xdg-desktop-portal-cosmic ;;
+    cosmic:full)
+        install_minimal cosmic-session cosmic-files cosmic-term xdg-desktop-portal-cosmic
+        install_optional @cosmic-desktop-environment || true ;;
+    cinnamon:minimal)
+        install_minimal cinnamon cinnamon-control-center cinnamon-settings-daemon \
+            nemo xdg-desktop-portal-xapp xorg-x11-server-Xorg xorg-x11-xinit ;;
+    cinnamon:full)
+        install_minimal cinnamon cinnamon-control-center cinnamon-settings-daemon \
+            nemo xdg-desktop-portal-xapp xorg-x11-server-Xorg xorg-x11-xinit
+        install_optional @cinnamon-desktop-environment || true ;;
+    xfce:minimal)
+        install_minimal xfce4-session xfce4-panel xfce4-settings thunar \
+            xfce4-terminal xfdesktop xorg-x11-server-Xorg xorg-x11-xinit ;;
+    xfce:full)
+        install_minimal xfce4-session xfce4-panel xfce4-settings thunar \
+            xfce4-terminal xfdesktop xorg-x11-server-Xorg xorg-x11-xinit
+        install_optional @xfce-desktop-environment || true ;;
+    sway:minimal) install_minimal sway waybar foot wofi xdg-desktop-portal-wlr ;;
+    sway:full)
+        install_minimal sway waybar foot wofi xdg-desktop-portal-wlr
+        install_optional @sway-desktop-environment || true ;;
+    hyprland:minimal)
+        "$DNF" copr enable -y solopasha/hyprland 2>/dev/null || true
+        install_minimal hyprland foot wofi waybar xdg-desktop-portal-hyprland xdg-desktop-portal-wlr ;;
+    hyprland:full)
+        "$DNF" copr enable -y solopasha/hyprland 2>/dev/null || true
+        install_standard hyprland foot wofi waybar mako grim slurp swappy \
+            wl-clipboard xdg-desktop-portal-hyprland xdg-desktop-portal-wlr ;;
+    niri:*|solarui:*|solarui_pure:*|solarui_gnome:*) ;;
+    *) echo "Unsupported desktop/profile: $DESKTOP/$PROFILE"; exit 1 ;;
+esac
+
+validate_gnome() {
+    local binary library_fail=0 session_file
+    for binary in gnome-shell gnome-session gnome-extensions; do
+        command -v "$binary" >/dev/null 2>&1 || { echo "GNOME runtime missing: $binary"; return 1; }
+    done
+    test -s /usr/share/gnome-session/sessions/gnome.session || {
+        echo "GNOME session definition is missing"; return 1;
+    }
+    # SDDM selects a .desktop launcher, not the internal gnome.session file.
+    # Without this check a partial DNF transaction could be reported as valid,
+    # leaving GNOME invisible or bouncing straight back to SDDM.
+    session_file=/usr/share/wayland-sessions/gnome.desktop
+    if [ ! -s "$session_file" ]; then
+        session_file=/usr/share/xsessions/gnome.desktop
+    fi
+    [ -s "$session_file" ] || {
+        echo "GNOME SDDM session launcher is missing (gnome-session-wayland-session)";
+        return 1;
+    }
+    local try_exec
+    try_exec=$(sed -n 's/^TryExec=//p' "$session_file" | head -n1)
+    [ -z "$try_exec" ] || command -v "$try_exec" >/dev/null 2>&1 || {
+        echo "GNOME session launcher is not executable: $try_exec"; return 1;
+    }
+    while IFS= read -r binary; do
+        ldd "$binary" 2>/dev/null | grep -q 'not found' && {
+            echo "Unresolved GNOME libraries in $binary"; ldd "$binary"; library_fail=1;
+        }
+    done < <(printf '%s\n' /usr/bin/gnome-shell /usr/libexec/gnome-session-binary)
+    ((library_fail == 0))
+}
+
+if [ "$DESKTOP" = gnome ]; then
+    validate_gnome || {
+        echo "GNOME validation failed; repairing the complete runtime once."
+        install_standard gnome-shell gnome-session gnome-session-wayland-session mutter \
+            gnome-settings-daemon gnome-keyring gnome-keyring-pam \
+            xdg-desktop-portal xdg-desktop-portal-gnome dbus-daemon
+        validate_gnome
+    }
+fi
+
+case "$USAGE_PROFILE" in
+    light)
+        # Low RAM footprint: strip out memory-intensive terminals (kitty), LibreOffice,
+        # heavy GNOME background services, and indexers.
+        remove_optional kitty kitty-terminfo gnome-boxes gnome-calendar gnome-contacts gnome-maps \
+            gnome-weather gnome-connections gnome-software libreoffice-core libreoffice-calc \
+            libreoffice-writer libreoffice-impress libreoffice-emailmerge rhythmbox cheese \
+            evolution-data-server tracker tracker-miners ;;
+    daily)
+        install_optional firefox celluloid papers loupe file-roller ;;
+    office)
+        install_optional libreoffice-writer libreoffice-calc libreoffice-impress \
+            libreoffice-draw papers thunderbird ;;
+    gaming)
+        install_optional mangohud gamemode gamescope lutris steam-devices wine protonup-qt ;;
+    standard)
+        # Keep the normal desktop profile lean. The full office suite belongs
+        # to the explicit Office/Work profile and otherwise adds hundreds of
+        # MB plus Java/UNO dependencies to every installation.
+        install_optional firefox celluloid papers loupe file-roller ;;
+    developer)
+        # OS & Distro Development & Remastering suite (Debian, Fedora, Arch forking tools)
+        install_optional \
+            git gcc gcc-c++ make cmake meson ninja-build rust cargo podman toolbox distrobox \
+            debootstrap dpkg-dev devscripts fakeroot \
+            mock rpm-build rpmdevtools lorax livecd-tools createrepo_c dnf-plugins-core pykickstart fedora-packager \
+            arch-install-scripts pacman \
+            qemu-system-x86 qemu-img xorriso squashfs-tools dosfstools mtools btrfs-progs parted e2fsprogs ;;
+esac
+
+case "$DESKTOP" in
+    kde) SESSION=plasma.desktop ;; gnome) SESSION=gnome.desktop ;;
+    cosmic) SESSION=cosmic.desktop ;; xfce) SESSION=xfce.desktop ;;
+    sway) SESSION=sway.desktop ;; hyprland) SESSION=hyprland.desktop ;;
+    niri|solarui|solarui_pure|solarui_gnome) SESSION=solarui.desktop ;;
+    cinnamon)
+        SESSION=cinnamon.desktop
+        [ -f /usr/share/wayland-sessions/cinnamon-wayland.desktop ] && SESSION=cinnamon-wayland.desktop ;;
+    *)
+        echo "Unsupported desktop '$DESKTOP'; falling back to SolarUI."
+        SESSION=solarui.desktop ;;
+esac
+SESSION_FILE="/usr/share/wayland-sessions/$SESSION"
+[ -f "$SESSION_FILE" ] || SESSION_FILE="/usr/share/xsessions/$SESSION"
+SESSION_TYPE=wayland
+[ -f "/usr/share/xsessions/$SESSION" ] && SESSION_TYPE=x11
+if [ ! -f "$SESSION_FILE" ]; then
+    echo "Installation succeeded but $SESSION is missing. SolarUI is preserved."
+    exit 1
+fi
+TRY_EXEC=$(sed -n 's/^TryExec=//p' "$SESSION_FILE" | head -n1)
+if [ -n "$TRY_EXEC" ] && ! command -v "$TRY_EXEC" >/dev/null 2>&1; then
+    echo "Session launcher '$TRY_EXEC' is missing. SolarUI is preserved."
+    exit 1
+fi
+
+SESSION_DESKTOP="$SESSION"
+printf '%s\n' "$SESSION_DESKTOP" >/etc/blazeos-selected-session
+for account in /var/lib/AccountsService/users/*; do
+    [ -f "$account" ] || continue
+    session_name=${SESSION_DESKTOP%.desktop}
+    if grep -q '^Session=' "$account"; then
+        sed -i "s/^Session=.*/Session=$session_name/" "$account"
+    else
+        printf 'Session=%s\n' "$session_name" >>"$account"
+    fi
+    if grep -q '^XSession=' "$account"; then
+        sed -i "s/^XSession=.*/XSession=$session_name/" "$account"
+    else
+        printf 'XSession=%s\n' "$session_name" >>"$account"
+    fi
+    if grep -q '^SessionType=' "$account"; then
+        sed -i "s/^SessionType=.*/SessionType=$SESSION_TYPE/" "$account"
+    else
+        printf 'SessionType=%s\n' "$SESSION_TYPE" >>"$account"
+    fi
+done
+
+if [ -f /etc/sddm.conf.d/autologin.conf ]; then
+    if grep -q '^Session=' /etc/sddm.conf.d/autologin.conf; then
+        sed -i "s/^Session=.*/Session=${SESSION_DESKTOP}/" /etc/sddm.conf.d/autologin.conf
+    else
+        printf 'Session=%s\n' "${SESSION_DESKTOP}" >>/etc/sddm.conf.d/autologin.conf
+    fi
+fi
+
+mkdir -p /var/lib/sddm
+LAST_USER=""
+if [ -f /var/lib/sddm/state.conf ]; then
+    LAST_USER=$(sed -n 's/^User=//p' /var/lib/sddm/state.conf | head -n1)
+fi
+if [ -z "$LAST_USER" ] && [ -f /etc/blazeos-setup-completed ]; then
+    LAST_USER=$(sed -n 's/^username=//p' /etc/blazeos-setup-completed | head -n1)
+fi
+{
+    printf '[Last]\nSession=%s\n' "$SESSION_DESKTOP"
+    if [ -n "$LAST_USER" ]; then
+        printf 'User=%s\n' "$LAST_USER"
+    fi
+} >/var/lib/sddm/state.conf
+
+[ -x /usr/bin/blazeos-sync-identity ] && /usr/bin/blazeos-sync-identity --force --quiet || :
+
+if [ "$REMOVE_SOLARUI" = yes ]; then /usr/bin/blazeos-remove-solarui; fi
+
+case "$DESKTOP" in
+    kde|gnome) touch "$STATE_DIR/style-center-pending" ;;
+esac
+
+printf 'desktop=%s\nsession=%s\nprofile=%s\nusage_profile=%s\nremove_solarui=%s\ncompleted_at=%s\n' \
+    "$DESKTOP" "$SESSION" "$PROFILE" "$USAGE_PROFILE" "$REMOVE_SOLARUI" \
+    "$(date --iso-8601=seconds)" >"$DONE"
+rm -f "$PENDING"
+systemctl disable blazeos-desktop-provision.service 2>/dev/null || true
+logger -t blazeos "Desktop preparation completed: $DESKTOP ($PROFILE)"
+echo "Desktop preparation completed. It will be selected at the next login."
+
+# If SDDM greeter is currently on screen without a logged-in human user (and OOBE is already complete),
+# restart SDDM so the new desktop session appears in the session list immediately without rebooting.
+if [ "${BLAZEOS_FORCE_PROVISION:-0}" != 1 ] && [ -f /etc/blazeos-setup-completed ]; then
+    has_active_user=0
+    for uid in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $2}'); do
+        [[ "$uid" =~ ^[0-9]+$ ]] || continue
+        if [ "$uid" -eq 961 ] || { [ "$uid" -ge 1000 ] && [ "$uid" -lt 65534 ]; }; then
+            has_active_user=1
+            break
+        fi
+    done
+    if [ "$has_active_user" -eq 0 ] && systemctl is-active --quiet sddm.service; then
+        echo "Reloading SDDM to display newly installed desktop session..."
+        systemctl restart sddm.service 2>/dev/null || true
+    fi
+fi
+
+# Broadcast desktop notification to active graphical sessions
+for uid in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $2}'); do
+    [[ "$uid" =~ ^[0-9]+$ ]] || continue
+    target_user=$(id -un "$uid" 2>/dev/null || true)
+    [ -n "$target_user" ] || continue
+    su - "$target_user" -c "DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus notify-send -u normal -i preferences-desktop-theme 'BlazeOS' 'Masaüstü ortamı ($DESKTOP) başarıyla kuruldu. Oturumu kapatıp yeni masaüstünüze geçebilirsiniz.'" 2>/dev/null || true
+done

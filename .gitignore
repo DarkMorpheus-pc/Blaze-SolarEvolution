@@ -20,6 +20,7 @@ f45_base/
 # Build working rootfs itself is large (3GB+) - exclude from git
 # Only the custom overlay in blazeos_custom_apps/ is tracked
 work_f45/rootfs/
+work_f45_stable/
 
 # Large prebuilt Electron binaries (>100MB limit on GitHub)
 blazeos_custom_apps/opt/FireHub/

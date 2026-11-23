@@ -1,0 +1,9 @@
+module Quickshell.Niri
+linktarget quickshell-niriplugin
+optional plugin quickshell-niriplugin
+classname Quickshell_NiriPlugin
+typeinfo quickshell-niri.qmltypes
+import Quickshell.Niri._Ipc
+prefer :/qt/qml/Quickshell/Niri/
+depends Quickshell
+

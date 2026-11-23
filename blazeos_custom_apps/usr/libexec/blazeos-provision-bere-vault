@@ -1,0 +1,346 @@
+#!/bin/bash
+# ==============================================================================
+# BlazeOS Immutable Recovery Vault Provisioner (BLAZE_REC)
+# Populates the dedicated physical GPT recovery partition (/boot/bere-vault or
+# LABEL=BLAZE_REC) with a self-contained read-only Graphical BERE + Console BERP
+# LiveOS SquashFS image, kernel, and dmsquash-live initrd, removes it from
+# /etc/fstab so normal desktop boots never mount it, and locks GPT attributes
+# (RequiredPartition + ReadOnly bit 60).
+# ==============================================================================
+set -euo pipefail
+
+SYSROOT=""
+VAULT_DEV=""
+REFRESH_KERNEL_ONLY=0
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --sysroot=*)
+            SYSROOT="${1#*=}"
+            shift
+            ;;
+        --sysroot)
+            SYSROOT="${2:-}"
+            shift 2
+            ;;
+        --device=*)
+            VAULT_DEV="${1#*=}"
+            shift
+            ;;
+        --device)
+            VAULT_DEV="${2:-}"
+            shift 2
+            ;;
+        --refresh-kernel-only)
+            REFRESH_KERNEL_ONLY=1
+            shift
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+SYSROOT="${SYSROOT%/}"
+VAULT_MP="${SYSROOT}/boot/bere-vault"
+CREATED_TEMP_MP=0
+
+log() {
+    echo "[BLAZE-VAULT] $*"
+}
+
+VAULT_MODE="full"
+for mf in /tmp/anaconda_bere_vault_mode "${SYSROOT}/etc/blazeos-bere-vault-mode"; do
+    if [[ -f "$mf" ]]; then
+        m_val="$(tr -d '[:space:]' < "$mf" | tr '[:upper:]' '[:lower:]')"
+        if [[ "$m_val" == "full" || "$m_val" == "minimal" || "$m_val" == "none" ]]; then
+            VAULT_MODE="$m_val"
+            break
+        fi
+    fi
+done
+
+if [[ "$VAULT_MODE" == "none" ]]; then
+    log "Kullanıcı BLAZE_REC kurtarma kasasını devre dışı bıraktı (mode=none)."
+    exit 0
+fi
+
+# 1. Locate vault block device:
+#    (a) mounted at $SYSROOT/boot/bere-vault or /mnt/sysimage/boot/bere-vault
+#    (b) listed as /boot/bere-vault in $SYSROOT/etc/fstab
+#    (c) labeled BLAZE_REC
+for cand_mp in "${SYSROOT}/boot/bere-vault" "/mnt/sysimage/boot/bere-vault" "/boot/bere-vault"; do
+    [[ -z "$VAULT_DEV" && -d "$cand_mp" ]] || continue
+    dev_try="$(awk -v mp="$cand_mp" '$2 == mp {print $1}' /proc/mounts 2>/dev/null | tail -n1 | sed 's/\[.*//' | tr -d '[:space:]' || true)"
+    if [[ -z "$dev_try" ]]; then
+        dev_try="$(findmnt -M "$cand_mp" -n -o SOURCE 2>/dev/null | tail -n1 | sed 's/\[.*//' | tr -d '[:space:]' || true)"
+    fi
+    if [[ -n "$dev_try" && -b "$dev_try" ]]; then
+        VAULT_DEV="$dev_try"
+        VAULT_MP="$cand_mp"
+        break
+    fi
+done
+
+if [[ -z "$VAULT_DEV" && -f "${SYSROOT}/etc/fstab" ]]; then
+    fstab_spec="$(awk '$2 == "/boot/bere-vault" && $1 !~ /^#/ {print $1; exit}' "${SYSROOT}/etc/fstab" || true)"
+    if [[ "$fstab_spec" == UUID=* ]]; then
+        dev_try="$(readlink -f "/dev/disk/by-uuid/${fstab_spec#UUID=}" 2>/dev/null || true)"
+        [[ -n "$dev_try" && -b "$dev_try" ]] && VAULT_DEV="$dev_try"
+    fi
+    if [[ -z "$VAULT_DEV" && -n "$fstab_spec" ]]; then
+        dev_try="$(findfs "$fstab_spec" 2>/dev/null | head -n1 | tr -d '[:space:]' || true)"
+        if [[ -n "$dev_try" && -b "$dev_try" ]]; then
+            VAULT_DEV="$dev_try"
+        fi
+    fi
+fi
+
+if [[ -z "$VAULT_DEV" ]]; then
+    VAULT_DEV="$(blkid -L BLAZE_REC 2>/dev/null | head -n1 | tr -d '[:space:]' || true)"
+fi
+if [[ -z "$VAULT_DEV" || ! -b "$VAULT_DEV" ]]; then
+    log "Fiziksel BLAZE_REC kurtarma bölümü bulunamadı (VAULT_MP=${VAULT_MP}); kasa kurulumu atlanıyor."
+    exit 0
+fi
+
+# Temporarily unlock kernel RO / GPT RO bit before writing updated vault assets
+blockdev --setrw "$VAULT_DEV" >/dev/null 2>&1 || true
+
+# Ensure mounted RW at a working mountpoint during provisioning
+if [[ ! -d "$VAULT_MP" ]] || ! mountpoint -q "$VAULT_MP" 2>/dev/null; then
+    VAULT_MP="$(mktemp -d /run/bere-vault-prov.XXXXXX)"
+    CREATED_TEMP_MP=1
+    mount -o rw "$VAULT_DEV" "$VAULT_MP"
+else
+    mount -o remount,rw "$VAULT_DEV" "$VAULT_MP" 2>/dev/null || mount -o remount,rw "$VAULT_MP" 2>/dev/null || true
+fi
+
+# 2. Locate clean OS source tree (/run/rootfsbase on Live ISO, or $SYSROOT)
+SRC_ROOT="/run/rootfsbase"
+if [[ ! -d "$SRC_ROOT/usr" ]]; then
+    if [[ -n "$SYSROOT" && -d "${SYSROOT}/usr" ]]; then
+        SRC_ROOT="$SYSROOT"
+    else
+        SRC_ROOT="/"
+    fi
+fi
+
+EXCLUDE_FILE="/usr/share/berp-recovery/bere-vault.exclude"
+if [[ ! -f "$EXCLUDE_FILE" && -n "$SYSROOT" && -f "${SYSROOT}/usr/share/berp-recovery/bere-vault.exclude" ]]; then
+    EXCLUDE_FILE="${SYSROOT}/usr/share/berp-recovery/bere-vault.exclude"
+fi
+
+MKSQUASHFS_BIN="$(command -v mksquashfs 2>/dev/null || true)"
+if [[ -z "$MKSQUASHFS_BIN" && -n "$SYSROOT" && -x "${SYSROOT}/usr/sbin/mksquashfs" ]]; then
+    MKSQUASHFS_BIN="${SYSROOT}/usr/sbin/mksquashfs"
+elif [[ -z "$MKSQUASHFS_BIN" && -n "$SYSROOT" && -x "${SYSROOT}/usr/bin/mksquashfs" ]]; then
+    MKSQUASHFS_BIN="${SYSROOT}/usr/bin/mksquashfs"
+fi
+
+log "BLAZE_REC bölümü hazırlanıyor: $VAULT_DEV -> $VAULT_MP (Mod: $VAULT_MODE, Kaynak: $SRC_ROOT)"
+tune2fs -m 0 "$VAULT_DEV" >/dev/null 2>&1 || true
+if [[ "$REFRESH_KERNEL_ONLY" -eq 1 && -f "$VAULT_MP/LiveOS/squashfs.img" ]]; then
+    rm -rf "${VAULT_MP:?}/boot"
+    mkdir -p "$VAULT_MP/boot"
+else
+    rm -rf "${VAULT_MP:?}/LiveOS" "${VAULT_MP:?}/boot" "${VAULT_MP:?}/BLAZE_RECOVERY_VAULT.json"
+    mkdir -p "$VAULT_MP/LiveOS" "$VAULT_MP/boot"
+fi
+
+cleanup_undersized_vault() {
+    local reason="$1"
+    log "UYARI: $reason — kurulum iptal edilmeden kasa adımı güvenli şekilde atlanıyor."
+    rm -rf "${VAULT_MP:?}/LiveOS" "${VAULT_MP:?}/boot" "${VAULT_MP:?}/BLAZE_RECOVERY_VAULT.json" 2>/dev/null || true
+    local fstab_p="${SYSROOT}/etc/fstab"
+    if [[ -f "$fstab_p" ]]; then
+        awk '$2 != "/boot/bere-vault" && $1 != "LABEL=BLAZE_REC"' "$fstab_p" > "${fstab_p}.bere.tmp"
+        cat "${fstab_p}.bere.tmp" > "$fstab_p"
+        rm -f "${fstab_p}.bere.tmp"
+    fi
+    for active_mp in $(lsblk -no MOUNTPOINTS "$VAULT_DEV" 2>/dev/null || true); do
+        [[ -n "$active_mp" ]] && umount "$active_mp" 2>/dev/null || umount -l "$active_mp" 2>/dev/null || true
+    done
+    [[ "$CREATED_TEMP_MP" -eq 1 ]] && rmdir "$VAULT_MP" 2>/dev/null || true
+    for empty_dir in "${SYSROOT}/boot/bere-vault" "/mnt/sysimage/boot/bere-vault"; do
+        [[ -d "$empty_dir" ]] && rmdir "$empty_dir" 2>/dev/null || true
+    done
+    exit 0
+}
+
+AVAIL_MB="$(df -BM --output=avail "$VAULT_MP" 2>/dev/null | tail -n1 | tr -dc '0-9' || echo 0)"
+if [[ "$REFRESH_KERNEL_ONLY" -eq 0 && "${AVAIL_MB:-0}" -lt 1750 ]]; then
+    cleanup_undersized_vault "BLAZE_REC bölümü (${AVAIL_MB} MiB boş) tam grafiksel BERE imajı için çok küçük (en az 1750 MiB gerekir)"
+fi
+
+# 3. Copy kernel, dmsquash-live initramfs, and standalone BERP binary FIRST so boot assets never hit ENOSPC
+LIVE_KERNEL=""
+LIVE_INITRD=""
+for kc in \
+    /run/initramfs/live/boot/x86_64/loader/linux \
+    /run/initramfs/live/images/pxeboot/vmlinuz \
+    "${SYSROOT}/boot"/vmlinuz-* \
+    /boot/vmlinuz-*; do
+    if [[ -f "$kc" && "$kc" != *rescue* ]]; then
+        LIVE_KERNEL="$kc"
+        break
+    fi
+done
+
+for ic in \
+    /run/initramfs/live/boot/x86_64/loader/initrd \
+    /run/initramfs/live/images/pxeboot/initrd.img; do
+    if [[ -f "$ic" ]]; then
+        LIVE_INITRD="$ic"
+        break
+    fi
+done
+
+# If provisioning from an installed system without ISO mounted, generate a dmsquash-live initrd via dracut
+if [[ -z "$LIVE_INITRD" ]]; then
+    KVER="$(ls -1 "${SRC_ROOT}/usr/lib/modules" 2>/dev/null | grep -v rescue | sort -V | tail -n1 || true)"
+    if [[ -n "$KVER" ]] && command -v dracut >/dev/null 2>&1; then
+        dracut --force --no-hostonly --add "dmsquash-live overlayfs pollcdrom" "$VAULT_MP/boot/initrd-bere.img" "$KVER"
+        LIVE_INITRD="$VAULT_MP/boot/initrd-bere.img"
+    fi
+fi
+
+if [[ -z "$LIVE_KERNEL" || -z "$LIVE_INITRD" ]]; then
+    log "HATA: BLAZE_REC için çekirdek veya initrd bulunamadı!"
+    exit 1
+fi
+
+cp -f "$LIVE_KERNEL" "$VAULT_MP/boot/vmlinuz-bere"
+if [[ "$LIVE_INITRD" != "$VAULT_MP/boot/initrd-bere.img" ]]; then
+    cp -f "$LIVE_INITRD" "$VAULT_MP/boot/initrd-bere.img"
+fi
+
+# Also embed standalone BERP binary directly on the vault partition for emergency direct execution
+for bbin in /usr/bin/blaze-recovery "${SYSROOT}/usr/bin/blaze-recovery"; do
+    if [[ -x "$bbin" ]]; then
+        cp -f "$bbin" "$VAULT_MP/boot/blaze-recovery"
+        chmod 0755 "$VAULT_MP/boot/blaze-recovery"
+        break
+    fi
+done
+
+# 4. Populate BLAZE_REC/LiveOS/squashfs.img
+#    In full mode (when >= 3500 MiB is free on BLAZE_REC and LiveOS/squashfs.img exists),
+#    directly copy the verified LiveOS SquashFS so BLAZE_REC contains BOTH Graphical BERE
+#    and the complete Zero-USB Reinstall OS image! Otherwise build compact BERE+BERP SquashFS.
+LIVE_SQ="/run/initramfs/live/LiveOS/squashfs.img"
+AVAIL_AFTER_BOOT_MB="$(df -BM --output=avail "$VAULT_MP" 2>/dev/null | tail -n1 | tr -dc '0-9' || echo 0)"
+FULL_OS_EMBEDDED=false
+ACTUAL_MODE="$VAULT_MODE"
+
+if [[ "$REFRESH_KERNEL_ONLY" -eq 1 && -f "$VAULT_MP/LiveOS/squashfs.img" ]]; then
+    SQ_SIZE_MB="$(du -BM "$VAULT_MP/LiveOS/squashfs.img" 2>/dev/null | awk '{print $1}' | tr -dc '0-9' || echo 0)"
+    if [[ "${SQ_SIZE_MB:-0}" -ge 2500 ]]; then
+        FULL_OS_EMBEDDED=true
+        ACTUAL_MODE="full"
+    else
+        ACTUAL_MODE="minimal"
+    fi
+elif [[ "$VAULT_MODE" == "full" && -f "$LIVE_SQ" ]]; then
+    NEED_SQ_MB="$(du -BM "$LIVE_SQ" 2>/dev/null | awk '{print $1}' | tr -dc '0-9' || echo 3200)"
+    if [[ "${AVAIL_AFTER_BOOT_MB:-0}" -ge $((NEED_SQ_MB + 120)) ]]; then
+        log "Tam Zırhlı Kasa: $LIVE_SQ (${NEED_SQ_MB} MiB) doğrudan BLAZE_REC üzerine kopyalanıyor..."
+        cp -f "$LIVE_SQ" "$VAULT_MP/LiveOS/squashfs.img"
+        FULL_OS_EMBEDDED=true
+        ACTUAL_MODE="full"
+    else
+        log "BLAZE_REC kalan alanı (${AVAIL_AFTER_BOOT_MB} MiB) tam imaj için yetersiz (${NEED_SQ_MB} MiB+120); minimal BERE kasasına düşülüyor."
+        ACTUAL_MODE="minimal"
+    fi
+else
+    ACTUAL_MODE="minimal"
+fi
+
+if [[ "$FULL_OS_EMBEDDED" != "true" && ! -f "$VAULT_MP/LiveOS/squashfs.img" ]]; then
+    if [[ -z "$MKSQUASHFS_BIN" ]]; then
+        log "UYARI: mksquashfs bulunamadı!"
+        exit 1
+    fi
+    SQ_ARGS=(
+        "$SRC_ROOT"
+        "$VAULT_MP/LiveOS/squashfs.img"
+        -comp zstd
+        -Xcompression-level 15
+        -b 262144
+        -no-progress
+        -noappend
+        -xattrs
+        -one-file-system
+        -wildcards
+    )
+    if [[ -f "$EXCLUDE_FILE" ]]; then
+        SQ_ARGS+=(-ef "$EXCLUDE_FILE")
+    else
+        SQ_ARGS+=(-e boot proc sys dev run tmp mnt media var/cache home opt/FireHub usr/lib64/firefox)
+    fi
+
+    if ! "$MKSQUASHFS_BIN" "${SQ_ARGS[@]}"; then
+        cleanup_undersized_vault "mksquashfs sırasında BLAZE_REC üzerinde yer kalmadı veya sıkıştırma tamamlanamadı"
+    fi
+fi
+
+SQ_SHA="$(sha256sum "$VAULT_MP/LiveOS/squashfs.img" | awk '{print $1}')"
+VM_SHA="$(sha256sum "$VAULT_MP/boot/vmlinuz-bere" | awk '{print $1}')"
+IN_SHA="$(sha256sum "$VAULT_MP/boot/initrd-bere.img" | awk '{print $1}')"
+
+cat > "$VAULT_MP/BLAZE_RECOVERY_VAULT.json" <<EOF
+{
+  "label": "BLAZE_REC",
+  "role": "immutable-graphical-bere-and-berp-vault",
+  "mode": "$ACTUAL_MODE",
+  "full_os_embedded": $FULL_OS_EMBEDDED,
+  "readonly": true,
+  "sha256": {
+    "squashfs": "$SQ_SHA",
+    "vmlinuz": "$VM_SHA",
+    "initrd": "$IN_SHA"
+  }
+}
+EOF
+
+sync
+
+# 5. Remove /boot/bere-vault from target /etc/fstab so normal OS never mounts it
+FSTAB_PATH="${SYSROOT}/etc/fstab"
+if [[ -f "$FSTAB_PATH" ]]; then
+    awk '$2 != "/boot/bere-vault" && $1 != "LABEL=BLAZE_REC"' "$FSTAB_PATH" > "${FSTAB_PATH}.bere.tmp"
+    cat "${FSTAB_PATH}.bere.tmp" > "$FSTAB_PATH"
+    rm -f "${FSTAB_PATH}.bere.tmp"
+fi
+
+# 6. Unmount vault (all active mountpoints of $VAULT_DEV), apply BLAZE_REC filesystem label, flush blkid/udev cache, and lock GPT attributes + kernel RO flag
+for active_mp in $(lsblk -no MOUNTPOINTS "$VAULT_DEV" 2>/dev/null || true); do
+    [[ -n "$active_mp" ]] && umount "$active_mp" 2>/dev/null || umount -l "$active_mp" 2>/dev/null || true
+done
+if [[ "$CREATED_TEMP_MP" -eq 1 ]]; then
+    rmdir "$VAULT_MP" 2>/dev/null || true
+fi
+for empty_dir in "${SYSROOT}/boot/bere-vault" "/mnt/sysimage/boot/bere-vault"; do
+    [[ -d "$empty_dir" ]] && rmdir "$empty_dir" 2>/dev/null || true
+done
+
+e2label "$VAULT_DEV" BLAZE_REC
+blkid -g >/dev/null 2>&1 || true
+blkid -p "$VAULT_DEV" >/dev/null 2>&1 || true
+udevadm trigger --action=change "$VAULT_DEV" 2>/dev/null || true
+udevadm settle 2>/dev/null || true
+
+PKNAME="$(lsblk -no PKNAME "$VAULT_DEV" 2>/dev/null | head -n1 | tr -d '[:space:]' || true)"
+PARTN="$(lsblk -no PARTN "$VAULT_DEV" 2>/dev/null | head -n1 | tr -d '[:space:]' || true)"
+if [[ -n "$PKNAME" && -b "/dev/$PKNAME" && "$PARTN" =~ ^[0-9]+$ ]]; then
+    PTTYPE="$(lsblk -dno PTTYPE "/dev/$PKNAME" 2>/dev/null | tr -d '[:space:]' || true)"
+    if [[ "${PTTYPE,,}" == "gpt" ]]; then
+        # Bit 0 = RequiredPartition (system required, do not delete), Bit 60 = Read-Only
+        sfdisk --part-attrs "/dev/$PKNAME" "$PARTN" "RequiredPartition,60" >/dev/null 2>&1 || true
+        partprobe "/dev/$PKNAME" 2>/dev/null || true
+        udevadm settle 2>/dev/null || true
+    fi
+fi
+blockdev --setro "$VAULT_DEV" >/dev/null 2>&1 || true
+
+log "BLAZE_REC zırhlı kurtarma bölümü ($VAULT_DEV, mode=$ACTUAL_MODE, full_os_embedded=$FULL_OS_EMBEDDED) başarıyla oluşturuldu ve salt-okunur kilitlendi."

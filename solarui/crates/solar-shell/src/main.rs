@@ -20,6 +20,8 @@ pub mod gamezone_gui;
 pub mod gamezone_live;
 pub mod installer_gui;
 pub mod living_flow;
+pub mod wallpaper;
+pub mod we10x_profile;
 
 use anyhow::Result;
 use apps::scan_desktop_applications;
@@ -33,6 +35,14 @@ use tokio::sync::RwLock;
 use tracing::info;
 
 async fn do_minimize(target_id: Option<u64>) -> Result<()> {
+    let cfg = SolarConfig::load();
+    if cfg.shell.engine != engine::ShellEngine::We10x {
+        tracing::info!(
+            "Minimize skipped: background minimization is enabled only in We10X mode (active={:?})",
+            cfg.shell.engine
+        );
+        return Ok(());
+    }
     {
         let client = solar_niri::NiriClient::new()?;
         let windows = client.get_windows().await?;
@@ -149,11 +159,9 @@ async fn main() -> Result<()> {
             let s = state.read().await;
             let vm = ShelfViewModel::from_state(&s);
 
-            let is_in_sync = matches!(
-                (desired.desired_engine, &actual),
-                (engine::ShellEngine::Noctalia, supervisor::ActualEngine::Noctalia)
-                    | (engine::ShellEngine::Caelestia, supervisor::ActualEngine::Caelestia)
-                    | (engine::ShellEngine::End4Pc, supervisor::ActualEngine::End4Pc)
+            let is_in_sync = supervisor::SolarShellSupervisor::is_reconciled(
+                desired.desired_engine,
+                &actual,
             );
             let sync_status = if is_in_sync {
                 "Reconciled (OK)"
@@ -231,6 +239,27 @@ async fn main() -> Result<()> {
                     .spawn();
             });
 
+            // Start live GSettings wallpaper bridge (syncs Nautilus "Set as Wallpaper" & BlazeHouse to Noctalia/We10X/Caelestia/end4-pC)
+            wallpaper::spawn_gsettings_wallpaper_watcher();
+
+            // Re-apply user's saved wallpaper on session startup if configured
+            {
+                let startup_cfg = SolarConfig::load();
+                let saved_wp = if startup_cfg.shell.engine == engine::ShellEngine::We10x
+                    && !startup_cfg.shell.we10x_wallpaper.trim().is_empty()
+                {
+                    startup_cfg.shell.we10x_wallpaper.clone()
+                } else {
+                    startup_cfg.display.wallpaper.clone()
+                };
+                if !saved_wp.trim().is_empty() && std::path::Path::new(&saved_wp).is_file() {
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(900));
+                        let _ = wallpaper::apply_wallpaper_everywhere(&saved_wp, false);
+                    });
+                }
+            }
+
             // Start ChromeOS Ash-level Watchdog daemon (auto-recovers shell engines within 3 seconds if crashed)
             let _watchdog_handle = supervisor.start_watchdog_loop();
 
@@ -240,7 +269,10 @@ async fn main() -> Result<()> {
                 || std::fs::read_to_string("/proc/cmdline")
                     .map(|c| c.contains("rd.live.image"))
                     .unwrap_or(false);
-            if cfg.shortcuts_hud.show_at_startup || is_live {
+            let live_installer_present = is_live
+                && (std::path::Path::new("/usr/bin/liveinst").exists()
+                    || std::path::Path::new("/usr/share/anaconda/gnome/fedora-welcome").exists());
+            if cfg.shortcuts_hud.show_at_startup && !live_installer_present {
                 std::thread::spawn(|| {
                     std::thread::sleep(std::time::Duration::from_millis(2000));
                     let _ = std::process::Command::new("solar-shell")
@@ -262,9 +294,90 @@ async fn main() -> Result<()> {
         }
         "settings" => {
             info!("Launching SolarUI Settings GUI...");
-            tokio::task::block_in_place(|| {
-                settings_gui::launch_settings_window();
+            let mut initial_tab: Option<String> = None;
+            let mut idx = 1;
+            while idx < args.len() {
+                if (args[idx] == "--tab" || args[idx] == "-t") && idx + 1 < args.len() {
+                    initial_tab = Some(args[idx + 1].clone());
+                    break;
+                } else if let Some(rest) = args[idx].strip_prefix("--tab=") {
+                    initial_tab = Some(rest.to_string());
+                    break;
+                }
+                idx += 1;
+            }
+            tokio::task::block_in_place(move || {
+                settings_gui::launch_settings_window_with_tab(initial_tab.as_deref());
             });
+            Ok(())
+        }
+        "wallpaper" => {
+            let sub = args.get(2).map(|s| s.as_str()).unwrap_or("get");
+            match sub {
+                "get" => {
+                    println!("{}", wallpaper::current_effective_wallpaper());
+                }
+                "list" => {
+                    for (label, path) in wallpaper::discover_available_wallpapers() {
+                        println!("{}\t{}", label, path);
+                    }
+                }
+                "set" => {
+                    let target = args
+                        .get(3)
+                        .ok_or_else(|| anyhow::anyhow!("Usage: solar-shell wallpaper set <path>"))?;
+                    let applied = wallpaper::apply_wallpaper_everywhere(target, true)?;
+                    println!("{}", applied);
+                }
+                other => {
+                    anyhow::bail!(
+                        "Unknown wallpaper subcommand '{}'. Valid: get, list, set <path>",
+                        other
+                    );
+                }
+            }
+            Ok(())
+        }
+        "display" => {
+            let sub = args.get(2).map(|s| s.as_str()).unwrap_or("list");
+            match sub {
+                "list" => {
+                    for out in settings_gui::get_detected_outputs() {
+                        println!(
+                            "{}\t{}\t{}\tscale={:.2}",
+                            out.name, out.description, out.resolution, out.scale
+                        );
+                    }
+                }
+                "set-mode" => {
+                    let out_name = args.get(3).ok_or_else(|| {
+                        anyhow::anyhow!("Usage: solar-shell display set-mode <output> <WxH@Hz> [--custom]")
+                    })?;
+                    let mode_str = args.get(4).ok_or_else(|| {
+                        anyhow::anyhow!("Usage: solar-shell display set-mode <output> <WxH@Hz> [--custom]")
+                    })?;
+                    let is_custom = args.iter().any(|a| a == "--custom");
+                    settings_gui::apply_per_output_mode_dynamically(out_name, mode_str, is_custom)?;
+                    println!("OK");
+                }
+                "set-scale" => {
+                    let out_name = args.get(3).ok_or_else(|| {
+                        anyhow::anyhow!("Usage: solar-shell display set-scale <output> <scale>")
+                    })?;
+                    let sc: f64 = args
+                        .get(4)
+                        .and_then(|v| v.parse().ok())
+                        .ok_or_else(|| anyhow::anyhow!("Invalid scale value"))?;
+                    settings_gui::apply_per_output_scale_dynamically(out_name, sc);
+                    println!("OK");
+                }
+                other => {
+                    anyhow::bail!(
+                        "Unknown display subcommand '{}'. Valid: list, set-mode, set-scale",
+                        other
+                    );
+                }
+            }
             Ok(())
         }
         "welcome" | "shortcuts" => {
@@ -537,9 +650,181 @@ async fn main() -> Result<()> {
                 .spawn();
             Ok(())
         }
-        other => {
-            eprintln!("Unknown command: '{}'. Valid: omnibar, gamezone, route, switch, sync-noctalia, supervisor, run, autostart, settings, welcome, snap, minimize, restore, toggle-taskbar, apps, status, bar, easter-egg, sound, atmosphere, recovery, oobe", other);
+        "show-desktop" => {
+            we10x_profile::toggle_show_desktop().await?;
             Ok(())
+        }
+        "aero-snap" => {
+            let dir = args.get(2).map(|s| s.as_str()).unwrap_or("up");
+            we10x_profile::aero_snap_focused(dir).await?;
+            Ok(())
+        }
+        "we10x-ipc" => {
+            let target = args.get(2).map(|s| s.as_str()).unwrap_or("startMenu");
+            let func = args.get(3).map(|s| s.as_str()).unwrap_or("toggle");
+            providers::We10xProvider::new()
+                .ipc_checked(target, func)
+                .await?;
+            Ok(())
+        }
+        "we10x-config" => {
+            let sub = args.get(2).map(|s| s.as_str()).unwrap_or("get");
+            match sub {
+                "get" => {
+                    let cfg = SolarConfig::load();
+                    let is_live = std::path::Path::new("/run/initramfs/live").exists()
+                        || std::path::Path::new("/dev/mapper/live-base").exists()
+                        || std::fs::read_to_string("/proc/cmdline")
+                            .map(|c| c.contains("rd.live.image"))
+                            .unwrap_or(false);
+                    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/liveuser".into());
+                    let trash_files = std::path::Path::new(&home).join(".local/share/Trash/files");
+                    let trash_has_items = std::fs::read_dir(&trash_files)
+                        .map(|mut it| it.next().is_some())
+                        .unwrap_or(false);
+                    let user = std::env::var("USER").unwrap_or_else(|_| "liveuser".into());
+                    let eff_wp = if !cfg.shell.we10x_wallpaper.trim().is_empty()
+                        && std::path::Path::new(&cfg.shell.we10x_wallpaper).is_file()
+                    {
+                        cfg.shell.we10x_wallpaper.clone()
+                    } else if !cfg.display.wallpaper.trim().is_empty()
+                        && std::path::Path::new(&cfg.display.wallpaper).is_file()
+                    {
+                        cfg.display.wallpaper.clone()
+                    } else {
+                        String::new()
+                    };
+                    let payload = serde_json::json!({
+                        "theme_mode": cfg.shell.we10x_theme_mode,
+                        "start_icon": cfg.shell.we10x_start_icon,
+                        "accent_color": we10x_profile::normalize_hex_color(&cfg.shell.we10x_accent_color),
+                        "colorize_surfaces": cfg.shell.we10x_colorize_surfaces,
+                        "taskbar_opacity_pct": cfg.shell.we10x_taskbar_opacity_pct,
+                        "wallpaper": eff_wp,
+                        "desktop_icons": cfg.shell.we10x_desktop_icons,
+                        "is_live": is_live,
+                        "trash_has_items": trash_has_items,
+                        "username": user,
+                        "home": home,
+                    });
+                    println!("{}", payload);
+                }
+                "set-theme" => {
+                    if let Some(mode) = args.get(3) {
+                        let normalized = if mode.eq_ignore_ascii_case("light") {
+                            "light"
+                        } else if mode.eq_ignore_ascii_case("oled") || mode.eq_ignore_ascii_case("black") {
+                            "oled"
+                        } else {
+                            "dark"
+                        };
+                        SolarConfig::update(|c| {
+                            c.shell.we10x_theme_mode = normalized.to_string();
+                        })?;
+                        let cfg = SolarConfig::load();
+                        if cfg.shell.engine == engine::ShellEngine::We10x {
+                            let _ = we10x_profile::enter_we10x_profile().await;
+                            let _ = providers::We10xProvider::new()
+                                .ipc("reloadConfig", "reload")
+                                .await;
+                        }
+                    }
+                }
+                "set-accent" => {
+                    if let Some(raw_hex) = args.get(3) {
+                        let hex = we10x_profile::normalize_hex_color(raw_hex);
+                        SolarConfig::update(|c| {
+                            c.shell.we10x_accent_color = hex;
+                        })?;
+                        let cfg = SolarConfig::load();
+                        if cfg.shell.engine == engine::ShellEngine::We10x {
+                            let _ = we10x_profile::enter_we10x_profile().await;
+                            let _ = providers::We10xProvider::new()
+                                .ipc("reloadConfig", "reload")
+                                .await;
+                        }
+                    }
+                }
+                "set-colorize" => {
+                    if let Some(v) = args.get(3) {
+                        let enabled = matches!(v.to_ascii_lowercase().as_str(), "true" | "1" | "on");
+                        SolarConfig::update(|c| {
+                            c.shell.we10x_colorize_surfaces = enabled;
+                        })?;
+                        let cfg = SolarConfig::load();
+                        if cfg.shell.engine == engine::ShellEngine::We10x {
+                            let _ = we10x_profile::enter_we10x_profile().await;
+                            let _ = providers::We10xProvider::new()
+                                .ipc("reloadConfig", "reload")
+                                .await;
+                        }
+                    }
+                }
+                "set-opacity" => {
+                    if let Some(v) = args.get(3) {
+                        let pct = v.parse::<u8>().unwrap_or(95).clamp(45, 100);
+                        SolarConfig::update(|c| {
+                            c.shell.we10x_taskbar_opacity_pct = pct;
+                        })?;
+                        let _ = providers::We10xProvider::new()
+                            .ipc("reloadConfig", "reload")
+                            .await;
+                    }
+                }
+                "set-wallpaper" => {
+                    if let Some(path) = args.get(3) {
+                        wallpaper::apply_wallpaper_everywhere(path, true)?;
+                    }
+                }
+                "set-start-icon" => {
+                    if let Some(icon) = args.get(3) {
+                        let normalized = if icon.eq_ignore_ascii_case("blaze") {
+                            "blaze"
+                        } else {
+                            "we10x"
+                        };
+                        SolarConfig::update(|c| {
+                            c.shell.we10x_start_icon = normalized.to_string();
+                        })?;
+                        let _ = providers::We10xProvider::new()
+                            .ipc("reloadConfig", "reload")
+                            .await;
+                    }
+                }
+                "set-desktop-icons" => {
+                    if let Some(v) = args.get(3) {
+                        let enabled = matches!(v.to_ascii_lowercase().as_str(), "true" | "1" | "on");
+                        SolarConfig::update(|c| {
+                            c.shell.we10x_desktop_icons = enabled;
+                        })?;
+                        let _ = providers::We10xProvider::new()
+                            .ipc("reloadConfig", "reload")
+                            .await;
+                    }
+                }
+                "provision-user" => {
+                    let target_home = args
+                        .get(3)
+                        .map(std::path::PathBuf::from)
+                        .ok_or_else(|| anyhow::anyhow!("Usage: solar-shell we10x-config provision-user <home_dir> [dark|light]"))?;
+                    let mode = args.get(4).map(|s| s.as_str()).unwrap_or("dark");
+                    we10x_profile::provision_user_we10x_home(
+                        &target_home,
+                        std::path::Path::new("/etc/solarui/niri.kdl"),
+                        mode,
+                    )?;
+                }
+                other => {
+                    anyhow::bail!(
+                        "Unknown we10x-config subcommand '{}'. Valid: get, set-theme, set-start-icon, set-desktop-icons, provision-user",
+                        other
+                    );
+                }
+            }
+            Ok(())
+        }
+        other => {
+            anyhow::bail!("Unknown command: '{}'. Valid: omnibar, gamezone, route, switch, sync-noctalia, supervisor, run, autostart, settings, welcome, snap, minimize, restore, show-desktop, aero-snap, we10x-ipc, we10x-config, toggle-taskbar, apps, status, bar, easter-egg, sound, atmosphere, recovery, oobe", other);
         }
     }
 }
@@ -569,7 +854,7 @@ async fn run_gamezone_shell_session() -> Result<()> {
         prev_engine
     );
 
-    // 2. Arka plan masaüstü kabuklarını (Noctalia, Caelestia, End4) durdurarak RAM ve GPU'yu tamamen oyuna aç
+    // 2. Arka plan masaüstü kabuklarını (Noctalia, Caelestia, End4, We10x) durdurarak RAM ve GPU'yu tamamen oyuna aç
     let noctalia = providers::NoctaliaProvider::default();
     let _ = noctalia.stop().await;
 
@@ -579,6 +864,9 @@ async fn run_gamezone_shell_session() -> Result<()> {
     let end4 = providers::End4PcProvider::default();
     let _ = end4.stop().await;
 
+    let we10x = providers::We10xProvider::default();
+    let _ = we10x.stop().await;
+
     let _ = std::process::Command::new("pkill")
         .args(["-TERM", "-x", "noctalia"])
         .status();
@@ -587,6 +875,9 @@ async fn run_gamezone_shell_session() -> Result<()> {
         .status();
     let _ = std::process::Command::new("pkill")
         .args(["-TERM", "-f", "(qs|quickshell).*end4"])
+        .status();
+    let _ = std::process::Command::new("pkill")
+        .args(["-TERM", "-f", "(qs|quickshell).*we10x"])
         .status();
     let _ = std::process::Command::new("pkill")
         .args(["-TERM", "-f", "solar-shell (run|gui|taskbar|window)"])

@@ -1,0 +1,2 @@
+# Hide the immutable BlazeOS Recovery Vault (BLAZE_REC) from desktop file managers/auto-mounters and enforce kernel read-only lock
+ENV{ID_FS_LABEL}=="BLAZE_REC", ENV{UDISKS_IGNORE}="1", ENV{UDISKS_PRESENTATION_HIDE}="1", ENV{UDISKS_AUTO}="0", ACTION=="add|change", KERNEL=="sd*|nvme*|vd*|mmcblk*|hd*", RUN+="/sbin/blockdev --setro $devnode"

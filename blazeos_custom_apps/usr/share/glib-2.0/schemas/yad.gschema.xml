@@ -1,0 +1,17 @@
+<schemalist>
+  <schema id="yad.settings" path="/yad/settings/">
+    <key name="width" type="i"><default>-1</default></key>
+    <key name="height" type="i"><default>-1</default></key>
+    <key name="border" type="i"><default>0</default></key>
+    <key name="show-remain" type="b"><default>false</default></key>
+    <key name="combo-always-editable" type="b"><default>false</default></key>
+    <key name="terminal" type="s"><default>"xterm -e %s"</default></key>
+    <key name="open-command" type="s"><default>"xdg-open %s"</default></key>
+    <key name="date-format" type="s"><default>"%x"</default></key>
+    <key name="max-tab" type="i"><default>100</default></key>
+    <key name="large-preview" type="b"><default>false</default></key>
+    <key name="uri-color" type="s"><default>"blue"</default></key>
+    <key name="ignore-unknown-options" type="b"><default>false</default></key>
+    <key name="debug" type="b"><default>false</default></key>
+  </schema>
+</schemalist>

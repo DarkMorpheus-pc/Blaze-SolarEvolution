@@ -66,7 +66,7 @@ pub use crate::workspace::{Workspace, WorkspaceLayoutPart};
 
 const RECURSION_LIMIT: u8 = 10;
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Default, PartialEq)]
 pub struct Config {
     pub input: Input,
     pub outputs: Outputs,
@@ -74,6 +74,7 @@ pub struct Config {
     pub spawn_sh_at_startup: Vec<SpawnShAtStartup>,
     pub layout: Layout,
     pub prefer_no_csd: bool,
+    pub super_tap_spawn: Vec<String>,
     pub cursor: Cursor,
     pub screenshot_path: ScreenshotPath,
     pub clipboard: Clipboard,
@@ -92,6 +93,40 @@ pub struct Config {
     pub debug: Debug,
     pub workspaces: Vec<Workspace>,
     pub recent_windows: RecentWindows,
+}
+
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = f.debug_struct("Config");
+        s.field("input", &self.input)
+            .field("outputs", &self.outputs)
+            .field("spawn_at_startup", &self.spawn_at_startup)
+            .field("spawn_sh_at_startup", &self.spawn_sh_at_startup)
+            .field("layout", &self.layout)
+            .field("prefer_no_csd", &self.prefer_no_csd);
+        if !self.super_tap_spawn.is_empty() {
+            s.field("super_tap_spawn", &self.super_tap_spawn);
+        }
+        s.field("cursor", &self.cursor)
+            .field("screenshot_path", &self.screenshot_path)
+            .field("clipboard", &self.clipboard)
+            .field("hotkey_overlay", &self.hotkey_overlay)
+            .field("config_notification", &self.config_notification)
+            .field("animations", &self.animations)
+            .field("blur", &self.blur)
+            .field("gestures", &self.gestures)
+            .field("overview", &self.overview)
+            .field("environment", &self.environment)
+            .field("xwayland_satellite", &self.xwayland_satellite)
+            .field("window_rules", &self.window_rules)
+            .field("layer_rules", &self.layer_rules)
+            .field("binds", &self.binds)
+            .field("switch_events", &self.switch_events)
+            .field("debug", &self.debug)
+            .field("workspaces", &self.workspaces)
+            .field("recent_windows", &self.recent_windows)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -236,6 +271,11 @@ where
 
                 "prefer-no-csd" => {
                     config.borrow_mut().prefer_no_csd = Flag::decode_node(node, ctx)?.0
+                }
+
+                "super-tap-spawn" => {
+                    let part = SpawnAtStartup::decode_node(node, ctx)?;
+                    config.borrow_mut().super_tap_spawn = part.command;
                 }
 
                 "screenshot-path" => {
@@ -2502,5 +2542,51 @@ mod tests {
         +                0.66667,
         "#,
         );
+    }
+
+    #[test]
+    fn parse_we10x_server_titlebar_and_super_tap() {
+        let parsed = do_parse(
+            r##"
+            super-tap-spawn "solar-shell" "route" "launcher"
+            layout {
+                server-titlebar {
+                    on
+                    height 30
+                    active-color "#1f1f1f"
+                    inactive-color "#2b2b2b"
+                    active-text-color "#ffffff"
+                    inactive-text-color "#999999"
+                    aero-snap true
+                    allow-minimize true
+                }
+            }
+            window-rule {
+                match app-id="^kitty$"
+                server-titlebar true
+            }
+            "##,
+        );
+        assert_eq!(
+            parsed.super_tap_spawn,
+            vec!["solar-shell", "route", "launcher"]
+        );
+        assert!(parsed.layout.server_titlebar.on);
+        assert_eq!(parsed.layout.server_titlebar.height, 30.0);
+        assert!(parsed.layout.server_titlebar.aero_snap);
+        assert!(parsed.layout.server_titlebar.allow_minimize);
+        assert_eq!(parsed.window_rules.len(), 1);
+        assert_eq!(parsed.window_rules[0].server_titlebar, Some(true));
+
+        let parsed_default = do_parse(
+            r##"
+            layout {
+                server-titlebar {
+                    on
+                }
+            }
+            "##,
+        );
+        assert!(!parsed_default.layout.server_titlebar.allow_minimize);
     }
 }

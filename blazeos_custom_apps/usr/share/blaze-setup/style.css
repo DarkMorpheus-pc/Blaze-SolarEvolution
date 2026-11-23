@@ -585,16 +585,16 @@ body.theme-light .field-label { color: #1d1d1f; }
 
 .shell-grid {
     width: 100%;
-    max-width: 580px;
+    max-width: 600px;
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 16px;
-    margin-bottom: 12px;
+    gap: 12px;
+    margin-bottom: 10px;
 }
 
 .shell-card {
     position: relative;
-    padding: 14px 16px;
+    padding: 12px 14px;
     border-radius: 12px;
     border: 2px solid rgba(255, 255, 255, 0.12);
     background: rgba(255, 255, 255, 0.04);
@@ -602,7 +602,7 @@ body.theme-light .field-label { color: #1d1d1f; }
     text-align: left;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 5px;
     transition: all 0.2s ease;
 }
 
@@ -624,15 +624,28 @@ body.theme-light .shell-card {
 
 .shell-badge {
     position: absolute;
-    top: 10px;
-    right: 10px;
-    font-size: 10px;
+    top: 9px;
+    right: 9px;
+    font-size: 9.5px;
     font-weight: 700;
     background: var(--apple-blue);
     color: #ffffff;
-    padding: 2px 8px;
+    padding: 2px 7px;
     border-radius: 10px;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.03em;
+}
+
+.shell-badge.win-badge {
+    background: #0078d7;
+}
+
+html[dir="rtl"] .shell-card {
+    text-align: right;
+}
+
+html[dir="rtl"] .shell-badge {
+    right: auto;
+    left: 9px;
 }
 
 .shell-icon-row {

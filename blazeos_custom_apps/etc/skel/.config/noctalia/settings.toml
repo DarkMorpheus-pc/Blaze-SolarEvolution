@@ -3,10 +3,10 @@ enabled = true
 fill_mode = "crop"
 transition = ["fade", "zoom"]
 transition_duration = 1000
-directory = "/usr/share/blazeos/wallpapers"
+directory = "/usr/share/backgrounds/blazeos"
 
 [wallpaper.default]
-path = "/usr/share/blazeos/wallpapers/default.png"
+path = "/usr/share/backgrounds/blazeos/default.png"
 
 [theme]
 mode = "dark"

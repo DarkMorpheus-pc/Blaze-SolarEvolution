@@ -2,12 +2,13 @@ use knuffel::errors::DecodeError;
 use niri_ipc::{ColumnDisplay, SizeChange};
 
 use crate::appearance::{
-    Border, FocusRing, InsertHint, Shadow, TabIndicator, DEFAULT_BACKGROUND_COLOR,
+    Border, FocusRing, InsertHint, ServerTitlebar, ServerTitlebarRule, Shadow, TabIndicator,
+    DEFAULT_BACKGROUND_COLOR,
 };
 use crate::utils::{expect_only_children, Flag, MergeWith};
 use crate::{BorderRule, Color, FloatOrInt, InsertHintPart, ShadowRule, TabIndicatorPart};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Layout {
     pub focus_ring: FocusRing,
     pub border: Border,
@@ -24,6 +25,38 @@ pub struct Layout {
     pub gaps: f64,
     pub struts: Struts,
     pub background_color: Color,
+    pub server_titlebar: ServerTitlebar,
+}
+
+impl std::fmt::Debug for Layout {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = f.debug_struct("Layout");
+        s.field("focus_ring", &self.focus_ring)
+            .field("border", &self.border)
+            .field("shadow", &self.shadow)
+            .field("tab_indicator", &self.tab_indicator)
+            .field("insert_hint", &self.insert_hint)
+            .field("preset_column_widths", &self.preset_column_widths)
+            .field("default_column_width", &self.default_column_width)
+            .field("preset_window_heights", &self.preset_window_heights)
+            .field("center_focused_column", &self.center_focused_column)
+            .field(
+                "always_center_single_column",
+                &self.always_center_single_column,
+            )
+            .field(
+                "empty_workspace_above_first",
+                &self.empty_workspace_above_first,
+            )
+            .field("default_column_display", &self.default_column_display)
+            .field("gaps", &self.gaps)
+            .field("struts", &self.struts)
+            .field("background_color", &self.background_color);
+        if self.server_titlebar != ServerTitlebar::default() {
+            s.field("server_titlebar", &self.server_titlebar);
+        }
+        s.finish()
+    }
 }
 
 impl Default for Layout {
@@ -52,6 +85,7 @@ impl Default for Layout {
                 PresetSize::Proportion(2. / 3.),
             ],
             background_color: DEFAULT_BACKGROUND_COLOR,
+            server_titlebar: ServerTitlebar::default(),
         }
     }
 }
@@ -68,6 +102,7 @@ impl MergeWith<LayoutPart> for Layout {
             always_center_single_column,
             empty_workspace_above_first,
             gaps,
+            server_titlebar,
         );
 
         merge_clone!(
@@ -126,6 +161,8 @@ pub struct LayoutPart {
     pub struts: Option<Struts>,
     #[knuffel(child)]
     pub background_color: Option<Color>,
+    #[knuffel(child)]
+    pub server_titlebar: Option<ServerTitlebarRule>,
 }
 
 #[derive(knuffel::Decode, Debug, Clone, Copy, PartialEq)]

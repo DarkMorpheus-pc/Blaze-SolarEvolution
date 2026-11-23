@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=BlazeOS Control
+Name[tr]=BlazeOS Merkezi
+Name[de]=BlazeOS-Zentrale
+Comment=Check for updates and add desktop environments
+Comment[tr]=Güncellemeleri denetle ve masaüstü ortamı ekle
+Comment[de]=Nach Updates suchen und Desktops hinzufügen
+Exec=/usr/bin/blazeos-control
+Icon=/usr/share/blazeos/icons/blazeos-logo.png
+Terminal=false
+Categories=System;Settings;PackageManager;
+Keywords=blazeos;update;upgrade;desktop;plasma;kde;xfce;control;merkez;güncelleme;

@@ -1,19 +1,30 @@
 #!/bin/bash
-# Preserve DNF5's offline transaction semantics while publishing real package
-# transaction progress to Plymouth.
+# Preserve DNF5's offline transaction & system-upgrade semantics while publishing
+# real package transaction progress to Plymouth and preserving BlazeOS identity.
 set -uo pipefail
 
 plymouth_call() {
     /usr/bin/plymouth "$@" >/dev/null 2>&1 || :
 }
 
-plymouth_call change-mode --updates
-plymouth_call display-message --text="Evren güncelleniyor, daha da genişliyor…"
+UPGRADE_TARGET_FILE="/var/lib/blazeos/pending-system-upgrade-releasever"
+PENDING_VER=""
+if [ -f "$UPGRADE_TARGET_FILE" ]; then
+    PENDING_VER="$(tr -dc '0-9' < "$UPGRADE_TARGET_FILE" | head -c 4 || true)"
+fi
+
+if [ -n "$PENDING_VER" ]; then
+    plymouth_call change-mode --system-upgrade || plymouth_call change-mode --updates
+    plymouth_call display-message --text="Evren yeni sürüme (Taban ${PENDING_VER}) yükseltiliyor…"
+else
+    plymouth_call change-mode --updates
+    plymouth_call display-message --text="Evren güncelleniyor, daha da genişliyor…"
+fi
 plymouth_call system-update --progress=0
 
 # Create automated rollback snapshot before executing offline update
-if [ -x /usr/local/bin/blaze-snapshot ]; then
-    /usr/local/bin/blaze-snapshot pre-transaction >/dev/null 2>&1 || :
+if [ -x /usr/bin/blaze-snapshot ]; then
+    /usr/bin/blaze-snapshot pre-transaction >/dev/null 2>&1 || :
 fi
 
 set +e
@@ -21,6 +32,19 @@ set +e
     /usr/libexec/blazeos-offline-progress-filter
 dnf_status=${PIPESTATUS[0]}
 set -e
+
+if [ "$dnf_status" -eq 0 ] && [ -n "$PENDING_VER" ]; then
+    printf '%s\n' "$PENDING_VER" > /etc/dnf/vars/releasever 2>/dev/null || :
+    printf '%s\n' "$PENDING_VER" > /usr/share/dnf5/vars.d/releasever 2>/dev/null || :
+    if [ -f /etc/blazeos/update-channel.conf ]; then
+        sed -i -E "s/^current_releasever=.*/current_releasever=${PENDING_VER}/" /etc/blazeos/update-channel.conf 2>/dev/null || :
+    fi
+    rm -f "$UPGRADE_TARGET_FILE" 2>/dev/null || :
+fi
+
+if [ -x /usr/bin/blazeos-sync-identity ]; then
+    /usr/bin/blazeos-sync-identity --force --quiet || :
+fi
 
 if [ "$dnf_status" -eq 0 ]; then
     plymouth_call system-update --progress=100

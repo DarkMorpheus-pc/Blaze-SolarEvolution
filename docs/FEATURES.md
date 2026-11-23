@@ -43,5 +43,5 @@ Durum / Status: `Stable` kararlı · `Beta` kullanılabilir, kenarları pürüzl
 
 - **Blaze Continuum deneyseldir** (v0.1): CRIU ve Niri sürümüne bağımlıdır, her uygulama dondurulamaz.
 - **Sentinel şu an bir denetçidir**, politika *uygulayıcı* değildir; politikayı SELinux/AppArmor uygular.
-- Snapshot/rollback henüz yoktur (planlanıyor: btrfs).
+- **Snapshot/rollback (`blaze-snapshot`):** Araç Btrfs dosya sistemi üzerinde çalışır; yalnızca Btrfs kök düzeni seçilen kurulumlarda aktiftir (Adım 4 ile varsayılan Btrfs düzenine sabitlenecektir).
 - Özel Rust ikili dosyalarının Fedora içinde yeniden üretilebilir derlenmesi için RPM paketleme çalışması sürmektedir (bkz. `SOURCES.md`).

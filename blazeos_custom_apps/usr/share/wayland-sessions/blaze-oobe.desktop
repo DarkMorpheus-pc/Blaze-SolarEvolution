@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=BlazeOS Setup Assistant
 Comment=One-time BlazeOS first-boot setup session
-Exec=niri --config /usr/share/blaze-setup/niri-setup.kdl
+Exec=/usr/libexec/blaze-oobe-session
 Type=Application
 DesktopNames=blaze-setup

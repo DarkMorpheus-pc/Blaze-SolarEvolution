@@ -1,0 +1,5 @@
+#!/usr/bin/bash
+# Enforce Blaze SolarEvolution 5.05 identity before GRUB BLS / dracut hooks run.
+[ -x /usr/bin/blazeos-sync-identity ] || exit 0
+/usr/bin/blazeos-sync-identity --pre-kernel --quiet || :
+exit 0

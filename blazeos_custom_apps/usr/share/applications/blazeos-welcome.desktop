@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=BlazeOS Setup
+Name[tr]=BlazeOS Kurulum Sihirbazı
+Name[de]=BlazeOS Einrichtung
+Comment=Re-run the BlazeOS first-boot setup (desktop selection, updates, Waydroid)
+Comment[tr]=BlazeOS ilk açılış sihirbazını yeniden çalıştır (masaüstü seçimi, güncelleme, Waydroid)
+Exec=/usr/bin/blazeos-welcome --force
+Icon=/usr/share/blazeos/icons/blazeos-logo.png
+Terminal=false
+Categories=System;Settings;
+Keywords=blazeos;setup;welcome;desktop;waydroid;

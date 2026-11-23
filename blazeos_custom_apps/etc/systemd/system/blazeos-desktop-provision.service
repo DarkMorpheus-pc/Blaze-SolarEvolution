@@ -7,7 +7,7 @@ ConditionPathExists=/var/lib/blazeos/desktop-provision-pending
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/blazeos-desktop-provision
+ExecStart=/usr/bin/blazeos-desktop-provision
 TimeoutStartSec=50min
 Nice=15
 IOSchedulingClass=best-effort

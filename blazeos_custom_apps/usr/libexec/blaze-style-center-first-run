@@ -32,4 +32,4 @@ done
 # Appearance presets now live inside BlazeOS Merkezi. Keep the style-center
 # executable as the shared, reversible settings backend.
 export BLAZEOS_CONTROL_PAGE=appearance
-exec /usr/local/bin/blazeos-control
+exec /usr/bin/blazeos-control

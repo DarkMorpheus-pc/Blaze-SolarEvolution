@@ -1,0 +1,285 @@
+#!/bin/bash
+# ==============================================================================
+# BlazeOS Post-Installation Firstboot Setup
+# Ensures proper user session, cleans liveuser, sets GDM, applies bootloader
+# ==============================================================================
+set -e
+
+# Live ISO detection: exit immediately before modifying anything
+if grep -qE 'rd\.live\.image|root=live:' /proc/cmdline 2>/dev/null || [ -d /run/initramfs/live ] || [ -f /run/liveuser ]; then
+    echo "Live environment detected; installed-system setup skipped."
+    exit 0
+fi
+
+LOG="/var/log/blazeos-postinstall.log"
+exec >> "$LOG" 2>&1
+echo "=== Starting BlazeOS Post-Install at $(date) ==="
+
+# The installer launcher belongs only to the live image.  Remove both the
+# copied desktop shortcut and the application menu entry after installation;
+# keeping it causes users to accidentally launch Anaconda on the installed OS.
+rm -f /etc/skel/Desktop/liveinst.desktop /usr/share/applications/liveinst.desktop
+rm -f /etc/sysconfig/livesys
+systemctl disable livesys.service livesys-late.service 2>/dev/null || true
+find /home -maxdepth 3 -type f -name liveinst.desktop -delete 2>/dev/null || true
+
+# 1. Check if Apple-Style OOBE has completed
+if [ ! -f /etc/blazeos-setup-completed ]; then
+    echo "BlazeOS first-boot OOBE pending. Ensuring SDDM 00-blaze-oobe.conf and blaze-setup account integrity..."
+    rm -f /etc/sddm.conf.d/autologin.conf /var/lib/sddm/state.conf
+
+    # Self-heal sddm & blaze-setup in /etc/passwd, /etc/shadow, /etc/group, /etc/gshadow
+    if ! id -u blaze-setup >/dev/null 2>&1; then
+        useradd --system --uid 961 --user-group --create-home --home-dir /var/lib/blaze-setup --shell /bin/bash blaze-setup 2>/dev/null || true
+    fi
+    if ! grep -q '^sddm:' /etc/shadow 2>/dev/null && grep -q '^sddm:' /etc/passwd 2>/dev/null; then
+        printf 'sddm:!*:20726::::::\n' >> /etc/shadow
+    fi
+    if ! grep -q '^blaze-setup:' /etc/shadow 2>/dev/null; then
+        printf 'blaze-setup::20726::::::\n' >> /etc/shadow
+    else
+        sed -i 's/^blaze-setup:[^:]*:/blaze-setup::/' /etc/shadow 2>/dev/null || true
+    fi
+    chmod 0000 /etc/shadow 2>/dev/null || true
+    if ! grep -q '^sddm:' /etc/gshadow 2>/dev/null && grep -q '^sddm:' /etc/group 2>/dev/null; then
+        printf 'sddm:!*::\n' >> /etc/gshadow
+    fi
+    if ! grep -q '^blaze-setup:' /etc/gshadow 2>/dev/null && grep -q '^blaze-setup:' /etc/group 2>/dev/null; then
+        printf 'blaze-setup:!::\n' >> /etc/gshadow
+    fi
+    chmod 0000 /etc/gshadow 2>/dev/null || true
+    usermod -s /bin/bash -d /var/lib/blaze-setup blaze-setup 2>/dev/null || true
+    for grp in wheel video audio input render; do
+        if getent group "$grp" >/dev/null 2>&1; then
+            usermod -aG "$grp" blaze-setup 2>/dev/null || true
+        fi
+    done
+
+    # Ensure home directory, sudoers, session template, and 00-blaze-oobe.conf for blaze-setup
+    mkdir -p /var/lib/blaze-setup /etc/sddm.conf.d /etc/sudoers.d /usr/share/wayland-sessions
+    chown -R blaze-setup:blaze-setup /var/lib/blaze-setup 2>/dev/null || chown -R 961:961 /var/lib/blaze-setup 2>/dev/null || true
+    chmod 0755 /var/lib/blaze-setup 2>/dev/null || true
+    printf 'blaze-setup ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/99-blaze-setup
+    chmod 0440 /etc/sudoers.d/99-blaze-setup 2>/dev/null || true
+    if [ ! -f /usr/share/wayland-sessions/blaze-oobe.desktop ] && [ -f /usr/share/blaze-setup/blaze-oobe.desktop ]; then
+        cp -a /usr/share/blaze-setup/blaze-oobe.desktop /usr/share/wayland-sessions/blaze-oobe.desktop
+    fi
+    cat > /etc/sddm.conf.d/00-blaze-oobe.conf << 'OOBESDDM'
+[Autologin]
+User=blaze-setup
+Session=blaze-oobe.desktop
+Relogin=false
+
+[Users]
+MinimumUid=900
+RememberLastUser=false
+RememberLastSession=false
+OOBESDDM
+    restorecon -F /etc/shadow /etc/gshadow /etc/passwd /etc/group /etc/sudoers.d/99-blaze-setup /etc/sddm.conf.d/00-blaze-oobe.conf 2>/dev/null || true
+    restorecon -FR /var/lib/blaze-setup 2>/dev/null || true
+
+    mkdir -p /etc/systemd/system
+    mkdir -p /etc/systemd/system/graphical.target.wants
+    mkdir -p /etc/systemd/system/multi-user.target.wants
+    ln -sf /usr/lib/systemd/system/sddm.service /etc/systemd/system/display-manager.service 2>/dev/null || true
+    ln -sf /usr/lib/systemd/system/sddm.service /etc/systemd/system/graphical.target.wants/sddm.service 2>/dev/null || true
+    ln -sf /usr/lib/systemd/system/sddm.service /etc/systemd/system/multi-user.target.wants/display-manager.service 2>/dev/null || true
+    ln -sf /usr/lib/systemd/system/graphical.target /etc/systemd/system/default.target 2>/dev/null || true
+    systemctl set-default graphical.target 2>/dev/null || true
+    systemctl enable sddm.service 2>/dev/null || true
+
+    echo "=== OOBE Firstboot Preparation Complete ==="
+    exit 0
+fi
+
+# 1. Resolve Primary Human User or migrate/create fallback
+FIRST_HUMAN_USER=$(awk -F: '$3 >= 1000 && $3 < 65534 && $1 != "liveuser" {print $1; exit}' /etc/passwd)
+
+if [ -z "$FIRST_HUMAN_USER" ]; then
+    echo "No custom human user found from installer. Setting up primary user 'blaze'..."
+    if id -u liveuser &>/dev/null; then
+        # Migrate liveuser to blaze preserving home configuration
+        usermod -l blaze -d /home/blaze -m liveuser 2>/dev/null || true
+        groupmod -n blaze liveuser 2>/dev/null || true
+        FIRST_HUMAN_USER="blaze"
+    else
+        useradd -m -s /bin/bash -U blaze 2>/dev/null || true
+        FIRST_HUMAN_USER="blaze"
+    fi
+    # Never publish a predictable fallback password. The first-boot assistant
+    # creates the real human account; this emergency fallback stays locked.
+    passwd -l blaze 2>/dev/null || true
+else
+    # Custom human user exists, purge lingering liveuser
+    if id -u liveuser &>/dev/null; then
+        echo "Purging lingering liveuser account..."
+        userdel -rf liveuser 2>/dev/null || true
+        rm -rf /home/liveuser /var/lib/AccountsService/users/liveuser /etc/sudoers.d/liveuser
+    fi
+fi
+
+# Ensure valid hostname and /etc/hosts
+if [ ! -s /etc/hostname ] || grep -qiE '^(localhost|localhost\.localdomain)?$' /etc/hostname 2>/dev/null; then
+    echo "blazeos" > /etc/hostname
+    hostnamectl set-hostname blazeos 2>/dev/null || true
+fi
+if ! grep -q "blazeos" /etc/hosts 2>/dev/null; then
+    cat > /etc/hosts << 'HOSTSEOF'
+127.0.0.1   localhost localhost.localdomain blazeos
+::1         localhost localhost.localdomain blazeos
+HOSTSEOF
+fi
+# Ensure setuid permissions for rootless containers & Ptyxis/toolbox instant startup
+chmod 4755 /usr/bin/newuidmap /usr/bin/newgidmap /usr/sbin/newuidmap /usr/sbin/newgidmap 2>/dev/null || true
+
+# 2. Configure SDDM & GDM for Primary Human User
+echo "Ensuring SDDM and display manager configuration for $FIRST_HUMAN_USER..."
+mkdir -p /etc/sddm.conf.d
+# Keep SDDM's packaged greeter/display-server defaults. Forcing the greeter
+# through a nested Weston kiosk compositor produces a persistent black screen
+# on some GPUs and virtual machines after OOBE completes.
+rm -f /etc/sddm.conf.d/10-blaze-session.conf
+
+# OOBE owns the user's autologin choice. Never create autologin here: doing so
+# bypasses SDDM and causes a fresh login keyring password prompt. If OOBE made
+# an autologin file, keep it and only normalize its selected desktop later.
+if [ -f /etc/sddm.conf.d/autologin.conf ] &&
+   ! grep -q "^User=${FIRST_HUMAN_USER}$" /etc/sddm.conf.d/autologin.conf; then
+    echo "Removing stale autologin configuration for another account."
+    rm -f /etc/sddm.conf.d/autologin.conf
+fi
+
+mkdir -p /etc/systemd/system
+ln -sf /usr/lib/systemd/system/sddm.service /etc/systemd/system/display-manager.service 2>/dev/null || true
+systemctl set-default graphical.target 2>/dev/null || true
+systemctl enable sddm.service 2>/dev/null || true
+
+mkdir -p /etc/gdm
+cat > /etc/gdm/custom.conf << 'GDMEOF'
+# GDM configuration storage
+[daemon]
+WaylandEnable=true
+DefaultSession=solarui.desktop
+InitialSetupEnable=false
+
+[security]
+
+[debug]
+GDMEOF
+
+# 3. Configure AccountsService for all human users (UID >= 1000)
+echo "Configuring user sessions in AccountsService..."
+mkdir -p /var/lib/AccountsService/users
+while IFS=: read -r user pass uid gid gecos home shell; do
+    if [ "$uid" -ge 1000 ] && [ "$uid" -lt 65534 ] && [ "$user" != "liveuser" ]; then
+        echo "Found user: $user (UID: $uid)"
+        cat > "/var/lib/AccountsService/users/$user" << ASCEOF
+[User]
+Session=solarui
+SessionType=wayland
+Icon=/usr/share/icons/hicolor/256x256/apps/solarui.png
+ASCEOF
+        chmod 0600 "/var/lib/AccountsService/users/$user"
+        chown root:root "/var/lib/AccountsService/users/$user"
+
+        for g in video audio render; do
+            usermod -aG "$g" "$user" 2>/dev/null || true
+        done
+        gpasswd -d "$user" input 2>/dev/null || true
+
+        if [ -d "$home" ]; then
+            mkdir -p "$home/.config/solarui" "$home/.config/noctalia"
+            if [ ! -f "$home/.config/noctalia/settings.toml" ] && [ -f /etc/skel/.config/noctalia/settings.toml ]; then
+                cp -f /etc/skel/.config/noctalia/settings.toml "$home/.config/noctalia/"
+            fi
+            if [ ! -f "$home/.config/solarui/niri.kdl" ] && [ -f /etc/solarui/niri.kdl ]; then
+                cp -f /etc/solarui/niri.kdl "$home/.config/solarui/"
+            fi
+            # Caelestia shell config (fixes grey screen / crash on first login)
+            if [ ! -d "$home/.config/caelestia" ] && [ -d /etc/skel/.config/caelestia ]; then
+                cp -a /etc/skel/.config/caelestia "$home/.config/caelestia"
+            fi
+            # Quickshell / Caelestia QML config (critical for shell rendering)
+            if [ ! -d "$home/.config/quickshell" ] && [ -d /etc/skel/.config/quickshell ]; then
+                cp -a /etc/skel/.config/quickshell "$home/.config/quickshell"
+            fi
+            chown -R "$user:$user" "$home/.config" 2>/dev/null || true
+        fi
+    fi
+done < /etc/passwd
+
+# Ensure at least one human administrator exists if none is currently in wheel
+if [ -n "$FIRST_HUMAN_USER" ]; then
+    WHEEL_MEMBERS=$(getent group wheel 2>/dev/null | cut -d: -f4 | tr ',' ' ')
+    HAS_HUMAN_ADMIN=0
+    for m in $WHEEL_MEMBERS; do
+        m_uid=$(id -u "$m" 2>/dev/null || echo 0)
+        if [ "$m_uid" -ge 1000 ] && [ "$m_uid" -lt 65534 ]; then
+            HAS_HUMAN_ADMIN=1
+            break
+        fi
+    done
+    if [ "$HAS_HUMAN_ADMIN" -eq 0 ]; then
+        usermod -aG wheel "$FIRST_HUMAN_USER" 2>/dev/null || true
+    fi
+fi
+
+# 4. Synchronize the session selected by the non-blocking desktop provisioner.
+# Package downloads are owned by blazeos-desktop-provision.service and must
+# never be repeated from this first-login cleanup service.
+SELECTED_DESKTOP="solarui.desktop"
+if [ -s /etc/blazeos-selected-session ]; then
+    SELECTED_DESKTOP=$(tr -d ' \n\r' </etc/blazeos-selected-session)
+fi
+if [ ! -f "/usr/share/wayland-sessions/$SELECTED_DESKTOP" ] && \
+   [ ! -f "/usr/share/xsessions/$SELECTED_DESKTOP" ]; then
+    echo "Selected session is not ready yet: $SELECTED_DESKTOP; keeping SolarUI."
+    SELECTED_DESKTOP="solarui.desktop"
+fi
+SESSION_NAME="${SELECTED_DESKTOP%.desktop}"
+SESSION_TYPE="wayland"
+[ -f "/usr/share/xsessions/$SELECTED_DESKTOP" ] && SESSION_TYPE="x11"
+for account in /var/lib/AccountsService/users/*; do
+    [ -f "$account" ] || continue
+    sed -i "s/^Session=.*/Session=${SESSION_NAME}/" "$account"
+    if grep -q '^XSession=' "$account"; then
+        sed -i "s/^XSession=.*/XSession=${SESSION_NAME}/" "$account"
+    else
+        printf 'XSession=%s\n' "$SESSION_NAME" >>"$account"
+    fi
+    if grep -q '^SessionType=' "$account"; then
+        sed -i "s/^SessionType=.*/SessionType=${SESSION_TYPE}/" "$account"
+    else
+        printf 'SessionType=%s\n' "$SESSION_TYPE" >>"$account"
+    fi
+    restorecon -F "$account" 2>/dev/null || true
+done
+
+# 5. Check bootloader choice
+if [ -f /etc/blazeos-bootloader-choice ]; then
+    BOOT_CHOICE=$(cat /etc/blazeos-bootloader-choice | tr -d ' \n\r')
+    echo "Bootloader choice: $BOOT_CHOICE"
+    if [ "$BOOT_CHOICE" = "limine" ]; then
+        if [ -x /usr/bin/blaze-bootloader ]; then
+            echo "Switching to Limine..."
+            /usr/bin/blaze-bootloader switch-to-limine || true
+        fi
+    fi
+fi
+
+# 6. Rebuild the real GRUB configuration, then repair the small EFI redirect.
+# Fedora's UEFI grub.cfg under EFI/fedora must remain a stub; writing the full
+# grub2-mkconfig output there can leave firmware at a bare `grub>` prompt.
+echo "Ensuring GRUB and its EFI redirect are up-to-date..."
+if [ -d /boot/grub2 ]; then
+    grub2-mkconfig -o /boot/grub2/grub.cfg || true
+fi
+if [ -d /sys/firmware/efi ] && [ -d /boot/efi ]; then
+    /usr/bin/gen_grub_cfgstub /boot/grub2 /boot/efi/EFI/fedora || true
+fi
+
+# 7. Self disable this service so it never runs again
+echo "Disabling blazeos-postinstall.service..."
+systemctl disable blazeos-postinstall.service 2>/dev/null || true
+echo "=== BlazeOS Post-Install Complete at $(date) ==="
+exit 0

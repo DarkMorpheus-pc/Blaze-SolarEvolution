@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Waydroid Setup
+Name[tr]=Waydroid Kurulumu
+Name[de]=Waydroid-Einrichtung
+Comment=Install and initialize Waydroid (Android apps)
+Comment[tr]=Waydroid'i kur ve başlat (Android uygulamaları)
+Comment[de]=Waydroid installieren und einrichten
+Exec=/usr/bin/blazeos-waydroid-setup
+Icon=/usr/share/blazeos/icons/blazeos-logo.png
+Terminal=false
+Categories=System;Utility;
+Keywords=waydroid;android;apps;

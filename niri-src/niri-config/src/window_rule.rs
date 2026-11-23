@@ -8,7 +8,7 @@ use crate::layout::DefaultPresetSize;
 use crate::utils::{MergeWith, RegexEq};
 use crate::FloatOrInt;
 
-#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq)]
+#[derive(knuffel::Decode, Default, Clone, PartialEq)]
 pub struct WindowRule {
     #[knuffel(children(name = "match"))]
     pub matches: Vec<Match>,
@@ -77,10 +77,58 @@ pub struct WindowRule {
     pub scroll_factor: Option<FloatOrInt<0, 100>>,
     #[knuffel(child, unwrap(argument))]
     pub tiled_state: Option<bool>,
+    #[knuffel(child, unwrap(argument))]
+    pub server_titlebar: Option<bool>,
     #[knuffel(child, default)]
     pub background_effect: BackgroundEffectRule,
     #[knuffel(child, default)]
     pub popups: PopupsRule,
+}
+
+impl std::fmt::Debug for WindowRule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = f.debug_struct("WindowRule");
+        s.field("matches", &self.matches)
+            .field("excludes", &self.excludes)
+            .field("default_column_width", &self.default_column_width)
+            .field("default_window_height", &self.default_window_height)
+            .field("open_on_output", &self.open_on_output)
+            .field("open_on_workspace", &self.open_on_workspace)
+            .field("open_maximized", &self.open_maximized)
+            .field("open_maximized_to_edges", &self.open_maximized_to_edges)
+            .field("open_fullscreen", &self.open_fullscreen)
+            .field("open_floating", &self.open_floating)
+            .field("open_focused", &self.open_focused)
+            .field("on_xdg_activate", &self.on_xdg_activate)
+            .field("min_width", &self.min_width)
+            .field("min_height", &self.min_height)
+            .field("max_width", &self.max_width)
+            .field("max_height", &self.max_height)
+            .field("focus_ring", &self.focus_ring)
+            .field("border", &self.border)
+            .field("shadow", &self.shadow)
+            .field("tab_indicator", &self.tab_indicator)
+            .field(
+                "draw_border_with_background",
+                &self.draw_border_with_background,
+            )
+            .field("opacity", &self.opacity)
+            .field("geometry_corner_radius", &self.geometry_corner_radius)
+            .field("clip_to_geometry", &self.clip_to_geometry)
+            .field("baba_is_float", &self.baba_is_float)
+            .field("block_out_from", &self.block_out_from)
+            .field("variable_refresh_rate", &self.variable_refresh_rate)
+            .field("default_column_display", &self.default_column_display)
+            .field("default_floating_position", &self.default_floating_position)
+            .field("scroll_factor", &self.scroll_factor)
+            .field("tiled_state", &self.tiled_state);
+        if self.server_titlebar.is_some() {
+            s.field("server_titlebar", &self.server_titlebar);
+        }
+        s.field("background_effect", &self.background_effect)
+            .field("popups", &self.popups)
+            .finish()
+    }
 }
 
 /// Rules for popup surfaces.

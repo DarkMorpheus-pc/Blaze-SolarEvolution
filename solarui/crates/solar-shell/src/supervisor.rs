@@ -5,7 +5,9 @@ use std::path::PathBuf;
 use tracing::{info, warn};
 
 use crate::engine::ShellEngine;
-use crate::providers::{CaelestiaProvider, End4PcProvider, NoctaliaProvider, ShellProvider};
+use crate::providers::{
+    CaelestiaProvider, End4PcProvider, NoctaliaProvider, ShellProvider, We10xProvider,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DesiredState {
@@ -33,6 +35,7 @@ pub enum ActualEngine {
     Noctalia,
     Caelestia,
     End4Pc,
+    We10x,
     Conflict,
     None,
     Failed(String),
@@ -44,6 +47,7 @@ impl ActualEngine {
             ActualEngine::Noctalia => "noctalia",
             ActualEngine::Caelestia => "caelestia",
             ActualEngine::End4Pc => "end4-pc",
+            ActualEngine::We10x => "we10x",
             ActualEngine::Conflict => "conflict",
             ActualEngine::None => "none",
             ActualEngine::Failed(_) => "failed",
@@ -56,6 +60,7 @@ pub struct SolarShellSupervisor {
     noctalia: NoctaliaProvider,
     caelestia: CaelestiaProvider,
     end4_pc: End4PcProvider,
+    we10x: We10xProvider,
 }
 
 impl Default for SolarShellSupervisor {
@@ -66,6 +71,7 @@ impl Default for SolarShellSupervisor {
             noctalia: NoctaliaProvider::new(),
             caelestia: CaelestiaProvider::new(),
             end4_pc: End4PcProvider::new(),
+            we10x: We10xProvider::new(),
         }
     }
 }
@@ -93,6 +99,7 @@ impl SolarShellSupervisor {
             ShellEngine::Noctalia => solar_common::SurfaceProvider::Noctalia,
             ShellEngine::Caelestia => solar_common::SurfaceProvider::Caelestia,
             ShellEngine::End4Pc => solar_common::SurfaceProvider::End4Pc,
+            ShellEngine::We10x => solar_common::SurfaceProvider::We10x,
         };
         SolarConfig::update(|cfg| {
             cfg.shell.engine = state.desired_engine;
@@ -192,21 +199,64 @@ impl SolarShellSupervisor {
             (ShellEngine::Noctalia, ActualEngine::Noctalia)
                 | (ShellEngine::Caelestia, ActualEngine::Caelestia)
                 | (ShellEngine::End4Pc, ActualEngine::End4Pc)
+                | (ShellEngine::We10x, ActualEngine::We10x)
         )
     }
 
-    pub async fn detect_actual_engine(&self) -> ActualEngine {
-        let n_alive = self.noctalia.health_check().await.unwrap_or(false);
-        let c_alive = self.caelestia.health_check().await.unwrap_or(false);
-        let e_alive = self.end4_pc.health_check().await.unwrap_or(false);
-
-        match (n_alive, c_alive, e_alive) {
-            (true, false, false) => ActualEngine::Noctalia,
-            (false, true, false) => ActualEngine::Caelestia,
-            (false, false, true) => ActualEngine::End4Pc,
-            (false, false, false) => ActualEngine::None,
+    pub async fn detect_actual_engine_fast(&self) -> ActualEngine {
+        let (n_alive, c_alive, e_alive, w_alive) = tokio::join!(
+            self.noctalia.process_alive(),
+            self.full_caelestia_or_caelestia_alive(),
+            self.end4_pc.process_alive(),
+            self.we10x.process_alive(),
+        );
+        match (n_alive, c_alive, e_alive, w_alive) {
+            (true, false, false, false) => ActualEngine::Noctalia,
+            (false, true, false, false) => ActualEngine::Caelestia,
+            (false, false, true, false) => ActualEngine::End4Pc,
+            (false, false, false, true) => ActualEngine::We10x,
+            (false, false, false, false) => ActualEngine::None,
             _ => ActualEngine::Conflict,
         }
+    }
+
+    async fn full_caelestia_or_caelestia_alive(&self) -> bool {
+        self.caelestia.process_alive().await
+    }
+
+    pub async fn detect_actual_engine(&self) -> ActualEngine {
+        let (n_res, c_res, e_res, w_res) = tokio::join!(
+            self.noctalia.health_check(),
+            self.caelestia.health_check(),
+            self.end4_pc.health_check(),
+            self.we10x.health_check(),
+        );
+        let n_alive = n_res.unwrap_or(false);
+        let c_alive = c_res.unwrap_or(false);
+        let e_alive = e_res.unwrap_or(false);
+        let w_alive = w_res.unwrap_or(false);
+
+        match (n_alive, c_alive, e_alive, w_alive) {
+            (true, false, false, false) => ActualEngine::Noctalia,
+            (false, true, false, false) => ActualEngine::Caelestia,
+            (false, false, true, false) => ActualEngine::End4Pc,
+            (false, false, false, true) => ActualEngine::We10x,
+            (false, false, false, false) => ActualEngine::None,
+            _ => ActualEngine::Conflict,
+        }
+    }
+
+    pub async fn reconcile_watchdog_tick(&self, full_ipc_check: bool) -> Result<()> {
+        if !full_ipc_check {
+            Self::reconcile_niri_config_symlink();
+            if let Ok(desired) = self.load_desired_state() {
+                let actual = self.detect_actual_engine_fast().await;
+                if Self::is_reconciled(desired.desired_engine, &actual) {
+                    return Ok(());
+                }
+            }
+        }
+        self.reconcile().await
     }
 
     pub async fn reconcile(&self) -> Result<()> {
@@ -237,9 +287,11 @@ impl SolarShellSupervisor {
         tokio::spawn(async move {
             info!("SolarShell watchdog started");
             let mut delay = 3;
+            let mut tick_count: u64 = 0;
             loop {
                 // Delay after completion: do not replay missed ticks in a restart storm.
                 tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                tick_count = tick_count.wrapping_add(1);
 
                 // Anaconda kurulum sureci calısıyorsa shell gecislerini durdur.
                 // Kurulum sırasında health_check geçici basarısız donebilir ve
@@ -276,7 +328,7 @@ impl SolarShellSupervisor {
                     continue;
                 }
 
-                match self.reconcile().await {
+                match self.reconcile_watchdog_tick(tick_count % 10 == 0).await {
                     Ok(()) => delay = 3,
                     Err(e) => {
                         tracing::error!("Watchdog reconciliation failed: {e:#}");
@@ -306,10 +358,18 @@ mod tests {
             ShellEngine::End4Pc,
             &ActualEngine::End4Pc
         ));
+        assert!(SolarShellSupervisor::is_reconciled(
+            ShellEngine::We10x,
+            &ActualEngine::We10x
+        ));
         // Uyuşmazlık durumları
         assert!(!SolarShellSupervisor::is_reconciled(
             ShellEngine::Noctalia,
             &ActualEngine::Caelestia
+        ));
+        assert!(!SolarShellSupervisor::is_reconciled(
+            ShellEngine::We10x,
+            &ActualEngine::Noctalia
         ));
         assert!(!SolarShellSupervisor::is_reconciled(
             ShellEngine::Caelestia,

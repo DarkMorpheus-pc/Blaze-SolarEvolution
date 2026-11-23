@@ -1,6 +1,6 @@
 [blaze]
 name=Blaze SolarEvolution - Packages
-baseurl=https://darkmorpheus-pc.github.io/Blaze-Galaxy/repo/
+baseurl=https://darkmorpheus-pc.github.io/Blaze-SolarEvolution/repo/
 enabled=1
 gpgcheck=1
 repo_gpgcheck=1

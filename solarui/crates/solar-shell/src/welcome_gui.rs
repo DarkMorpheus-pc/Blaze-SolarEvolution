@@ -215,6 +215,8 @@ fn build_welcome_ui(main_loop: glib::MainLoop) {
     if has_solar_installer || has_liveinst {
         let inst_btn = Button::with_label("Sistemi Kur");
         inst_btn.add_css_class("lf-btn-glass");
+        let win_weak_inst = window.downgrade();
+        let loop_inst = main_loop.clone();
         inst_btn.connect_clicked(move |_| {
             if has_solar_installer {
                 let _ = std::process::Command::new("solar-shell")
@@ -223,6 +225,10 @@ fn build_welcome_ui(main_loop: glib::MainLoop) {
             } else {
                 let _ = std::process::Command::new("/usr/bin/liveinst").spawn();
             }
+            if let Some(win) = win_weak_inst.upgrade() {
+                win.close();
+            }
+            loop_inst.quit();
         });
         bottom_box.append(&inst_btn);
     }

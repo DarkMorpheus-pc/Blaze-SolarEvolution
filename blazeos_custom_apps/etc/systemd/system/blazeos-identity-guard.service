@@ -1,0 +1,14 @@
+[Unit]
+Description=Blaze SolarEvolution Identity & Boot Title Guard
+DefaultDependencies=no
+After=local-fs.target dnf5-offline-transaction.service
+Before=display-manager.service systemd-hostnamed.service
+ConditionPathExists=!/run/initramfs/live
+ConditionPathIsReadWrite=/etc
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/blazeos-sync-identity --check --quiet
+
+[Install]
+WantedBy=multi-user.target

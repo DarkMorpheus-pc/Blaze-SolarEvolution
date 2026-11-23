@@ -11,7 +11,7 @@ GPL/LGPL bileşenler için kaynak kodu teklifi: upstream bağlantısı ve sürü
 | `blaze-sentinel` | [Blaze-Universe-/crates/blaze-sentinel](https://github.com/DarkMorpheus-pc/Blaze-Universe-) | MIT/GPL (depo `LICENSE`) | `cargo build --release -p blaze-sentinel` |
 | `blaze-continuum` | Blaze-Universe-/crates/blaze-continuum | MIT/GPL | `cargo build --release -p blaze-continuum` |
 | `blaze-recovery`, `solar-core` | [SolarUI](https://github.com/DarkMorpheus-pc/SolarUI) `crates/` | Depo lisansı | `cargo build --release` |
-| `blaze-house` | Yerel depo (`~/blaze-house`), **henüz GitHub'da yok** | Belirlenecek | `cargo build --release` |
+| `blaze-house` | [BlazeHouse-](https://github.com/DarkMorpheus-pc/BlazeHouse-) (`modern-ui` + `src-tauri`) | GPL-3.0 | `npm run build && cargo build --release` |
 | `firehub` | [Blaze-Fire-Hub](https://github.com/DarkMorpheus-pc/Blaze-Fire-Hub) | Depo lisansı | `npm run dist` (Electron) |
 | Python/Bash araçları (`blaze-setup`, `blaze-style-center`, `blaze-ghost-overlay`, `blaze-death-screen`, `berp-recovery-gui`, `blazeos-*`) | Bu depo | GPL-3.0 | Kaynak betik |
 
@@ -19,9 +19,10 @@ GPL/LGPL bileşenler için kaynak kodu teklifi: upstream bağlantısı ve sürü
 
 | İkili | Upstream | Lisans | Durum |
 |---|---|---|---|
-| `niri` | https://github.com/YaLTeR/niri (26.04) | GPL-3.0 | Doğrulanacak: Fedora paketi mi, kendi derlememiz mi? |
+| `niri` | https://github.com/YaLTeR/niri (26.04 + BlazeOS `niri-src` minimize & We10X server-titlebar yamaları) | GPL-3.0 | Yerel `niri-src/` ağacından derlenmektedir |
 | `noctalia`, `quickshell.bin`, `qs` | https://github.com/noctalia-dev/noctalia ve Quickshell | GPL-3.0 / LGPL-3.0 | Doğrulanacak (derleme kaynağı) |
 | `caelestia` ve QML/C++ eklentileri | https://github.com/caelestia-dots/shell | GPL-3.0 | Yerel Türkçe yama ve yeniden derleme; yamalar `solarui/vendor/caelestia-shell` içinde |
+| `we10x-shell` (`We10X` görsel varlıkları, duvar kâğıtları ve ikon teması; `sddm/` hariç) | https://github.com/yeyushengfan258/We10XOS-kde (`270f0d7`) ve https://github.com/yeyushengfan258/We10X-icon-theme (`0f52ff2`) | GPL-3.0 | Quickshell QML portu `solarui/vendor/we10x-shell`, ikonlar `usr/share/icons/We10X` içinde |
 | `sddm`, `sddm-greeter-qt6` | https://github.com/sddm/sddm (0.21) | GPL-2.0+ | Doğrulanacak |
 | `seatd`, `weston*` | https://sr.ht/~kennylevinsen/seatd, https://gitlab.freedesktop.org/wayland/weston | MIT | Doğrulanacak |
 | `limine` | https://github.com/limine-bootloader/limine (12.9.0) | BSD-2-Clause | Resmi sürüm |

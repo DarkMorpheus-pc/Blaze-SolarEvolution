@@ -65,6 +65,17 @@ layout {
         off
     }
 
+    server-titlebar {
+        on
+        height 30
+        active-color "#17181d"
+        inactive-color "#202229"
+        active-text-color "#f4f4f6"
+        inactive-text-color "#9ca3af"
+        aero-snap true
+        allow-minimize false
+    }
+
     struts {
         top 10
         left 10
@@ -123,7 +134,7 @@ window-rule {
 
 // Installer & Dialog window rules: Center Anaconda and prevent full-screen corner trapping
 window-rule {
-    match app-id=r#"^(liveinst|anaconda|org\.fedoraproject\.Anaconda.*|Anaconda)$"#
+    match app-id=r#"^(anaconda|org\.fedoraproject\.Anaconda.*|Anaconda)$"#
     open-floating true
     default-column-width { proportion 0.88; }
     default-window-height { proportion 0.88; }
@@ -141,6 +152,7 @@ window-rule {
     open-floating true
     open-focused true
     open-fullscreen true
+    server-titlebar false
 }
 
 window-rule {
@@ -148,12 +160,14 @@ window-rule {
     open-floating true
     open-focused true
     open-fullscreen true
+    server-titlebar false
 }
 
 // SolarUI Windows 11 Snap Layouts HUD Window Rule
 window-rule {
     match app-id="^solar-snap$"
     open-floating true
+    server-titlebar false
     default-floating-position x=0 y=54 relative-to="top"
     default-column-width { fixed 440; }
     default-window-height { fixed 260; }
@@ -161,9 +175,22 @@ window-rule {
     clip-to-geometry true
 }
 
-// Live Installer Window Rule (Floating Centered, 82% screen proportion)
+// Live Installer Window Rule (Floating Centered, 82% screen proportion, never auto-maximize)
 window-rule {
-    match app-id="^(liveinst|firefox)$"
+    match app-id="^liveinst$"
+    open-floating true
+    open-focused true
+    open-maximized false
+    open-maximized-to-edges false
+    open-fullscreen false
+    default-column-width { proportion 0.82; }
+    default-window-height { proportion 0.82; }
+    geometry-corner-radius 16
+    clip-to-geometry true
+}
+
+window-rule {
+    match app-id="^firefox$"
     open-floating true
     default-column-width { proportion 0.82; }
     default-window-height { proportion 0.82; }
@@ -185,10 +212,22 @@ window-rule {
 
 // BlazeOS Control Center & Native Tools
 window-rule {
-    match app-id=r#"^(org\.blazeos\.control|FireHub|firehub|blazeos-welcome|blaze-setup)$"#
+    match app-id=r#"^(org\.blazeos\.control|blazeos-welcome)$"#
     open-floating true
+    server-titlebar false
     default-column-width { proportion 0.75; }
     default-window-height { proportion 0.80; }
+    geometry-corner-radius 16
+    clip-to-geometry true
+}
+
+// FireHub App Store & Native Electron/SSD Apps (with crisp Minimize / Maximize / Close titlebar)
+window-rule {
+    match app-id=r#"^(FireHub|firehub)$"#
+    open-floating true
+    server-titlebar true
+    default-column-width { proportion 0.78; }
+    default-window-height { proportion 0.82; }
     geometry-corner-radius 16
     clip-to-geometry true
 }
@@ -197,6 +236,7 @@ window-rule {
 window-rule {
     match app-id="solar-shell"
     open-floating true
+    server-titlebar false
     default-floating-position x=0 y=0 relative-to="bottom-left"
     default-column-width { proportion 1.0; }
     default-window-height { fixed 44; }
@@ -206,6 +246,7 @@ window-rule {
 window-rule {
     match app-id="dev.noctalia.Noctalia"
     open-floating true
+    server-titlebar false
     default-column-width { fixed 1080; }
     default-window-height { fixed 920; }
 }
@@ -214,6 +255,7 @@ window-rule {
 window-rule {
     match app-id="^solar-settings$"
     open-floating true
+    server-titlebar false
     default-column-width { fixed 1020; }
     default-window-height { fixed 620; }
     geometry-corner-radius 20
@@ -224,6 +266,7 @@ window-rule {
 window-rule {
     match app-id=r#"^(Alacritty|org\.Alacritty|foot|kitty)$"#
     open-floating true
+    server-titlebar true
     default-column-width { fixed 1020; }
     default-window-height { fixed 540; }
     geometry-corner-radius 20
@@ -234,6 +277,7 @@ window-rule {
 window-rule {
     match app-id="^solar-welcome$"
     open-floating true
+    server-titlebar false
     default-column-width { fixed 750; }
     default-window-height { fixed 590; }
     geometry-corner-radius 20
@@ -244,6 +288,7 @@ window-rule {
 window-rule {
     match app-id="^solar-installer-gui$"
     open-floating true
+    server-titlebar false
     default-column-width { fixed 920; }
     default-window-height { fixed 640; }
     geometry-corner-radius 20
@@ -254,6 +299,7 @@ window-rule {
 window-rule {
     match app-id="^solar-omnibar$"
     open-floating true
+    server-titlebar false
     default-column-width { fixed 720; }
     default-window-height { fixed 490; }
     geometry-corner-radius 22
@@ -264,6 +310,7 @@ window-rule {
 window-rule {
     match app-id="^solar-gamezone$"
     open-fullscreen true
+    server-titlebar false
     geometry-corner-radius 0
     clip-to-geometry false
     background-effect {
@@ -274,6 +321,7 @@ window-rule {
 window-rule {
     match app-id=r#"^(steam_app_.*|gamescope|cs2|dota2|hl2_linux|lutris)$"#
     open-floating false
+    server-titlebar false
     geometry-corner-radius 0
     clip-to-geometry false
     background-effect {
@@ -293,6 +341,7 @@ window-rule {
     match app-id="^solar-clock$"
     open-floating true
     open-focused false
+    server-titlebar false
     default-floating-position x=0 y=70 relative-to="top"
     default-column-width { fixed 460; }
     default-window-height { fixed 280; }

@@ -7,7 +7,7 @@ Version:        5.05
 Release:        1%{?dist}
 Summary:        BlazeOS helper tools and installers
 License:        GPL-3.0-or-later
-URL:            https://github.com/DarkMorpheus-pc/Blaze-Galaxy
+URL:            https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
 Source0:        %{name}-%{version}.tar
 BuildArch:      noarch
 Requires:       bash
@@ -27,20 +27,20 @@ cp -a . %{buildroot}/
 rm -f %{buildroot}/%{name}-%{version}.tar
 
 %files
-/usr/local/bin/blaze-bootloader
-/usr/local/bin/blaze-optimize
-/usr/local/bin/blazeos-apply-install-choices
-/usr/local/bin/blazeos-control
-/usr/local/bin/blazeos-desktop-provision
-/usr/local/bin/blazeos-limine-install
-/usr/local/bin/blazeos-nvidia-setup
-/usr/local/bin/blazeos-postinstall
-/usr/local/bin/blazeos-remove-solarui
-/usr/local/bin/blazeos-session-diagnose
-/usr/local/bin/blazeos-waydroid-setup
-/usr/local/bin/blazeos-welcome
-/usr/local/bin/solar-torture
-/usr/local/bin/blaze-snapshot
+/usr/bin/blaze-bootloader
+/usr/bin/blaze-optimize
+/usr/bin/blazeos-apply-install-choices
+/usr/bin/blazeos-control
+/usr/bin/blazeos-desktop-provision
+/usr/bin/blazeos-limine-install
+/usr/bin/blazeos-nvidia-setup
+/usr/bin/blazeos-postinstall
+/usr/bin/blazeos-remove-solarui
+/usr/bin/blazeos-session-diagnose
+/usr/bin/blazeos-waydroid-setup
+/usr/bin/blazeos-welcome
+/usr/bin/solar-torture
+/usr/bin/blaze-snapshot
 
 %changelog
 * Mon Oct 26 2026 Blaze Release <release@blazeos.com.tr> - 5.05-1

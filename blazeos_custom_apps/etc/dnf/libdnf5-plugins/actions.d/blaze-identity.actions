@@ -1,0 +1,3 @@
+# BlazeOS automatic identity enforcement after DNF5 transactions (when libdnf5-plugin-actions is present).
+# Primary enforcement runs natively via blaze-release RPM %transfiletriggerin and kernel-install hooks.
+post_transaction::::/usr/bin/blazeos-sync-identity --quiet

@@ -136,42 +136,13 @@ impl CaelestiaProvider {
     }
 
     async fn get_pids(&self) -> Vec<i32> {
-        let out = tokio::process::Command::new("pgrep")
-            .args(["-u", &solar_common::current_uid().to_string()])
-            .args(["-f", "(qs|quickshell).*caelestia"])
-            .output_timeout()
-            .await;
-
-        if let Ok(output) = out {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let pids: Vec<i32> = stdout
-                    .lines()
-                    .filter_map(|l| l.trim().parse::<i32>().ok())
-                    .collect();
-                if !pids.is_empty() {
-                    return pids;
-                }
-            }
-        }
-
-        // Fallback without UID constraint if running in certain session container contexts
-        let fallback_out = tokio::process::Command::new("pgrep")
-            .args(["-f", "quickshell.*caelestia"])
-            .output_timeout()
-            .await;
-
-        if let Ok(output) = fallback_out {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                return stdout
-                    .lines()
-                    .filter_map(|l| l.trim().parse::<i32>().ok())
-                    .collect();
-            }
-        }
-
-        Vec::new()
+        super::find_uid_process_pids(|_, text| {
+            (text.contains("qs") || text.contains("quickshell"))
+                && text.contains("caelestia")
+                && !text.contains(" ipc ")
+                && !text.contains(" drawers ")
+                && !text.contains(" shell -k")
+        })
     }
 }
 
@@ -284,6 +255,10 @@ impl ShellProvider for CaelestiaProvider {
         } else {
             bail!("Caelestia Shell süreçleri kapatılamadı!");
         }
+    }
+
+    async fn process_alive(&self) -> bool {
+        !self.get_pids().await.is_empty()
     }
 
     async fn health_check(&self) -> Result<bool> {

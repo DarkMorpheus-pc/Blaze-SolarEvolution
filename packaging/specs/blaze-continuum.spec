@@ -7,7 +7,7 @@ Version:        0.1.0
 Release:        1%{?dist}
 Summary:        Blaze Continuum stateful session teleportation (experimental)
 License:        MIT or GPL-3.0-or-later
-URL:            https://github.com/DarkMorpheus-pc/Blaze-Galaxy
+URL:            https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
 Source0:        %{name}-%{version}.tar
 ExclusiveArch:  x86_64
 Requires:       criu

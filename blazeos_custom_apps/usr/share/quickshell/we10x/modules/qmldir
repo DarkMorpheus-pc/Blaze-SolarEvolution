@@ -1,0 +1,10 @@
+module modules
+singleton We10xState 1.0 We10xState.qml
+DesktopIcons 1.0 DesktopIcons.qml
+Taskbar 1.0 Taskbar.qml
+StartMenu 1.0 StartMenu.qml
+ActionCenter 1.0 ActionCenter.qml
+CalendarFlyout 1.0 CalendarFlyout.qml
+AltTabSwitcher 1.0 AltTabSwitcher.qml
+AeroSnapOverlay 1.0 AeroSnapOverlay.qml
+PowerDialog 1.0 PowerDialog.qml

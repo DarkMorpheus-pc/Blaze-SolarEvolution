@@ -13,7 +13,7 @@ use super::opening_window::{OpenAnimation, OpeningWindowRenderElement};
 use super::shadow::Shadow;
 use super::{
     HitType, LayoutElement, LayoutElementRenderElement, LayoutElementRenderSnapshot, Options,
-    SizeFrac, RESIZE_ANIMATION_THRESHOLD,
+    SizeFrac, TitlebarButton, RESIZE_ANIMATION_THRESHOLD,
 };
 use crate::animation::{Animation, Clock};
 use crate::layout::SizingMode;
@@ -23,8 +23,10 @@ use crate::render_helpers::border::BorderRenderElement;
 use crate::render_helpers::clipped_surface::{ClippedSurfaceRenderElement, RoundedCornerDamage};
 use crate::render_helpers::damage::ExtraDamage;
 use crate::render_helpers::offscreen::{OffscreenBuffer, OffscreenRenderElement};
+use crate::render_helpers::primary_gpu_texture::PrimaryGpuTextureRenderElement;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::resize::ResizeRenderElement;
+use crate::render_helpers::server_titlebar::CAPTION_BUTTON_WIDTH;
 use crate::render_helpers::shadow::ShadowRenderElement;
 use crate::render_helpers::snapshot::RenderSnapshot;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
@@ -55,6 +57,9 @@ pub struct Tile<W: LayoutElement> {
     /// This will update only when the `window` actually goes maximized or fullscreen, rather than
     /// right away, to avoid black backdrop flicker before the window has had a chance to resize.
     sizing_mode: SizingMode,
+
+    /// Whether this tile was active on the most recent update_render_elements pass.
+    is_active: bool,
 
     /// The black backdrop for fullscreen windows.
     fullscreen_backdrop: SolidColorBuffer,
@@ -123,6 +128,7 @@ pub struct Tile<W: LayoutElement> {
 niri_render_elements! {
     TileRenderElement<R> => {
         LayoutElement = LayoutElementRenderElement<R>,
+        ServerTitlebar = PrimaryGpuTextureRenderElement,
         FocusRing = FocusRingRenderElement,
         SolidColor = SolidColorRenderElement,
         Opening = OpeningWindowRenderElement,
@@ -198,6 +204,7 @@ impl<W: LayoutElement> Tile<W> {
             focus_ring: FocusRing::new(focus_ring_config),
             shadow: Shadow::new(shadow_config),
             sizing_mode,
+            is_active: false,
             fullscreen_backdrop: SolidColorBuffer::new((0., 0.), [0., 0., 0., 1.]),
             restore_to_floating: false,
             floating_window_size: None,
@@ -286,10 +293,13 @@ impl<W: LayoutElement> Tile<W> {
                 if prev_sizing_mode.is_fullscreen() {
                     tile_size.w = f64::max(tile_size.w, self.view_size.w);
                     tile_size.h = f64::max(tile_size.h, self.view_size.h);
-                } else if prev_sizing_mode.is_normal() && !self.border.is_off() {
-                    let width = self.border.width();
-                    tile_size.w += width * 2.;
-                    tile_size.h += width * 2.;
+                } else {
+                    tile_size.h += self.nonfullscreen_titlebar_height();
+                    if prev_sizing_mode.is_normal() && !self.border.is_off() {
+                        let width = self.border.width();
+                        tile_size.w += width * 2.;
+                        tile_size.h += width * 2.;
+                    }
                 }
 
                 tile_size.w = tile_size_from.w + (tile_size.w - tile_size_from.w) * val;
@@ -325,10 +335,13 @@ impl<W: LayoutElement> Tile<W> {
                 if prev_sizing_mode.is_fullscreen() {
                     tile_size.w = f64::max(tile_size.w, self.view_size.w);
                     tile_size.h = f64::max(tile_size.h, self.view_size.h);
-                } else if prev_sizing_mode.is_normal() && !self.border.is_off() {
-                    let width = self.border.width();
-                    tile_size.w += width * 2.;
-                    tile_size.h += width * 2.;
+                } else {
+                    tile_size.h += self.nonfullscreen_titlebar_height();
+                    if prev_sizing_mode.is_normal() && !self.border.is_off() {
+                        let width = self.border.width();
+                        tile_size.w += width * 2.;
+                        tile_size.h += width * 2.;
+                    }
                 }
 
                 let fullscreen_from = if prev_sizing_mode.is_fullscreen() {
@@ -471,6 +484,7 @@ impl<W: LayoutElement> Tile<W> {
     }
 
     pub fn update_render_elements(&mut self, is_active: bool, view_rect: Rectangle<f64, Logical>) {
+        self.is_active = is_active;
         let rules = self.window.rules();
         let animated_tile_size = self.animated_tile_size();
         let expanded_progress = self.expanded_progress();
@@ -774,23 +788,52 @@ impl<W: LayoutElement> Tile<W> {
         Some(self.border.width())
     }
 
+    pub fn nonfullscreen_titlebar_height(&self) -> f64 {
+        let cfg = &self.options.layout.server_titlebar;
+        if !cfg.on {
+            return 0.;
+        }
+        let wants = self
+            .window
+            .rules()
+            .server_titlebar
+            .unwrap_or_else(|| self.window.has_ssd());
+        if wants {
+            round_logical_in_physical_max1(self.scale, cfg.height)
+        } else {
+            0.
+        }
+    }
+
+    pub fn effective_titlebar_height(&self) -> f64 {
+        if self.sizing_mode.is_fullscreen() {
+            0.
+        } else {
+            self.nonfullscreen_titlebar_height()
+        }
+    }
+
+    fn visual_titlebar_height(&self) -> f64 {
+        let h = self.nonfullscreen_titlebar_height();
+        let fp = self.fullscreen_progress();
+        if h == 0. || fp >= 1. {
+            0.
+        } else {
+            round_logical_in_physical(self.scale, h * (1. - fp))
+        }
+    }
+
     /// Returns the location of the window's visual geometry within this Tile.
     pub fn window_loc(&self) -> Point<f64, Logical> {
         let mut loc = Point::from((0., 0.));
 
         let window_size = self.animated_window_size();
         let target_size = self.animated_tile_size();
+        let tb_height = self.visual_titlebar_height();
 
-        // Center the window within its tile.
-        //
-        // - Without borders, the sizes match, so this difference is zero.
-        // - Borders always match from all sides, so this difference is pre-rounded to physical.
-        // - In fullscreen, if the window is smaller than the tile, then it gets centered, otherwise
-        //   the tile size matches the window.
-        // - During animations, the window remains centered within the tile; this is important for
-        //   the to/from fullscreen animation.
+        // Center the window within its tile below any server-side titlebar.
         loc.x += (target_size.w - window_size.w) / 2.;
-        loc.y += (target_size.h - window_size.h) / 2.;
+        loc.y += (target_size.h - window_size.h - tb_height) / 2. + tb_height;
 
         // Round to physical pixels.
         loc = loc
@@ -811,6 +854,8 @@ impl<W: LayoutElement> Tile<W> {
             return size;
         }
 
+        size.h += self.effective_titlebar_height();
+
         if let Some(width) = self.effective_border_width() {
             size.w += width * 2.;
             size.h += width * 2.;
@@ -829,6 +874,8 @@ impl<W: LayoutElement> Tile<W> {
             size.h = f64::max(size.h, self.view_size.h);
             return size;
         }
+
+        size.h += self.effective_titlebar_height();
 
         if let Some(width) = self.effective_border_width() {
             size.w += width * 2.;
@@ -923,6 +970,33 @@ impl<W: LayoutElement> Tile<W> {
         let offset = self.bob_offset();
         let point = point - offset;
 
+        let tb_h = self.effective_titlebar_height();
+        if tb_h > 0. {
+            let bw = self.effective_border_width().unwrap_or(0.);
+            let tsz = self.tile_size();
+            if point.x >= bw
+                && point.x < (tsz.w - bw)
+                && point.y >= bw
+                && point.y < (bw + tb_h)
+            {
+                let rx = (tsz.w - bw) - point.x;
+                let btn_w = round_logical_in_physical_max1(self.scale, CAPTION_BUTTON_WIDTH);
+                let button = if rx >= 0. && rx < btn_w {
+                    Some(TitlebarButton::Close)
+                } else if rx >= btn_w && rx < btn_w * 2. {
+                    Some(TitlebarButton::Maximize)
+                } else if self.options.layout.server_titlebar.allow_minimize
+                    && rx >= btn_w * 2.
+                    && rx < btn_w * 3.
+                {
+                    Some(TitlebarButton::Minimize)
+                } else {
+                    None
+                };
+                return Some(HitType::Titlebar { button });
+            }
+        }
+
         if self.is_in_input_region(point) {
             let win_pos = self.buf_loc() + offset;
             Some(HitType::Input { win_pos })
@@ -947,6 +1021,10 @@ impl<W: LayoutElement> Tile<W> {
             size.w = f64::max(1., size.w - width * 2.);
             size.h = f64::max(1., size.h - width * 2.);
         }
+        let tb_h = self.nonfullscreen_titlebar_height();
+        if tb_h > 0. {
+            size.h = f64::max(1., size.h - tb_h);
+        }
 
         // The size request has to be i32 unfortunately, due to Wayland. We floor here instead of
         // round to avoid situations where proportionally-sized columns don't fit on the screen
@@ -968,11 +1046,11 @@ impl<W: LayoutElement> Tile<W> {
     }
 
     pub fn tile_height_for_window_height(&self, size: f64) -> f64 {
-        if self.border.is_off() {
-            size
-        } else {
-            size + self.border.width() * 2.
+        let mut h = size + self.nonfullscreen_titlebar_height();
+        if !self.border.is_off() {
+            h += self.border.width() * 2.;
         }
+        h
     }
 
     pub fn window_width_for_tile_width(&self, size: f64) -> f64 {
@@ -984,19 +1062,23 @@ impl<W: LayoutElement> Tile<W> {
     }
 
     pub fn window_height_for_tile_height(&self, size: f64) -> f64 {
-        if self.border.is_off() {
-            size
-        } else {
-            size - self.border.width() * 2.
+        let mut h = size - self.nonfullscreen_titlebar_height();
+        if !self.border.is_off() {
+            h -= self.border.width() * 2.;
         }
+        h
     }
 
     pub fn request_maximized(
         &mut self,
-        size: Size<f64, Logical>,
+        mut size: Size<f64, Logical>,
         animate: bool,
         transaction: Option<Transaction>,
     ) {
+        let tb_h = self.nonfullscreen_titlebar_height();
+        if tb_h > 0. {
+            size.h = f64::max(1., size.h - tb_h);
+        }
         self.window.request_size(
             size.to_i32_round(),
             SizingMode::Maximized,
@@ -1016,6 +1098,11 @@ impl<W: LayoutElement> Tile<W> {
 
     pub fn min_size_nonfullscreen(&self) -> Size<f64, Logical> {
         let mut size = self.window.min_size().to_f64();
+        let tb_h = self.nonfullscreen_titlebar_height();
+        if tb_h > 0. {
+            size.w = f64::max(1., size.w);
+            size.h = f64::max(1., size.h) + tb_h;
+        }
 
         // Can't go through effective_border_width() because we might be fullscreen.
         if !self.border.is_off() {
@@ -1033,6 +1120,10 @@ impl<W: LayoutElement> Tile<W> {
 
     pub fn max_size_nonfullscreen(&self) -> Size<f64, Logical> {
         let mut size = self.window.max_size().to_f64();
+        let tb_h = self.nonfullscreen_titlebar_height();
+        if tb_h > 0. && size.h > 0. {
+            size.h += tb_h;
+        }
 
         // Can't go through effective_border_width() because we might be fullscreen.
         if !self.border.is_off() {
@@ -1083,14 +1174,6 @@ impl<W: LayoutElement> Tile<W> {
             alpha * (1. - p) + 1. * p
         };
 
-        // This is here rather than in render_offset() because render_offset() is currently assumed
-        // by the code to be temporary. So, for example, interactive move will try to "grab" the
-        // tile at its current render offset and reset the render offset to zero by cancelling the
-        // tile move animations. On the other hand, bob_offset() is not resettable, so adding it in
-        // render_offset() would cause obvious animation glitches.
-        //
-        // This isn't to say that adding it here is perfect; indeed, it kind of breaks view_rect
-        // passed to update_render_elements(). But, it works well enough for what it is.
         let bob_offset = self.bob_offset();
         let location = location + bob_offset;
         xray_pos = xray_pos.offset(bob_offset);
@@ -1121,6 +1204,24 @@ impl<W: LayoutElement> Tile<W> {
             xray_pos,
             &mut |elem| push(elem.into()),
         );
+
+        let tb_h = self.visual_titlebar_height();
+        if tb_h > 0. {
+            let tb_loc = Point::from((window_render_loc.x, window_render_loc.y - tb_h));
+            let tb_size = Size::from((animated_window_size.w, tb_h));
+            if let Some(tb_elem) = self.window.render_server_titlebar(
+                ctx.renderer,
+                tb_loc,
+                tb_size,
+                self.scale,
+                win_alpha,
+                self.is_active,
+                self.sizing_mode.is_maximized(),
+                &self.options.layout.server_titlebar,
+            ) {
+                push(tb_elem.into());
+            }
+        }
 
         // If we're resizing, try to render a shader, or a fallback.
         let mut pushed_resize = false;

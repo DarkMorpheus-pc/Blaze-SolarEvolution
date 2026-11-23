@@ -676,8 +676,6 @@ pub fn apply_living_flow_theme(extra_css: &str) {
         icon_theme.add_search_path("/usr/share/pixmaps");
         icon_theme.add_search_path("/usr/share/solarui/icons/living-flow");
         icon_theme.add_search_path("/usr/share/solarui/icons");
-        icon_theme.add_search_path("/home/darkmorpheus/BlazeFedora/solarui/data/icons/living-flow");
-        icon_theme.add_search_path("/home/darkmorpheus/SolarUI/data/icons/living-flow");
 
         let combined = format!("{}\n{}", LIVING_FLOW_CORE_CSS, extra_css);
         let provider = CssProvider::new();
@@ -775,6 +773,21 @@ pub fn build_living_flow_topbar(
         let _ = Command::new("solar-shell").arg("minimize").spawn();
     });
     controls.append(&min_btn);
+
+    let max_btn = Button::with_label("□");
+    max_btn.add_css_class("lf-win-btn");
+    max_btn.set_tooltip_text(Some("Büyüt / Pencere Boyutuna Döndür"));
+    let win_max = window.downgrade();
+    max_btn.connect_clicked(move |_| {
+        if let Some(w) = win_max.upgrade() {
+            if w.is_maximized() {
+                w.unmaximize();
+            } else {
+                w.maximize();
+            }
+        }
+    });
+    controls.append(&max_btn);
 
     let close_btn = Button::with_label("✕");
     close_btn.add_css_class("lf-win-btn");

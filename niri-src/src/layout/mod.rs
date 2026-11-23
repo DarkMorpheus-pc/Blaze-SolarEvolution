@@ -213,6 +213,22 @@ pub trait LayoutElement {
     ) {
     }
 
+    /// Renders an optional compositor-side titlebar above the window surface.
+    #[allow(clippy::too_many_arguments)]
+    fn render_server_titlebar<R: NiriRenderer>(
+        &self,
+        _renderer: &mut R,
+        _location: Point<f64, Logical>,
+        _size: Size<f64, Logical>,
+        _scale: f64,
+        _alpha: f32,
+        _is_active: bool,
+        _is_maximized: bool,
+        _cfg: &niri_config::ServerTitlebar,
+    ) -> Option<crate::render_helpers::primary_gpu_texture::PrimaryGpuTextureRenderElement> {
+        None
+    }
+
     /// Requests the element to change its size.
     ///
     /// The size request is stored and will be continuously sent to the element on any further
@@ -532,6 +548,13 @@ pub enum AddWindowTarget<'a, W: LayoutElement> {
     NextTo(&'a W::Id),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TitlebarButton {
+    Minimize,
+    Maximize,
+    Close,
+}
+
 /// Type of the window hit from `window_under()`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HitType {
@@ -539,6 +562,10 @@ pub enum HitType {
     Input {
         /// Position of the window's buffer.
         win_pos: Point<f64, Logical>,
+    },
+    /// The hit is on the server-side titlebar or one of its caption buttons.
+    Titlebar {
+        button: Option<TitlebarButton>,
     },
     /// The hit can activate a window, but it is not in the input region so cannot send events.
     ///
@@ -636,7 +663,7 @@ impl HitType {
     pub fn offset_win_pos(mut self, offset: Point<f64, Logical>) -> Self {
         match &mut self {
             HitType::Input { win_pos } => *win_pos += offset,
-            HitType::Activate { .. } => (),
+            HitType::Titlebar { .. } | HitType::Activate { .. } => (),
         }
         self
     }
@@ -653,7 +680,7 @@ impl HitType {
 
     pub fn to_activate(self) -> Self {
         match self {
-            HitType::Input { .. } => HitType::Activate {
+            HitType::Input { .. } | HitType::Titlebar { .. } => HitType::Activate {
                 is_tab_indicator: false,
             },
             HitType::Activate { .. } => self,

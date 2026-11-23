@@ -1,0 +1,393 @@
+#!/bin/bash
+# ==============================================================================
+# Blaze SolarEvolution Identity Enforcer (blazeos-sync-identity)
+# Idempotently asserts Blaze SolarEvolution 5.05 identity across release files,
+# DNF5 configuration ($releasever=45 + excludepkgs), Anaconda buildstamp,
+# GRUB distributor / BLS boot entries, and Fedora logo replacements.
+# ==============================================================================
+set -euo pipefail
+
+SYSROOT=""
+MODE="full"
+FORCE=0
+QUIET=0
+
+for arg in "$@"; do
+    case "$arg" in
+        --sysroot=*) SYSROOT="${arg#--sysroot=}" ;;
+        --check)     MODE="check" ;;
+        --pre-kernel) MODE="pre-kernel" ;;
+        --bls-only)  MODE="bls-only" ;;
+        --force)     FORCE=1 ;;
+        --quiet|-q)  QUIET=1 ;;
+        -h|--help)
+            cat <<'EOF'
+Usage: blazeos-sync-identity [--sysroot=PATH] [--check|--pre-kernel|--bls-only] [--force] [--quiet]
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $arg" >&2
+            exit 2
+            ;;
+    esac
+done
+
+SYSROOT="${SYSROOT%/}"
+SRC_DIR="${SYSROOT}/usr/share/blazeos/identity"
+
+log() {
+    if [ "$QUIET" -eq 0 ]; then
+        echo "[blazeos-sync-identity] $*"
+    fi
+}
+
+CHANGES=0
+
+files_equal() {
+    local a="$1"
+    local b="$2"
+    [ -f "$a" ] && [ -f "$b" ] && [ ! -L "$b" ] || return 1
+    if command -v cmp >/dev/null 2>&1; then
+        cmp -s "$a" "$b"
+        return $?
+    fi
+    local ha hb
+    ha=$(sha256sum "$a" 2>/dev/null || true)
+    hb=$(sha256sum "$b" 2>/dev/null || true)
+    [ -n "$ha" ] && [ "${ha%% *}" = "${hb%% *}" ]
+}
+
+install_atomic() {
+    local src="$1"
+    local dst="$2"
+    local mode="${3:-0644}"
+    [ -f "$src" ] || return 0
+    mkdir -p "$(dirname "$dst")"
+    if files_equal "$src" "$dst"; then
+        return 0
+    fi
+    local tmp
+    tmp=$(mktemp "$(dirname "$dst")/.blaze-id.XXXXXX")
+    cp -f "$src" "$tmp"
+    chmod "$mode" "$tmp"
+    mv -f "$tmp" "$dst"
+    CHANGES=$((CHANGES + 1))
+}
+
+ensure_symlink() {
+    local target="$1"
+    local link_path="$2"
+    mkdir -p "$(dirname "$link_path")"
+    if [ -L "$link_path" ] && [ "$(readlink "$link_path")" = "$target" ]; then
+        return 0
+    fi
+    rm -f "$link_path"
+    ln -s "$target" "$link_path"
+    CHANGES=$((CHANGES + 1))
+}
+
+write_literal_atomic() {
+    local dst="$1"
+    local content="$2"
+    local mode="${3:-0644}"
+    mkdir -p "$(dirname "$dst")"
+    local tmp
+    tmp=$(mktemp "$(dirname "$dst")/.blaze-lit.XXXXXX")
+    printf '%s' "$content" > "$tmp"
+    if files_equal "$tmp" "$dst"; then
+        rm -f "$tmp"
+        return 0
+    fi
+    chmod "$mode" "$tmp"
+    mv -f "$tmp" "$dst"
+    CHANGES=$((CHANGES + 1))
+}
+
+sync_release_files() {
+    if [ ! -d "$SRC_DIR" ]; then
+        log "Canonical identity directory missing: $SRC_DIR"
+        return 0
+    fi
+
+    install_atomic "$SRC_DIR/os-release"        "${SYSROOT}/usr/lib/os-release"        0644
+    install_atomic "$SRC_DIR/fedora-release"    "${SYSROOT}/usr/lib/fedora-release"    0644
+    install_atomic "$SRC_DIR/system-release-cpe" "${SYSROOT}/usr/lib/system-release-cpe" 0644
+    install_atomic "$SRC_DIR/issue"             "${SYSROOT}/usr/lib/issue"             0644
+    install_atomic "$SRC_DIR/issue.net"         "${SYSROOT}/usr/lib/issue.net"         0644
+    install_atomic "$SRC_DIR/blazeos-release"   "${SYSROOT}/usr/lib/blazeos-release"   0644
+    install_atomic "$SRC_DIR/blazeos-release"   "${SYSROOT}/etc/blazeos-release"       0644
+    install_atomic "$SRC_DIR/buildstamp"        "${SYSROOT}/.buildstamp"               0644
+
+    ensure_symlink "../usr/lib/os-release"        "${SYSROOT}/etc/os-release"
+    ensure_symlink "../usr/lib/fedora-release"    "${SYSROOT}/etc/fedora-release"
+    ensure_symlink "fedora-release"               "${SYSROOT}/etc/redhat-release"
+    ensure_symlink "fedora-release"               "${SYSROOT}/etc/system-release"
+    ensure_symlink "../usr/lib/system-release-cpe" "${SYSROOT}/etc/system-release-cpe"
+    ensure_symlink "../usr/lib/issue"             "${SYSROOT}/etc/issue"
+    ensure_symlink "../usr/lib/issue.net"         "${SYSROOT}/etc/issue.net"
+
+    if [ ! -f "${SYSROOT}/etc/blazeos/update-channel.conf" ] && [ -f "$SRC_DIR/update-channel.conf" ]; then
+        install_atomic "$SRC_DIR/update-channel.conf" "${SYSROOT}/etc/blazeos/update-channel.conf" 0644
+    fi
+    local target_relver="45"
+    if [ -f "${SYSROOT}/etc/blazeos/update-channel.conf" ]; then
+        local parsed_ver
+        parsed_ver=$(awk -F= '/^current_releasever=/{gsub(/[^0-9]/,"",$2); print $2; exit}' "${SYSROOT}/etc/blazeos/update-channel.conf" 2>/dev/null || true)
+        if [ -n "$parsed_ver" ]; then
+            target_relver="$parsed_ver"
+        fi
+    fi
+
+    write_literal_atomic "${SYSROOT}/etc/dnf/vars/releasever" "${target_relver}"$'\n' 0644
+    write_literal_atomic "${SYSROOT}/usr/share/dnf5/vars.d/releasever" "${target_relver}"$'\n' 0644
+
+    write_literal_atomic "${SYSROOT}/etc/dnf/libdnf5.conf.d/10-blaze-identity.conf" \
+"# Preserve Blaze SolarEvolution identity and logos across Fedora updates.
+# Keep Fedora 45 / RPMFusion binary compatibility via \$releasever=45 while
+# blocking upstream release/logo packages from overwriting OS identity.
+[main]
+excludepkgs=fedora-release*,fedora-logos*,generic-release*,generic-logos*,redhat-release*
+" 0644
+
+    write_literal_atomic "${SYSROOT}/etc/dnf/protected.d/blaze-release.conf" \
+"blaze-release
+blaze-tools
+blaze-house
+blaze-recovery
+solarui
+NetworkManager
+" 0644
+
+    write_literal_atomic "${SYSROOT}/etc/anaconda/profile.d/blazeos-solarevolution.conf" \
+"# Anaconda profile configuration for Blaze SolarEvolution 5.05
+
+[Profile]
+profile_id = blazeos-solarevolution
+base_profile = fedora-workstation
+
+[Profile Detection]
+os_id = blazeos
+variant_id = solarevolution
+" 0644
+}
+
+sync_default_grub() {
+    local grub_def="${SYSROOT}/etc/default/grub"
+    [ -f "$grub_def" ] || return 0
+    if grep -qx 'GRUB_DISTRIBUTOR="Blaze SolarEvolution"' "$grub_def" 2>/dev/null; then
+        return 0
+    fi
+    local tmp
+    tmp=$(mktemp "$(dirname "$grub_def")/.blaze-grub.XXXXXX")
+    if grep -q '^GRUB_DISTRIBUTOR=' "$grub_def" 2>/dev/null; then
+        awk '{
+            if ($0 ~ /^GRUB_DISTRIBUTOR=/) {
+                print "GRUB_DISTRIBUTOR=\"Blaze SolarEvolution\""
+            } else {
+                print $0
+            }
+        }' "$grub_def" > "$tmp"
+    else
+        cat "$grub_def" > "$tmp"
+        printf 'GRUB_DISTRIBUTOR="Blaze SolarEvolution"\n' >> "$tmp"
+    fi
+    chmod 0644 "$tmp"
+    mv -f "$tmp" "$grub_def"
+    CHANGES=$((CHANGES + 1))
+    log "Updated GRUB_DISTRIBUTOR in $grub_def"
+}
+
+repair_bls_dir() {
+    local entries_dir="$1"
+    [ -d "$entries_dir" ] || return 0
+
+    local conf_f
+    for conf_f in "$entries_dir"/*.conf; do
+        [ -f "$conf_f" ] || continue
+        [ -L "$conf_f" ] && continue
+
+        local cur_title cur_ver cur_class
+        cur_title=$(awk '/^title[[:space:]]+/{sub(/^title[[:space:]]+/, ""); print; exit}' "$conf_f" 2>/dev/null || true)
+        cur_ver=$(awk '/^version[[:space:]]+/{sub(/^version[[:space:]]+/, ""); print; exit}' "$conf_f" 2>/dev/null || true)
+        cur_class=$(awk '/^grub_class[[:space:]]+/{sub(/^grub_class[[:space:]]+/, ""); print; exit}' "$conf_f" 2>/dev/null || true)
+
+        case "$cur_title" in
+            "Blaze snapshot"*|"BlazeOS Recovery"*|"Blaze Emergency"*)
+                continue
+                ;;
+        esac
+
+        if [ -z "$cur_ver" ]; then
+            local base
+            base=$(basename "$conf_f" .conf)
+            if [[ "$base" == *-* ]]; then
+                cur_ver="${base#*-}"
+            else
+                cur_ver="$base"
+            fi
+        fi
+
+        local debug_suffix="" clean_ver="$cur_ver"
+        if [[ "$cur_ver" == *~debug ]]; then
+            clean_ver="${cur_ver%~debug}"
+            debug_suffix=" with debugging"
+        elif [[ "$cur_ver" == *-debug ]] && [[ "$cur_title" == *"with debugging"* ]]; then
+            clean_ver="${cur_ver%-debug}"
+            debug_suffix=" with debugging"
+        fi
+
+        local expected_title="Blaze SolarEvolution (${clean_ver}) 5.05${debug_suffix}"
+        if [ "$cur_title" = "$expected_title" ] && { [ -z "$cur_class" ] || [ "$cur_class" = "blazeos" ]; }; then
+            continue
+        fi
+
+        local tmp
+        tmp=$(mktemp "$(dirname "$conf_f")/.blaze-bls.XXXXXX")
+        awk -v new_title="$expected_title" '
+            BEGIN { saw_title = 0 }
+            /^title[[:space:]]+/ {
+                print "title " new_title
+                saw_title = 1
+                next
+            }
+            /^grub_class[[:space:]]+/ {
+                print "grub_class blazeos"
+                next
+            }
+            { print $0 }
+            END {
+                if (!saw_title) {
+                    print "title " new_title
+                }
+            }
+        ' "$conf_f" > "$tmp"
+        chmod 0644 "$tmp"
+        mv -f "$tmp" "$conf_f"
+        CHANGES=$((CHANGES + 1))
+        log "Repaired BLS boot entry: $(basename "$conf_f") -> $expected_title"
+    done
+}
+
+compute_logo_fingerprint() {
+    local files=(
+        "${SYSROOT}/usr/share/blazeos/gdm/logo.png"
+        "${SYSROOT}/usr/share/icons/hicolor/256x256/apps/blazeos-logo.png"
+        "${SYSROOT}/usr/share/pixmaps/fedora-logo-icon.png"
+        "${SYSROOT}/usr/share/pixmaps/fedora_logo.png"
+        "${SYSROOT}/usr/share/pixmaps/system-logo-white.png"
+        "${SYSROOT}/usr/share/icons/hicolor/48x48/apps/fedora-logo-icon.png"
+        "${SYSROOT}/usr/share/icons/breeze/places/48/start-here-kde.svg"
+    )
+    local present=()
+    local f
+    for f in "${files[@]}"; do
+        [ -f "$f" ] && present+=("$f")
+    done
+    if [ "${#present[@]}" -eq 0 ]; then
+        echo "none"
+        return 0
+    fi
+    sha256sum "${present[@]}" | awk -v pfx="${SYSROOT}" '{
+        sub("^" pfx, "", $2)
+        print $1 " " $2
+    }' | LC_ALL=C sort
+}
+
+sync_logos() {
+    local logos_bin="${SYSROOT}/usr/libexec/blazeos-apply-logos"
+    [ -x "$logos_bin" ] || return 0
+
+    local stamp_file="${SYSROOT}/var/lib/blazeos/identity-logos.sha256"
+    local cur_fp
+    cur_fp=$(compute_logo_fingerprint)
+
+    if [ "$FORCE" -eq 0 ] && [ -f "$stamp_file" ]; then
+        local old_fp
+        old_fp=$(cat "$stamp_file" 2>/dev/null || true)
+        if [ "$cur_fp" = "$old_fp" ]; then
+            return 0
+        fi
+    fi
+
+    log "Applying BlazeOS logo overrides..."
+    if [ -n "$SYSROOT" ]; then
+        if [ -r /proc/self/mounts ] && chroot "$SYSROOT" /usr/libexec/blazeos-apply-logos >/dev/null 2>&1; then
+            :
+        else
+            log "Skipped chroot logo apply for $SYSROOT"
+            return 0
+        fi
+    else
+        /usr/libexec/blazeos-apply-logos >/dev/null 2>&1 || true
+    fi
+
+    mkdir -p "$(dirname "$stamp_file")"
+    compute_logo_fingerprint > "$stamp_file"
+    CHANGES=$((CHANGES + 1))
+}
+
+restore_selinux_labels() {
+    [ -z "$SYSROOT" ] || return 0
+    command -v restorecon >/dev/null 2>&1 || return 0
+    [ -d /sys/fs/selinux ] || return 0
+    restorecon -F \
+        /usr/lib/os-release /etc/os-release \
+        /usr/lib/fedora-release /etc/fedora-release /etc/redhat-release /etc/system-release \
+        /usr/lib/system-release-cpe /etc/system-release-cpe \
+        /usr/lib/issue /etc/issue /usr/lib/issue.net /etc/issue.net \
+        /usr/lib/blazeos-release /etc/blazeos-release \
+        /etc/default/grub \
+        /etc/dnf/vars/releasever /etc/dnf/libdnf5.conf.d/10-blaze-identity.conf \
+        /etc/dnf/protected.d/blaze-release.conf \
+        /etc/anaconda/profile.d/blazeos-solarevolution.conf \
+        /boot/loader/entries/*.conf \
+        /usr/share/pixmaps/fedora*.png /usr/share/pixmaps/system-logo-white.png \
+        >/dev/null 2>&1 || true
+}
+
+sync_grub_cfg_fallback() {
+    [ -z "$SYSROOT" ] || return 0
+    [ ! -d /run/initramfs/live ] || return 0
+    local cfg="/boot/grub2/grub.cfg"
+    [ -f "$cfg" ] || return 0
+    if grep -Eq "menuentry ['\"]Fedora Linux" "$cfg" 2>/dev/null; then
+        if command -v grub2-mkconfig >/dev/null 2>&1; then
+            log "Regenerating $cfg to clear legacy Fedora Linux entries..."
+            grub2-mkconfig --no-grubenv-update -o "$cfg" >/dev/null 2>&1 || true
+            if [ -d /sys/firmware/efi ] && [ -d /boot/efi/EFI/fedora ] && [ -x /usr/bin/gen_grub_cfgstub ]; then
+                /usr/bin/gen_grub_cfgstub /boot/grub2 /boot/efi/EFI/fedora >/dev/null 2>&1 || true
+            fi
+            CHANGES=$((CHANGES + 1))
+        fi
+    fi
+}
+
+case "$MODE" in
+    pre-kernel)
+        sync_release_files
+        sync_default_grub
+        ;;
+    bls-only)
+        sync_release_files
+        sync_default_grub
+        repair_bls_dir "${SYSROOT}/boot/loader/entries"
+        if [ -n "${KERNEL_INSTALL_BOOT_ROOT:-}" ] && [ -d "${SYSROOT}${KERNEL_INSTALL_BOOT_ROOT}/loader/entries" ]; then
+            repair_bls_dir "${SYSROOT}${KERNEL_INSTALL_BOOT_ROOT}/loader/entries"
+        fi
+        ;;
+    full|check)
+        sync_release_files
+        sync_default_grub
+        repair_bls_dir "${SYSROOT}/boot/loader/entries"
+        sync_logos
+        sync_grub_cfg_fallback
+        ;;
+esac
+
+if [ "$CHANGES" -gt 0 ]; then
+    restore_selinux_labels
+    log "Identity sync completed ($CHANGES updates)."
+fi
+
+exit 0

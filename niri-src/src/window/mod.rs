@@ -123,6 +123,9 @@ pub struct ResolvedWindowRules {
     /// Override whether to set the Tiled xdg-toplevel state on the window.
     pub tiled_state: Option<bool>,
 
+    /// Override whether to draw the server-side titlebar on this window.
+    pub server_titlebar: Option<bool>,
+
     /// Background effect configuration.
     pub background_effect: BackgroundEffect,
 
@@ -308,6 +311,9 @@ impl ResolvedWindowRules {
                 }
                 if let Some(x) = rule.tiled_state {
                     resolved.tiled_state = Some(x);
+                }
+                if let Some(x) = rule.server_titlebar {
+                    resolved.server_titlebar = Some(x);
                 }
 
                 resolved

@@ -14,7 +14,7 @@ ROOT="$(dirname "$HERE")"
 OVERLAY="$ROOT/blazeos_custom_apps"
 OUT="$HERE/out"
 GNUPGHOME_HOST="${BLAZE_GNUPGHOME:-$HOME/.blaze-signing}"
-FEDORA_IMAGE="${FEDORA_IMAGE:-registry.fedoraproject.org/fedora:44}"
+FEDORA_IMAGE="${FEDORA_IMAGE:-registry.fedoraproject.org/fedora:45}"
 KEYID="${BLAZE_KEYID:-Blaze Release}"
 
 [ -d "$GNUPGHOME_HOST" ] || { echo "missing signing keyring: $GNUPGHOME_HOST" >&2; exit 1; }
@@ -64,7 +64,14 @@ EOF
     find /work/rpmbuild/RPMS -name "*.rpm" -exec cp {} /work/repo/ \;
     rpmsign --addsign /work/repo/*.rpm
     rpm --import /work/SOURCES/RPM-GPG-KEY-blaze
-    rpm -K /work/repo/*.rpm
+    for rpm_file in /work/repo/*.rpm; do
+      rpm -K "$rpm_file" | grep -q "digests signatures OK" || { echo "FATAL: signature verify failed: $rpm_file" >&2; exit 1; }
+      sig="$(rpm -qp --qf "%{OPENPGP:pgpsig}|%{SIGPGP:pgpsig}|%{RSAHEADER:pgpsig}|%{DSAHEADER:pgpsig}" "$rpm_file")"
+      if [[ "$sig" == "(none)|(none)|(none)|(none)" ]]; then
+        echo "FATAL: unsigned RPM detected after rpmsign: $rpm_file" >&2
+        exit 1
+      fi
+    done
     createrepo_c -q /work/repo
     gpg --batch --yes --pinentry-mode loopback -u "$KEYID" --detach-sign --armor /work/repo/repodata/repomd.xml
     cp /work/SOURCES/RPM-GPG-KEY-blaze /work/repo/RPM-GPG-KEY-blaze

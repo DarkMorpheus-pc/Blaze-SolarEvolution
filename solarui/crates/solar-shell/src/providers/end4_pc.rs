@@ -20,13 +20,15 @@ pub struct End4PcProvider {
 impl Default for End4PcProvider {
     fn default() -> Self {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/home/liveuser".to_string());
-        let checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../vendor/end4-pC");
+        let checkout = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("../../vendor/end4-pC")));
         let candidates = [
             std::env::var_os("SOLARUI_END4_PC_DIR").map(PathBuf::from),
             Some(PathBuf::from("/usr/share/quickshell/end4-pC")),
             Some(PathBuf::from("/etc/xdg/quickshell/end4-pC")),
             Some(PathBuf::from(&home).join(".config/quickshell/end4-pC")),
-            Some(checkout),
+            checkout,
         ];
         let config_dir = candidates
             .into_iter()
@@ -81,29 +83,12 @@ impl End4PcProvider {
     }
 
     async fn get_pids(&self) -> Vec<i32> {
-        let uid = solar_common::current_uid();
         let needle = self.config_dir.to_string_lossy();
-        let Ok(entries) = std::fs::read_dir("/proc") else {
-            return Vec::new();
-        };
-
-        entries
-            .flatten()
-            .filter_map(|entry| {
-                let pid = entry.file_name().to_string_lossy().parse::<i32>().ok()?;
-                let metadata = std::fs::metadata(entry.path()).ok()?;
-                use std::os::unix::fs::MetadataExt;
-                if metadata.uid() != uid {
-                    return None;
-                }
-                let cmdline = std::fs::read(entry.path().join("cmdline")).ok()?;
-                let text = String::from_utf8_lossy(&cmdline).replace('\0', " ");
-                (text.contains("qs") || text.contains("quickshell"))
-                    .then_some(())
-                    .filter(|_| text.contains(needle.as_ref()))
-                    .map(|_| pid)
-            })
-            .collect()
+        super::find_uid_process_pids(|_, text| {
+            (text.contains("qs") || text.contains("quickshell"))
+                && text.contains(needle.as_ref())
+                && !text.contains(" ipc ")
+        })
     }
 
     async fn ipc(&self, target: &str, function: &str) -> Result<std::process::Output> {
@@ -225,6 +210,10 @@ impl ShellProvider for End4PcProvider {
             "end4-pC processes could not be stopped"
         );
         Ok(())
+    }
+
+    async fn process_alive(&self) -> bool {
+        !self.get_pids().await.is_empty()
     }
 
     async fn health_check(&self) -> Result<bool> {

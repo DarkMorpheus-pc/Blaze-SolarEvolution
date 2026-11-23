@@ -56,9 +56,9 @@ const TRANSLATIONS = {
         wipe_home_title: "Kullanıcı Hesaplarını ve Verilerini Sıfırla (/home)",
         wipe_home_desc: "Tüm kullanıcı belgeleri ve hesapları silinir. Sistem ilk kurulum sihirbazına (OOBE) döner.",
         wipe_factory_title: "Tam Fabrika Sıfırlaması (Format Data / Root Subvolumes)",
-        wipe_factory_desc: "Doğrulanmış fabrika imajı gerektirir. İmaj yoksa işlem güvenli biçimde engellenir.",
+        wipe_factory_desc: "Tüm kullanıcı hesaplarını ve sistem önbelleklerini temizleyip OOBE ilk kurulum sihirbazını geri yükler.",
         wipe_hard_reset_title: "Tam Sistem Temizliği (Hard Reset / Wipe System Data - sudo rm -rf /*)",
-        wipe_hard_reset_desc: "Yalnız bağımsız BERE kurtarma kökü kuruluysa çalışır; aksi halde sistemi önyüklenemez bırakmamak için engellenir.",
+        wipe_hard_reset_desc: "Tüm kök dosya sistemini (rootfs) siler; /boot/bere ve Btrfs snapshotları korunur, açılışta BlazeOS Acil Durum Ekranına düşer.",
         wipe_slider_warn: "Dikkat: Seçilen alanlar kalıcı olarak temizlenecektir.",
         wipe_slider_label: "Kaydırarak Temizlemeyi Başlat",
         wipe_running: "Temizleniyor...",
@@ -70,13 +70,13 @@ const TRANSLATIONS = {
 
         modal_hard_reset_title: "Kritik Güvenlik Doğrulaması",
         modal_hard_reset_msg: "Bu işlem geri alınamaz emin misiniz?",
-        modal_hard_reset_submsg: "Sistem verileri kalıcı olarak sıfırlanacaktır. Devam etmek için aşağıdaki kutucuğa SIFIRLA (veya YES) yazın:",
+        modal_hard_reset_submsg: "Sistem verileri kalıcı olarak sıfırlanacaktır. Devam etmek için aşağıdaki kutucuğa SIFIRLA (veya YES) yazın ve yetkili parolanızı girin:",
         modal_confirm_label: 'Onaylamak için "SIFIRLA" veya "YES" yazın:',
-        modal_pass_label: "Yetkili Kullanıcı / Root Şifresi (İsteğe Bağlı):",
+        modal_pass_label: "Yetkili Kullanıcı (wheel) / Root Şifresi (Zorunlu):",
         btn_cancel: "İptal",
         btn_confirm_wipe: "Onayla ve Kilidi Aç",
         modal_err_yes: "Onaylamak için kutucuğa 'SIFIRLA' veya 'YES' yazmalısınız.",
-        modal_err_pass: "Lütfen yetkili kullanıcı / root şifrenizi girin.",
+        modal_err_pass: "Yetkili kullanıcı (wheel) / root şifresi zorunludur.",
 
         part_title: "Bölüm ve Disk Yönetimi",
         part_desc: "Bağlama (Mount/Unmount), dosya sistemi onarımı (fsck/scrub) ve disk SMART sağlığı.",
@@ -184,9 +184,9 @@ const TRANSLATIONS = {
         wipe_home_title: "Reset User Accounts & Data (/home)",
         wipe_home_desc: "Deletes all user documents and accounts. System restarts into first-boot wizard (OOBE).",
         wipe_factory_title: "Full Factory Reset (Format Data / Root Subvolumes)",
-        wipe_factory_desc: "Requires a verified factory image. The operation is safely blocked when no image is installed.",
+        wipe_factory_desc: "Wipes all user accounts and system caches and restores the first-boot OOBE setup wizard.",
         wipe_hard_reset_title: "Complete System Wipe (Hard Reset / Wipe System Data - sudo rm -rf /*)",
-        wipe_hard_reset_desc: "Runs only when a standalone BERE recovery root is installed; otherwise it is blocked to prevent an unbootable system.",
+        wipe_hard_reset_desc: "Destroys the entire OS rootfs while preserving /boot/bere and Btrfs snapshots, booting into the BlazeOS Emergency Guard.",
         wipe_slider_warn: "Warning: Selected target areas will be permanently erased.",
         wipe_slider_label: "Slide to Start Wipe",
         wipe_running: "Wiping...",
@@ -200,11 +200,11 @@ const TRANSLATIONS = {
         modal_hard_reset_msg: "This action cannot be undone. Are you sure?",
         modal_hard_reset_submsg: "All operating system files across the root directory (rootfs) will be permanently destroyed. To proceed, type YES exactly into the box below and enter your administrative password:",
         modal_confirm_label: 'Type "YES" to confirm:',
-        modal_pass_label: "Administrator / Root Password:",
+        modal_pass_label: "Administrator (wheel) / Root Password (Required):",
         btn_cancel: "Cancel",
         btn_confirm_wipe: "Authorize and Unlock",
         modal_err_yes: "You must type exactly 'YES' to authorize this action.",
-        modal_err_pass: "Please enter your administrator / root password.",
+        modal_err_pass: "Administrator (wheel) / root password is required.",
 
         part_title: "Partition & Disk Management",
         part_desc: "Mount/Unmount controls, filesystem repair (fsck/scrub), and SMART health analysis.",
@@ -328,6 +328,108 @@ async function ensureApiToken() {
     return cachedApiToken;
 }
 
+let cachedAuthRequired = true;
+let isSessionUnlocked = false;
+let workspaceInitialized = false;
+
+function showStartupLockOverlay(show, adminUsers = []) {
+    const overlay = document.getElementById("bere-lock-overlay");
+    const usersEl = document.getElementById("bere-lock-users");
+    const errEl = document.getElementById("bere-lock-error");
+    const pwInp = document.getElementById("bere-lock-password");
+    if (!overlay) return;
+    if (show) {
+        if (usersEl) {
+            usersEl.textContent = adminUsers.length
+                ? `Yetkili Hesaplar: ${adminUsers.join(", ")}`
+                : "Yetkili yönetici hesabı doğrulanıyor...";
+        }
+        if (errEl) errEl.style.display = "none";
+        overlay.style.display = "flex";
+        setTimeout(() => pwInp && pwInp.focus(), 80);
+    } else {
+        overlay.style.display = "none";
+    }
+}
+
+async function requestActionPassword(title, desc) {
+    if (!cachedAuthRequired) {
+        return "";
+    }
+    const modal = document.getElementById("modal-action-auth");
+    const titleEl = document.getElementById("action-auth-title");
+    const descEl = document.getElementById("action-auth-desc");
+    const inp = document.getElementById("input-action-auth-pass");
+    const errEl = document.getElementById("action-auth-error");
+    const btnOk = document.getElementById("btn-action-auth-confirm");
+    const btnCancel = document.getElementById("btn-action-auth-cancel");
+    const btnClose = document.getElementById("btn-action-auth-close");
+
+    if (!modal || !inp || !btnOk) return null;
+
+    if (titleEl && title) titleEl.textContent = title;
+    if (descEl && desc) descEl.textContent = desc;
+    inp.value = "";
+    if (errEl) {
+        errEl.style.display = "none";
+        errEl.textContent = "";
+    }
+    modal.style.display = "flex";
+    setTimeout(() => inp.focus(), 60);
+
+    return new Promise((resolve) => {
+        const cleanup = () => {
+            modal.style.display = "none";
+            btnOk.removeEventListener("click", onConfirm);
+            btnCancel && btnCancel.removeEventListener("click", onCancel);
+            btnClose && btnClose.removeEventListener("click", onCancel);
+            inp.removeEventListener("keydown", onKey);
+        };
+        const onCancel = () => {
+            cleanup();
+            resolve(null);
+        };
+        const onConfirm = async () => {
+            const pw = inp.value;
+            if (!pw) {
+                if (errEl) {
+                    errEl.textContent = "Yetkili kullanıcı / root parolası zorunludur.";
+                    errEl.style.display = "block";
+                }
+                inp.focus();
+                return;
+            }
+            btnOk.disabled = true;
+            const checkRes = await apiCall("auth_unlock", { password: pw });
+            btnOk.disabled = false;
+            if (checkRes.status !== "ok") {
+                if (errEl) {
+                    errEl.textContent = checkRes.message || "Hatalı parola.";
+                    errEl.style.display = "block";
+                }
+                inp.value = "";
+                inp.focus();
+                return;
+            }
+            cleanup();
+            resolve(pw);
+        };
+        const onKey = (ev) => {
+            if (ev.key === "Enter") {
+                ev.preventDefault();
+                void onConfirm();
+            } else if (ev.key === "Escape") {
+                ev.preventDefault();
+                onCancel();
+            }
+        };
+        btnOk.addEventListener("click", onConfirm);
+        btnCancel && btnCancel.addEventListener("click", onCancel);
+        btnClose && btnClose.addEventListener("click", onCancel);
+        inp.addEventListener("keydown", onKey);
+    });
+}
+
 async function apiCall(endpoint, data = null) {
     try {
         const token = await ensureApiToken();
@@ -338,7 +440,13 @@ async function apiCall(endpoint, data = null) {
         if (data) options.body = JSON.stringify(data);
         const res = await fetch("/api/" + endpoint, options);
         const payload = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(payload.message || `HTTP ${res.status}`);
+        if (!res.ok) {
+            if (res.status === 401 || payload.status === "locked") {
+                isSessionUnlocked = false;
+                showStartupLockOverlay(true);
+            }
+            throw new Error(payload.message || `HTTP ${res.status}`);
+        }
         return payload;
     } catch (e) {
         console.error("API call error:", e);
@@ -378,7 +486,11 @@ function switchTab(target) {
         }
     });
 
-    if (target === "tab-install") loadIsos();
+    if (target === "tab-install") {
+        loadIsos();
+        loadUsbDevices();
+        loadIsoTargets();
+    }
     if (target === "tab-restore") loadSnapshots();
     if (target === "tab-partitions") loadPartitions();
 }
@@ -393,7 +505,7 @@ function initTabs() {
     });
 
     window.addEventListener("keydown", (e) => {
-        const isInput = e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA");
+        const isInput = e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT");
         if (isInput) return;
 
         // Number keys 1-8
@@ -546,13 +658,332 @@ function resetSlider(slider) {
     }, 300);
 }
 
-// 4. ISO Install / USB-less direct boot
+// 4. ISO Install, USB File Explorer & Pull-to-Vault
 let selectedIsoPath = null;
+let selectedIsoObj = null;
+let selectedUsbDevice = null;
+let currentUsbSubpath = "";
+let parentUsbSubpath = "";
+let selectedUsbIso = null;
+let pullPollTimer = null;
+let recommendRamDefaultApplied = false;
 
 function initIsos() {
     const btn = document.getElementById("btn-refresh-isos");
     if (btn) btn.addEventListener("click", loadIsos);
+
+    const btnUsb = document.getElementById("btn-refresh-usb");
+    if (btnUsb) {
+        btnUsb.addEventListener("click", () => {
+            loadUsbDevices();
+            loadIsoTargets();
+        });
+    }
+
+    const btnUsbUp = document.getElementById("btn-usb-up");
+    if (btnUsbUp) {
+        btnUsbUp.addEventListener("click", () => {
+            if (selectedUsbDevice) {
+                browseUsbDevice(selectedUsbDevice, parentUsbSubpath || "");
+            }
+        });
+    }
+
+    const btnPull = document.getElementById("btn-pull-iso");
+    if (btnPull) {
+        btnPull.addEventListener("click", startIsoPull);
+    }
+
+    const btnCancelPull = document.getElementById("btn-cancel-pull");
+    if (btnCancelPull) {
+        btnCancelPull.addEventListener("click", async () => {
+            await apiCall("iso_pull_cancel", { cancel: true });
+        });
+    }
+
+    const btnBootUsbDirect = document.getElementById("btn-boot-usb-direct");
+    if (btnBootUsbDirect) {
+        btnBootUsbDirect.addEventListener("click", () => {
+            if (selectedUsbIso && selectedUsbIso.full_path) {
+                selectIsoForLaunch({
+                    name: selectedUsbIso.name,
+                    path: selectedUsbIso.full_path,
+                    size_mb: selectedUsbIso.size_mb,
+                    can_pull: true,
+                    kind: selectedUsbIso.full_path.startsWith("media://") ? "media" : "iso",
+                    source: selectedUsbIso.source || "usb",
+                });
+            }
+        });
+    }
+
+    const btnCardPull = document.getElementById("btn-iso-card-pull");
+    if (btnCardPull) {
+        btnCardPull.addEventListener("click", () => {
+            if (!selectedIsoObj) return;
+            selectedUsbIso = {
+                name: selectedIsoObj.name,
+                full_path: selectedIsoObj.path,
+                size_mb: selectedIsoObj.size_mb || 0,
+                source: selectedIsoObj.source || "optical",
+            };
+            const lbl = document.getElementById("usb-selected-iso-label");
+            const pullPanel = document.getElementById("usb-pull-panel");
+            if (lbl) {
+                lbl.innerHTML = `<strong>${escapeHtml(selectedUsbIso.name)}</strong> (${selectedUsbIso.size_mb} MB)<br><small>${escapeHtml(selectedUsbIso.full_path)}</small>`;
+            }
+            if (pullPanel) pullPanel.style.display = "block";
+            void startIsoPull();
+        });
+    }
+
     loadIsos();
+    loadUsbDevices();
+    loadIsoTargets();
+
+    const btnVaultReinstall = document.getElementById("btn-vault-reinstall");
+    if (btnVaultReinstall) {
+        btnVaultReinstall.addEventListener("click", () => void triggerVaultBoot("install"));
+    }
+    const btnVaultLive = document.getElementById("btn-vault-live");
+    if (btnVaultLive) {
+        btnVaultLive.addEventListener("click", () => void triggerVaultBoot("live"));
+    }
+}
+
+async function triggerVaultBoot(profile) {
+    const labelTxt = profile === "install"
+        ? "BLAZE_REC Zırhlı Kasasından USB olmadan Anaconda Kurulum Sihirbazı (kexec) başlatılsın mı?"
+        : "BLAZE_REC Zırhlı Kasasından Canlı Blaze SolarEvolution masaüstü (kexec) başlatılsın mı?";
+    const pw = await requestActionPassword("Zırhlı Kasa Başlatma Doğrulaması", labelTxt);
+    if (pw === null) return;
+    const ramChk = document.getElementById("iso-copy-to-ram");
+    const copyToRam = ramChk ? ramChk.checked : false;
+    const res = await apiCall("vault_verify_and_boot", {
+        profile,
+        copy_to_ram: copyToRam,
+        password: pw,
+    });
+    if (res.status !== "ok") {
+        alert("Hata: " + (res.message || "BLAZE_REC başlatılamadı."));
+    }
+}
+
+async function loadIsoTargets() {
+    const sel = document.getElementById("iso-pull-target");
+    if (!sel) return;
+    const prev = sel.value;
+    const res = await apiCall("iso_targets");
+    sel.innerHTML = "";
+    if (!res.targets || res.targets.length === 0) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = currentLang === "tr"
+            ? "Yazılabilir dahili bölüm bulunamadı (Önce Diskler sekmesinden bölüm oluşturun)"
+            : "No writable internal partition found";
+        sel.appendChild(opt);
+        return;
+    }
+    res.targets.forEach(tg => {
+        const opt = document.createElement("option");
+        opt.value = tg.dest_dir;
+        opt.textContent = tg.label;
+        sel.appendChild(opt);
+    });
+    if (prev && Array.from(sel.options).some(o => o.value === prev)) {
+        sel.value = prev;
+    }
+}
+
+async function loadUsbDevices() {
+    const container = document.getElementById("usb-device-list");
+    if (!container) return;
+    container.innerHTML = `<div class='empty-hint'>${currentLang === "tr" ? "USB ve harici diskler taranıyor..." : "Scanning USB and external drives..."}</div>`;
+    const res = await apiCall("usb_devices");
+    if (!res.devices || res.devices.length === 0) {
+        container.innerHTML = `<div class='empty-hint'>${currentLang === "tr" ? "Takılı bir USB bellek veya harici bölüm algılanmadı. USB takıp 'USB'leri Tara' tuşuna basın." : "No USB flash drive or external partition detected."}</div>`;
+        return;
+    }
+
+    container.innerHTML = "";
+    res.devices.forEach(dev => {
+        const row = document.createElement("div");
+        row.className = "list-row-item" + (selectedUsbDevice === dev.device ? " selected" : "");
+        row.innerHTML = `
+            <div class="item-left">
+                <span class="item-title">${escapeHtml(dev.label)} <span class="tag-badge">${escapeHtml(dev.badge)}</span></span>
+                <span class="item-meta">${escapeHtml(dev.device)} | ${escapeHtml(dev.fstype.toUpperCase())} | ${dev.size_gb} GB | ${escapeHtml(dev.model)}</span>
+            </div>
+            <button class="fox-btn outline-btn fox-btn-sm" type="button">${currentLang === "tr" ? "İçine Gir" : "Browse"}</button>
+        `;
+        row.addEventListener("click", () => {
+            selectedUsbDevice = dev.device;
+            document.querySelectorAll("#usb-device-list .list-row-item").forEach(r => r.classList.remove("selected"));
+            row.classList.add("selected");
+            if (dev.is_live_media && dev.media_ref) {
+                selectedUsbIso = {
+                    name: `${dev.label || "BlazeOS-Media"}.iso`,
+                    full_path: dev.media_ref,
+                    size_mb: Math.round((dev.size_gb || 0) * 1024),
+                    source: dev.kind || "optical",
+                };
+                const pullPanel = document.getElementById("usb-pull-panel");
+                const lbl = document.getElementById("usb-selected-iso-label");
+                if (lbl) {
+                    lbl.innerHTML = `<strong>${escapeHtml(selectedUsbIso.name)}</strong> (${escapeHtml(dev.badge)})<br><small>${escapeHtml(selectedUsbIso.full_path)}</small>`;
+                }
+                if (pullPanel) pullPanel.style.display = "block";
+                void loadIsoTargets();
+            }
+            browseUsbDevice(dev.device, "");
+        });
+        container.appendChild(row);
+    });
+}
+
+async function browseUsbDevice(device, subpath) {
+    const box = document.getElementById("usb-browser-box");
+    const listEl = document.getElementById("usb-entry-list");
+    const pathEl = document.getElementById("usb-current-path");
+    const upBtn = document.getElementById("btn-usb-up");
+    if (!box || !listEl) return;
+
+    box.style.display = "block";
+    listEl.innerHTML = `<div class='empty-hint'>${currentLang === "tr" ? "Klasör okunuyor..." : "Reading directory..."}</div>`;
+    const res = await apiCall("usb_browse", { device, subpath });
+    if (res.status !== "ok") {
+        listEl.innerHTML = `<div class='empty-hint'>[HATA] ${escapeHtml(res.message || "Okunamadı")}</div>`;
+        return;
+    }
+
+    currentUsbSubpath = res.current_subpath || "";
+    parentUsbSubpath = res.parent_subpath || "";
+    if (pathEl) pathEl.textContent = `${device}:/${currentUsbSubpath}`;
+    if (upBtn) upBtn.disabled = !currentUsbSubpath;
+
+    if (!res.entries || res.entries.length === 0) {
+        listEl.innerHTML = `<div class='empty-hint'>${currentLang === "tr" ? "Bu klasörde alt dizin veya .iso dosyası yok." : "No folders or .iso files in this directory."}</div>`;
+        return;
+    }
+
+    listEl.innerHTML = "";
+    res.entries.forEach(entry => {
+        const row = document.createElement("div");
+        row.className = "list-row-item";
+        if (entry.type === "dir") {
+            row.innerHTML = `
+                <div class="item-left">
+                    <span class="item-title">[KLASÖR] ${escapeHtml(entry.name)}</span>
+                    <span class="item-meta">/${escapeHtml(entry.subpath)}</span>
+                </div>
+                <button class="fox-btn outline-btn fox-btn-sm" type="button">${currentLang === "tr" ? "Aç" : "Open"}</button>
+            `;
+            row.addEventListener("click", () => browseUsbDevice(device, entry.subpath));
+        } else {
+            row.innerHTML = `
+                <div class="item-left">
+                    <span class="item-title">${escapeHtml(entry.name)} <span class="tag-badge">ISO</span></span>
+                    <span class="item-meta">${entry.size_mb} MB | /${escapeHtml(entry.subpath)}</span>
+                </div>
+                <button class="fox-btn primary-btn fox-btn-sm" type="button">${currentLang === "tr" ? "Seç" : "Select"}</button>
+            `;
+            row.addEventListener("click", () => {
+                document.querySelectorAll("#usb-entry-list .list-row-item").forEach(r => r.classList.remove("selected"));
+                row.classList.add("selected");
+                selectedUsbIso = entry;
+                const pullPanel = document.getElementById("usb-pull-panel");
+                const lbl = document.getElementById("usb-selected-iso-label");
+                if (lbl) {
+                    lbl.innerHTML = `<strong>${escapeHtml(entry.name)}</strong> (${entry.size_mb} MB)<br><small>${escapeHtml(entry.full_path)}</small>`;
+                }
+                if (pullPanel) pullPanel.style.display = "block";
+                loadIsoTargets();
+            });
+        }
+        listEl.appendChild(row);
+    });
+}
+
+async function startIsoPull() {
+    if (!selectedUsbIso || !selectedUsbIso.full_path) return;
+    const targetSel = document.getElementById("iso-pull-target");
+    const destDir = targetSel ? targetSel.value : "";
+    if (!destDir) {
+        alert(currentLang === "tr" ? "Lütfen hedef dahili bölümü seçin." : "Please select a destination partition.");
+        return;
+    }
+
+    const btnPull = document.getElementById("btn-pull-iso");
+    const btnCancel = document.getElementById("btn-cancel-pull");
+    const progWrap = document.getElementById("iso-pull-progress-wrap");
+    const progFill = document.getElementById("iso-pull-progress-fill");
+    const progTxt = document.getElementById("iso-pull-progress-text");
+
+    if (btnPull) btnPull.disabled = true;
+    const res = await apiCall("iso_pull", { src_path: selectedUsbIso.full_path, dest_dir: destDir });
+    if (res.status !== "ok") {
+        if (btnPull) btnPull.disabled = false;
+        alert("Hata: " + (res.message || "Aktarım başlatılamadı."));
+        return;
+    }
+
+    if (progWrap) progWrap.style.display = "block";
+    if (btnCancel) btnCancel.style.display = "inline-block";
+    if (progFill) progFill.style.width = "1%";
+    if (progTxt) progTxt.textContent = "Başlatılıyor...";
+
+    if (pullPollTimer) clearInterval(pullPollTimer);
+    pullPollTimer = setInterval(async () => {
+        const st = await apiCall("iso_pull_status");
+        if (st.status !== "ok") return;
+        const doneMb = Math.round((st.bytes_done || 0) / (1024 * 1024));
+        const totalMb = Math.round((st.bytes_total || 0) / (1024 * 1024));
+        const pct = st.percent || 0;
+        if (progFill) progFill.style.width = `${pct}%`;
+        if (progTxt) {
+            progTxt.textContent = st.active
+                ? `%${pct} (${doneMb} / ${totalMb} MB — ${st.speed_mbps || 0} MB/sn) | ${st.message || ""}`
+                : (st.message || "");
+        }
+        if (!st.active) {
+            clearInterval(pullPollTimer);
+            pullPollTimer = null;
+            if (btnPull) btnPull.disabled = false;
+            if (btnCancel) btnCancel.style.display = "none";
+            await loadIsos();
+            await loadIsoTargets();
+            if (st.dest_path && pct === 100) {
+                selectIsoForLaunch({
+                    name: st.filename || st.dest_path.split("/").pop(),
+                    path: st.dest_path,
+                    size_mb: totalMb,
+                    source: "vault",
+                });
+            }
+        }
+    }, 450);
+}
+
+async function selectIsoForLaunch(iso) {
+    selectedIsoPath = iso.path;
+    selectedIsoObj = iso;
+    const metaEl = document.getElementById("selected-iso-meta");
+    const actCard = document.getElementById("iso-action-card");
+    const pullBar = document.getElementById("selected-iso-pull-bar");
+    if (actCard) actCard.style.display = "block";
+    if (pullBar) {
+        pullBar.style.display = (iso.can_pull || iso.kind === "media") ? "flex" : "none";
+    }
+    if (metaEl) {
+        metaEl.innerHTML = `<strong>${escapeHtml(iso.display_name || iso.name)}</strong> (${iso.size_mb} MB)<br><small>${escapeHtml(iso.path)}</small>`;
+    }
+    const probe = await apiCall("iso_inspect", { path: iso.path });
+    if (probe.status === "ok" && probe.info && metaEl && selectedIsoPath === iso.path) {
+        const inf = probe.info;
+        const badgeTxt = inf.supported ? inf.distro_label : "Desteklenmeyen Yapı";
+        const lblExtra = inf.cd_label ? ` | CDLABEL: ${escapeHtml(inf.cd_label)}` : "";
+        metaEl.innerHTML = `<strong>${escapeHtml(iso.display_name || iso.name)}</strong> <span class="tag-badge">${escapeHtml(badgeTxt)}</span><br><small>${inf.size_mb || iso.size_mb} MB${lblExtra} | ${escapeHtml(iso.path)}</small>`;
+    }
 }
 
 async function loadIsos() {
@@ -561,36 +992,101 @@ async function loadIsos() {
     container.innerHTML = `<div class='empty-hint'>${escapeHtml(t("scanning_isos"))}</div>`;
     const res = await apiCall("isos");
 
+    const ramChk = document.getElementById("iso-copy-to-ram");
+    if (ramChk && !recommendRamDefaultApplied && res.recommend_ram_boot) {
+        ramChk.checked = true;
+        recommendRamDefaultApplied = true;
+    }
+
+    const vaultBanner = document.getElementById("bere-vault-banner");
+    if (vaultBanner && res.vault && res.vault.present) {
+        vaultBanner.style.display = "block";
+        const desc = document.getElementById("bere-vault-desc");
+        const actions = document.getElementById("bere-vault-actions");
+        const badge = document.getElementById("bere-vault-badge");
+        const szGb = ((res.vault.squashfs_mb || 0) / 1024).toFixed(2);
+        if (res.vault.full_os_embedded) {
+            if (badge) badge.textContent = "TAM İMAJ · SHA-256";
+            if (desc) {
+                desc.textContent = `Aygıt: ${res.vault.device} (${szGb} GiB) — Tam Blaze SolarEvolution LiveOS imajı gömülü. Format USB'si olmadan doğrudan kexec ile kurulum veya kurtarma başlatabilirsiniz.`;
+            }
+            if (actions) actions.style.display = "flex";
+        } else {
+            if (badge) badge.textContent = "MİNİMAL BERE";
+            if (desc) {
+                desc.textContent = `Aygıt: ${res.vault.device} (${res.vault.squashfs_mb || 0} MB) — Minimal BERE kurtarma kasası aktif (Tam LiveOS kurulum imajı gömülü değil).`;
+            }
+            if (actions) actions.style.display = "none";
+        }
+    } else if (vaultBanner) {
+        vaultBanner.style.display = "none";
+    }
+
     if (!res.isos || res.isos.length === 0) {
         container.innerHTML = `<div class='empty-hint'>${escapeHtml(t("no_isos_found"))}</div>`;
-        const actCard = document.getElementById("iso-action-card");
-        if (actCard) actCard.style.display = "none";
         return;
     }
 
     container.innerHTML = "";
     res.isos.forEach(iso => {
         const item = document.createElement("div");
-        item.className = "list-row-item";
+        item.className = "list-row-item" + (selectedIsoPath === iso.path ? " selected" : "");
+        let srcBadge = "";
+        if (iso.source === "armored_vault") {
+            srcBadge = `<span class="tag-badge">ZIRHLI KASA (USB YOK)</span>`;
+        } else if (iso.source === "vault") {
+            srcBadge = `<span class="tag-badge">KASA</span>`;
+        } else if (iso.source === "optical") {
+            srcBadge = `<span class="tag-badge">DVD/ISO</span>`;
+        } else if (iso.source === "usb") {
+            srcBadge = `<span class="tag-badge">USB</span>`;
+        } else {
+            srcBadge = `<span class="tag-badge">DİSK</span>`;
+        }
+        const delBtnHtml = iso.managed
+            ? `<button class="fox-btn danger-btn fox-btn-sm btn-iso-del" type="button">${currentLang === "tr" ? "Sil" : "Delete"}</button>`
+            : "";
         item.innerHTML = `
             <div class="item-left">
-                <span class="item-title">${escapeHtml(iso.name)}</span>
+                <span class="item-title">${escapeHtml(iso.display_name || iso.name)} ${srcBadge}</span>
                 <span class="item-meta">${iso.size_mb} MB | ${escapeHtml(iso.path)}</span>
             </div>
-            <button class="fox-btn outline-btn">${currentLang === "tr" ? "Seç" : "Select"}</button>
+            <div class="inline-row">
+                <button class="fox-btn outline-btn fox-btn-sm" type="button">${currentLang === "tr" ? "Seç" : "Select"}</button>
+                ${delBtnHtml}
+            </div>
         `;
         item.addEventListener("click", () => {
             document.querySelectorAll("#iso-list .list-row-item").forEach(r => r.classList.remove("selected"));
             item.classList.add("selected");
-            selectedIsoPath = iso.path;
-
-            const metaEl = document.getElementById("selected-iso-meta");
-            if (metaEl) {
-                metaEl.innerHTML = `<strong>${escapeHtml(iso.name)}</strong> (${iso.size_mb} MB)<br><small>${escapeHtml(iso.path)}</small>`;
-            }
-            const actCard = document.getElementById("iso-action-card");
-            if (actCard) actCard.style.display = "block";
+            selectIsoForLaunch(iso);
         });
+        const delBtn = item.querySelector(".btn-iso-del");
+        if (delBtn) {
+            delBtn.addEventListener("click", async (ev) => {
+                ev.stopPropagation();
+                const pw = await requestActionPassword(
+                    "ISO Kalıbını Sil",
+                    `${iso.name} kalıbını .blaze-isos kasasından kalıcı olarak silmek için parolanızı girin:`
+                );
+                if (pw === null) return;
+                delBtn.disabled = true;
+                const dr = await apiCall("iso_delete", { path: iso.path, password: pw });
+                if (dr.status !== "ok") {
+                    alert("Hata: " + (dr.message || "Silinemedi"));
+                    delBtn.disabled = false;
+                    return;
+                }
+                if (selectedIsoPath === iso.path) {
+                    selectedIsoPath = null;
+                    selectedIsoObj = null;
+                    const actCard = document.getElementById("iso-action-card");
+                    if (actCard) actCard.style.display = "none";
+                }
+                loadIsos();
+                loadIsoTargets();
+            });
+        }
         container.appendChild(item);
     });
 }
@@ -602,14 +1098,29 @@ async function onConfirmIsoBoot(slider) {
         return;
     }
 
+    const profSel = document.getElementById("iso-boot-profile");
+    const engSel = document.getElementById("iso-boot-engine");
+    const ramChk = document.getElementById("iso-copy-to-ram");
+    const profile = profSel ? profSel.value : "live";
+    const engine = engSel ? engSel.value : "auto";
+    const copyToRam = ramChk ? ramChk.checked : false;
+
     const label = slider.querySelector(".slider-label");
     label.textContent = t("iso_configured_msg");
 
-    const res = await apiCall("iso_boot", { path: selectedIsoPath });
+    const res = await apiCall("iso_boot", {
+        path: selectedIsoPath,
+        profile,
+        engine,
+        copy_to_ram: copyToRam,
+    });
     if (res.status === "ok") {
-        setTimeout(() => {
-            apiCall("reboot", { target: "system" });
-        }, 1500);
+        if (res.message) label.textContent = res.message;
+        if (!res.auto_transition) {
+            setTimeout(() => {
+                apiCall("reboot", { target: "system" });
+            }, 1500);
+        }
     } else {
         alert("Hata: " + res.message);
         label.textContent = t("slider_iso_label");
@@ -673,9 +1184,12 @@ async function loadSnapshots() {
                 <span class="item-title">${escapeHtml(s.name)}</span>
                 <span class="item-meta">${currentLang === "tr" ? "Tarih" : "Date"}: ${escapeHtml(s.date)} | ${escapeHtml(s.path)}</span>
             </div>
-            <button class="fox-btn outline-btn">${currentLang === "tr" ? "Seç" : "Select"}</button>
+            <div class="inline-row">
+                <button class="fox-btn outline-btn btn-snap-select" type="button">${currentLang === "tr" ? "Seç" : "Select"}</button>
+                <button class="fox-btn outline-btn fox-btn-sm btn-snap-delete" type="button">${currentLang === "tr" ? "Sil" : "Delete"}</button>
+            </div>
         `;
-        row.addEventListener("click", () => {
+        const selectSnap = () => {
             document.querySelectorAll("#snapshot-list .list-row-item").forEach(r => r.classList.remove("selected"));
             row.classList.add("selected");
             selectedSnapshot = s;
@@ -685,7 +1199,32 @@ async function loadSnapshots() {
             }
             const sliderBox = document.getElementById("restore-slider-box");
             if (sliderBox) sliderBox.style.display = "block";
-        });
+        };
+        row.addEventListener("click", selectSnap);
+        const delBtn = row.querySelector(".btn-snap-delete");
+        if (delBtn) {
+            delBtn.addEventListener("click", async (ev) => {
+                ev.stopPropagation();
+                const pw = await requestActionPassword(
+                    "Snapshot Silme Onayı",
+                    `${s.name} yedeğini kalıcı olarak silmek için parolanızı girin:`
+                );
+                if (pw === null) return;
+                delBtn.disabled = true;
+                const dres = await apiCall("delete_snapshot", { snapshot: s.path, password: pw });
+                if (dres.status !== "ok") {
+                    alert("Hata: " + (dres.message || "Silinemedi"));
+                    delBtn.disabled = false;
+                    return;
+                }
+                if (selectedSnapshot && selectedSnapshot.path === s.path) {
+                    selectedSnapshot = null;
+                    const sliderBox = document.getElementById("restore-slider-box");
+                    if (sliderBox) sliderBox.style.display = "none";
+                }
+                loadSnapshots();
+            });
+        }
         container.appendChild(row);
     });
 }
@@ -697,10 +1236,19 @@ async function onConfirmRestore(slider) {
         return;
     }
 
+    const pw = await requestActionPassword(
+        "Sistem Geri Yükleme Onayı",
+        `${selectedSnapshot.name} yedeğine geri dönmek için Yetkili Kullanıcı (wheel) veya Root parolanızı girin:`
+    );
+    if (pw === null) {
+        resetSlider(slider);
+        return;
+    }
+
     const label = slider.querySelector(".slider-label");
     label.textContent = t("restoring_msg");
 
-    const res = await apiCall("restore_snapshot", { snapshot: selectedSnapshot.path });
+    const res = await apiCall("restore_snapshot", { snapshot: selectedSnapshot.path, password: pw });
     if (res.status === "ok") {
         label.textContent = t("restore_success_msg");
         setTimeout(() => {
@@ -716,6 +1264,7 @@ async function onConfirmRestore(slider) {
 // 6. Wipe & Hard Reset Logic
 let hardResetVerified = false;
 let hardResetConfirmCode = "SIFIRLA";
+let hardResetPassword = "";
 
 function initHardResetModal() {
     const chkHardReset = document.getElementById("wipe-hard-reset");
@@ -733,6 +1282,8 @@ function initHardResetModal() {
         inputPass.value = "";
         errorEl.style.display = "none";
         errorEl.textContent = "";
+        const passField = inputPass ? inputPass.closest(".modal-field") : null;
+        if (passField) passField.style.display = cachedAuthRequired ? "flex" : "none";
         modal.style.display = "flex";
         setTimeout(() => inputConfirm.focus(), 100);
     }
@@ -753,6 +1304,7 @@ function initHardResetModal() {
                 openModal();
             } else if (!chkHardReset.checked) {
                 hardResetVerified = false;
+                hardResetPassword = "";
             }
         });
     }
@@ -761,19 +1313,40 @@ function initHardResetModal() {
     if (btnCancel) btnCancel.addEventListener("click", closeModal);
 
     if (btnConfirm) {
-        btnConfirm.addEventListener("click", () => {
+        btnConfirm.addEventListener("click", async () => {
             const confirmVal = inputConfirm.value.trim().toUpperCase();
+            const pw = inputPass ? inputPass.value : "";
 
-            if (confirmVal !== "YES" && confirmVal !== "SIFIRLA" && confirmVal !== "SIFIRLA") {
+            if (confirmVal !== "YES" && confirmVal !== "SIFIRLA" && confirmVal !== "RESET") {
                 errorEl.textContent = t("modal_err_yes");
                 errorEl.style.display = "block";
                 inputConfirm.focus();
                 return;
             }
 
+            if (cachedAuthRequired) {
+                if (!pw) {
+                    errorEl.textContent = t("modal_err_pass");
+                    errorEl.style.display = "block";
+                    inputPass.focus();
+                    return;
+                }
+                btnConfirm.disabled = true;
+                const authRes = await apiCall("auth_unlock", { password: pw });
+                btnConfirm.disabled = false;
+                if (authRes.status !== "ok") {
+                    errorEl.textContent = authRes.message || "Hatalı yetkili kullanıcı / root parolası.";
+                    errorEl.style.display = "block";
+                    inputPass.value = "";
+                    inputPass.focus();
+                    return;
+                }
+            }
+
             // Verification successful
             hardResetVerified = true;
             hardResetConfirmCode = confirmVal;
+            hardResetPassword = pw;
             if (chkHardReset) chkHardReset.checked = true;
             closeModal();
         });
@@ -794,6 +1367,18 @@ async function onConfirmWipe(slider) {
         return;
     }
 
+    let actionPassword = wipeHardReset ? hardResetPassword : "";
+    if (cachedAuthRequired && !actionPassword) {
+        actionPassword = await requestActionPassword(
+            "Temizleme / Sıfırlama Güvenlik Onayı",
+            "Seçili sistem alanlarını silmek veya sıfırlamak için Yetkili Kullanıcı (wheel) / Root parolanızı girin:"
+        );
+        if (actionPassword === null) {
+            resetSlider(slider);
+            return;
+        }
+    }
+
     const label = slider.querySelector(".slider-label");
     if (wipeHardReset) {
         label.textContent = t("wipe_running_hard");
@@ -810,6 +1395,7 @@ async function onConfirmWipe(slider) {
         factory: wipeFactory,
         hard_reset: wipeHardReset,
         confirm: hardResetConfirmCode,
+        password: actionPassword,
         lang: currentLang
     });
 
@@ -833,19 +1419,102 @@ async function onConfirmWipe(slider) {
     }
 }
 
-// 7. Partitions & SMART
+// 7. Partitions, Disk Partitioning & SMART
 function initPartitions() {
     const btn = document.getElementById("btn-refresh-parts");
     if (btn) btn.addEventListener("click", loadPartitions);
+
+    const logEl = document.getElementById("part-op-console");
+    function setPartLog(msg) {
+        if (logEl) logEl.textContent = msg;
+    }
+
+    const btnMklabel = document.getElementById("btn-disk-mklabel");
+    if (btnMklabel) {
+        btnMklabel.addEventListener("click", async () => {
+            const diskSel = document.getElementById("part-target-disk");
+            const tblSel = document.getElementById("part-table-type");
+            const disk = diskSel ? diskSel.value : "";
+            const labelType = tblSel ? tblSel.value : "gpt";
+            if (!disk) return;
+            const pw = await requestActionPassword(
+                "Disk Bölüm Tablosu Sıfırlama",
+                `${disk} üzerinde ${labelType.toUpperCase()} bölüm tablosu oluşturmak için Yetkili Kullanıcı / Root parolasını girin:`
+            );
+            if (pw === null) return;
+            btnMklabel.disabled = true;
+            setPartLog(`${disk} üzerinde ${labelType.toUpperCase()} bölüm tablosu oluşturuluyor...`);
+            const res = await apiCall("disk_mklabel", { disk, label_type: labelType, password: pw });
+            btnMklabel.disabled = false;
+            setPartLog(res.status === "ok" ? res.output : `[HATA] ${res.message || res.output || ""}`);
+            loadPartitions();
+        });
+    }
+
+    const btnCreate = document.getElementById("btn-part-create");
+    if (btnCreate) {
+        btnCreate.addEventListener("click", async () => {
+            const diskSel = document.getElementById("part-target-disk");
+            const sizeInp = document.getElementById("part-new-size");
+            const fsSel = document.getElementById("part-new-fs");
+            const lblInp = document.getElementById("part-new-label");
+            const disk = diskSel ? diskSel.value : "";
+            const sizeMb = sizeInp ? sizeInp.value.trim() : "";
+            const fstype = fsSel ? fsSel.value : "ext4";
+            const label = lblInp ? lblInp.value.trim() : "";
+            if (!disk) return;
+            const pw = await requestActionPassword(
+                "Yeni Disk Bölümü Oluşturma",
+                `${disk} diskinde yeni ${fstype.toUpperCase()} bölümü oluşturmak için Yetkili Kullanıcı / Root parolasını girin:`
+            );
+            if (pw === null) return;
+            btnCreate.disabled = true;
+            setPartLog(`${disk} üzerinde yeni bölüm (${fstype}, boyut=${sizeMb || "100%"}) oluşturuluyor...`);
+            const res = await apiCall("part_create", {
+                disk,
+                size_mb: sizeMb,
+                fstype,
+                label,
+                password: pw,
+            });
+            btnCreate.disabled = false;
+            if (res.status === "ok") {
+                if (sizeInp) sizeInp.value = "";
+                if (lblInp) lblInp.value = "";
+                setPartLog(res.output || "Bölüm başarıyla oluşturuldu.");
+            } else {
+                setPartLog(`[HATA] ${res.message || res.output || ""}`);
+            }
+            loadPartitions();
+        });
+    }
+
     loadPartitions();
 }
 
 async function loadPartitions() {
     const tbody = document.querySelector("#parts-table tbody");
+    const diskSel = document.getElementById("part-target-disk");
+    const logEl = document.getElementById("part-op-console");
     if (!tbody) return;
     tbody.innerHTML = `<tr><td colspan='5' class='text-center'>${escapeHtml(t("fetching_parts"))}</td></tr>`;
 
     const res = await apiCall("partitions");
+
+    if (diskSel && Array.isArray(res.disks)) {
+        const prev = diskSel.value;
+        diskSel.innerHTML = "";
+        res.disks.forEach(dk => {
+            const opt = document.createElement("option");
+            opt.value = dk.name;
+            opt.textContent = `${dk.name} (${dk.size} — ${dk.model || "Disk"}, ${String(dk.pttype || "none").toUpperCase()}${dk.busy ? ", BAĞLI" : ""})`;
+            diskSel.appendChild(opt);
+        });
+        if (prev && Array.from(diskSel.options).some(o => o.value === prev)) {
+            diskSel.value = prev;
+        }
+    }
+
     if (!res.partitions || res.partitions.length === 0) {
         tbody.innerHTML = `<tr><td colspan='5' class='text-center'>${escapeHtml(t("no_parts_found"))}</td></tr>`;
         return;
@@ -854,33 +1523,123 @@ async function loadPartitions() {
     tbody.innerHTML = "";
     res.partitions.forEach(p => {
         const tr = document.createElement("tr");
-        const isMounted = p.mountpoint && p.mountpoint.length > 0;
-        tr.innerHTML = `
-            <td><strong>${escapeHtml(p.name)}</strong></td>
-            <td>${escapeHtml(p.fstype || "-")}</td>
-            <td>${escapeHtml(p.size || "-")}</td>
-            <td>${escapeHtml(p.mountpoint || t("not_mounted"))}</td>
-            <td>
-                <button class="fox-btn outline-btn part-act-btn" data-dev="${p.name}" data-mounted="${isMounted}">
+        const isMounted = Boolean(p.mountpoint && p.mountpoint.length > 0);
+        const isPart = p.type === "part";
+        const isProtected = Boolean(p.protected);
+        const fsLabel = [p.fstype || "-", p.label ? `[${p.label}]` : ""].filter(Boolean).join(" ");
+
+        let actionsHtml = "";
+        if (!isProtected && (isPart || p.fstype)) {
+            actionsHtml += `
+                <button class="fox-btn outline-btn fox-btn-sm part-act-mount" type="button">
                     ${isMounted ? t("btn_unmount") : t("btn_mount")}
                 </button>
-            </td>
+            `;
+            if (p.fstype && p.fstype !== "swap") {
+                actionsHtml += `
+                    <button class="fox-btn outline-btn fox-btn-sm part-act-fsck" type="button">
+                        ${currentLang === "tr" ? "Onar" : "Check"}
+                    </button>
+                `;
+            }
+            if (isPart && !isMounted) {
+                actionsHtml += `
+                    <button class="fox-btn outline-btn fox-btn-sm part-act-fmt" type="button">
+                        ${currentLang === "tr" ? "Biçimlendir" : "Format"}
+                    </button>
+                    <button class="fox-btn danger-btn fox-btn-sm part-act-del" type="button">
+                        ${currentLang === "tr" ? "Sil" : "Delete"}
+                    </button>
+                `;
+            }
+        } else if (p.vault_protected) {
+            actionsHtml = `<span class="vault-lock-badge">ZIRHLI KASA (KORUMALI)</span>`;
+        } else {
+            actionsHtml = `<span class="item-meta">${p.type === "disk" ? "Disk" : "Sistem"}</span>`;
+        }
+
+        tr.innerHTML = `
+            <td><strong>${escapeHtml(p.name)}</strong></td>
+            <td>${escapeHtml(fsLabel)}</td>
+            <td>${escapeHtml(p.size || "-")}</td>
+            <td>${escapeHtml(p.mountpoint || t("not_mounted"))}</td>
+            <td><div class="part-actions-cell">${actionsHtml}</div></td>
         `;
-        const actBtn = tr.querySelector(".part-act-btn");
-        actBtn.addEventListener("click", async () => {
-            const dev = actBtn.getAttribute("data-dev");
-            const mounted = actBtn.getAttribute("data-mounted") === "true";
-            actBtn.disabled = true;
-            actBtn.textContent = currentLang === "tr" ? "İşleniyor..." : "Processing...";
-            await apiCall("mount_toggle", { device: dev, action: mounted ? "unmount" : "mount" });
-            loadPartitions();
-        });
+
+        const mountBtn = tr.querySelector(".part-act-mount");
+        if (mountBtn) {
+            mountBtn.addEventListener("click", async () => {
+                const pw = await requestActionPassword(
+                    isMounted ? "Bölüm Ayırma Onayı" : "Bölüm Bağlama Onayı",
+                    `${p.name} bölümünü ${isMounted ? "ayırmak" : "bağlamak"} için Yetkili Kullanıcı / Root parolasını girin:`
+                );
+                if (pw === null) return;
+                mountBtn.disabled = true;
+                const r = await apiCall("mount_toggle", { device: p.name, action: isMounted ? "unmount" : "mount", password: pw });
+                if (logEl) logEl.textContent = r.status === "ok" ? (r.output || "Tamam") : `[HATA] ${r.message}`;
+                loadPartitions();
+            });
+        }
+
+        const fsckBtn = tr.querySelector(".part-act-fsck");
+        if (fsckBtn) {
+            fsckBtn.addEventListener("click", async () => {
+                const pw = await requestActionPassword(
+                    "Dosya Sistemi Denetimi",
+                    `${p.name} bölümünde dosya sistemi denetimi / onarımı için Yetkili Kullanıcı / Root parolasını girin:`
+                );
+                if (pw === null) return;
+                fsckBtn.disabled = true;
+                if (logEl) logEl.textContent = `${p.name} dosya sistemi denetleniyor...`;
+                const r = await apiCall("part_fsck", { device: p.name, password: pw });
+                fsckBtn.disabled = false;
+                if (logEl) logEl.textContent = r.output || r.message || "";
+            });
+        }
+
+        const fmtBtn = tr.querySelector(".part-act-fmt");
+        if (fmtBtn) {
+            fmtBtn.addEventListener("click", async () => {
+                const fsSel = document.getElementById("part-new-fs");
+                const lblInp = document.getElementById("part-new-label");
+                const chosenFs = fsSel ? fsSel.value : "ext4";
+                const chosenLbl = lblInp ? lblInp.value.trim() : "";
+                const pw = await requestActionPassword(
+                    "Bölüm Biçimlendirme Onayı",
+                    `${p.name} bölümünü ${chosenFs.toUpperCase()} olarak biçimlendirmek için Yetkili Kullanıcı / Root parolasını girin:`
+                );
+                if (pw === null) return;
+                fmtBtn.disabled = true;
+                if (logEl) logEl.textContent = `${p.name} -> ${chosenFs} olarak biçimlendiriliyor...`;
+                const r = await apiCall("part_format", { device: p.name, fstype: chosenFs, label: chosenLbl, password: pw });
+                fmtBtn.disabled = false;
+                if (logEl) logEl.textContent = r.status === "ok" ? r.output : `[HATA] ${r.message}`;
+                loadPartitions();
+            });
+        }
+
+        const delBtn = tr.querySelector(".part-act-del");
+        if (delBtn) {
+            delBtn.addEventListener("click", async () => {
+                const pw = await requestActionPassword(
+                    "Bölüm Silme Onayı",
+                    `${p.name} bölümünü kalıcı olarak silmek için Yetkili Kullanıcı / Root parolasını girin:`
+                );
+                if (pw === null) return;
+                delBtn.disabled = true;
+                if (logEl) logEl.textContent = `${p.name} bölümü siliniyor...`;
+                const r = await apiCall("part_delete", { device: p.name, password: pw });
+                if (logEl) logEl.textContent = r.status === "ok" ? r.output : `[HATA] ${r.message}`;
+                loadPartitions();
+            });
+        }
+
         tbody.appendChild(tr);
     });
 
     const smartBox = document.getElementById("smart-summary");
     if (smartBox) {
-        smartBox.textContent = res.smart_info || (currentLang === "tr" ? "SMART sağlık verisi alınamadı veya NVMe tanılama desteklenmiyor." : "No SMART data available or NVMe telemetry unsupported.");
+        smartBox.textContent = res.smart_info || (currentLang === "tr" ? "SMART sağlık verisi alınamadı." : "No SMART data available.");
     }
 }
 
@@ -888,31 +1647,46 @@ async function loadPartitions() {
 function initBootRepair() {
     const consoleEl = document.getElementById("boot-repair-console");
 
+    async function runBootOp(target, bannerTr, bannerEn) {
+        let pw = "";
+        if (target !== "status") {
+            pw = await requestActionPassword(
+                "Önyükleme Onarım Onayı",
+                "Önyükleyici / initramfs yapılandırmasını değiştirmek için Yetkili Kullanıcı / Root parolanızı girin:"
+            );
+            if (pw === null) return;
+        }
+        if (consoleEl) consoleEl.textContent = (currentLang === "tr" ? bannerTr : bannerEn) + "\n";
+        const res = await apiCall("boot_repair", { target, password: pw });
+        if (consoleEl) {
+            const prefix = res.status === "ok" ? "" : "[HATA] ";
+            consoleEl.textContent += prefix + (res.output || res.message || "") + "\n" + (currentLang === "tr" ? "İşlem tamamlandı." : "Operation complete.");
+        }
+    }
+
+    const btnStatus = document.getElementById("btn-boot-status");
+    if (btnStatus) {
+        btnStatus.addEventListener("click", () => runBootOp("status", "Önyükleyici durumu sorgulanıyor...", "Querying bootloader status..."));
+    }
+
     const btnGrub = document.getElementById("btn-repair-grub");
     if (btnGrub) {
-        btnGrub.addEventListener("click", async () => {
-            consoleEl.textContent = (currentLang === "tr" ? "GRUB yapılandırması onarılıyor (grub2-mkconfig)...\n" : "Rebuilding GRUB configuration (grub2-mkconfig)...\n");
-            const res = await apiCall("boot_repair", { target: "grub" });
-            consoleEl.textContent += (res.output || res.message) + "\n" + (currentLang === "tr" ? "İşlem tamamlandı." : "Operation complete.");
-        });
+        btnGrub.addEventListener("click", () => runBootOp("grub", "GRUB2 yapılandırması ve ikilileri onarılıyor...", "Rebuilding GRUB2 binaries and configuration..."));
+    }
+
+    const btnLimine = document.getElementById("btn-repair-limine");
+    if (btnLimine) {
+        btnLimine.addEventListener("click", () => runBootOp("limine", "Limine önyükleyicisi kuruluyor ve yapılandırılıyor...", "Installing and configuring Limine bootloader..."));
     }
 
     const btnEfi = document.getElementById("btn-repair-efi");
     if (btnEfi) {
-        btnEfi.addEventListener("click", async () => {
-            consoleEl.textContent = (currentLang === "tr" ? "EFI NVRAM girişleri kontrol ediliyor ve onarılıyor (efibootmgr)...\n" : "Repairing EFI NVRAM boot entries (efibootmgr)...\n");
-            const res = await apiCall("boot_repair", { target: "efi" });
-            consoleEl.textContent += (res.output || res.message) + "\n" + (currentLang === "tr" ? "İşlem tamamlandı." : "Operation complete.");
-        });
+        btnEfi.addEventListener("click", () => runBootOp("efi", "EFI NVRAM girişleri kontrol ediliyor ve onarılıyor (efibootmgr)...", "Repairing EFI NVRAM boot entries (efibootmgr)..."));
     }
 
     const btnDracut = document.getElementById("btn-repair-dracut");
     if (btnDracut) {
-        btnDracut.addEventListener("click", async () => {
-            consoleEl.textContent = (currentLang === "tr" ? "Dracut ile tüm initramfs kalıpları yeniden üretiliyor (Bu işlem 1-2 dakika sürebilir)...\n" : "Regenerating all initramfs images via dracut (may take 1-2 minutes)...\n");
-            const res = await apiCall("boot_repair", { target: "dracut" });
-            consoleEl.textContent += (res.output || res.message) + "\n" + (currentLang === "tr" ? "İşlem tamamlandı." : "Operation complete.");
-        });
+        btnDracut.addEventListener("click", () => runBootOp("dracut", "Dracut ile tüm initramfs kalıpları yeniden üretiliyor...", "Regenerating all initramfs images via dracut..."));
     }
 }
 
@@ -989,8 +1763,9 @@ function escapeHtml(text) {
     return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-    initLanguage();
+function bootstrapRecoveryWorkspace() {
+    if (workspaceInitialized) return;
+    workspaceInitialized = true;
     initTabs();
     initTelemetry();
     initSliders();
@@ -1001,4 +1776,66 @@ document.addEventListener("DOMContentLoaded", () => {
     initTerminal();
     initReboot();
     initHardResetModal();
+}
+
+async function initStartupSecurityLock() {
+    const form = document.getElementById("bere-lock-form");
+    const pwInp = document.getElementById("bere-lock-password");
+    const errEl = document.getElementById("bere-lock-error");
+    const unlockBtn = document.getElementById("btn-bere-unlock");
+
+    if (form) {
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const pw = pwInp ? pwInp.value : "";
+            if (!pw) {
+                if (errEl) {
+                    errEl.textContent = "Yetkili kullanıcı / root parolası boş bırakılamaz.";
+                    errEl.style.display = "block";
+                }
+                pwInp && pwInp.focus();
+                return;
+            }
+            if (unlockBtn) unlockBtn.disabled = true;
+            const res = await apiCall("auth_unlock", { password: pw });
+            if (unlockBtn) unlockBtn.disabled = false;
+            if (res.status === "ok" && res.unlocked) {
+                cachedAuthRequired = Boolean(res.auth_required);
+                isSessionUnlocked = true;
+                showStartupLockOverlay(false);
+                bootstrapRecoveryWorkspace();
+            } else {
+                if (errEl) {
+                    errEl.textContent = res.message || "Parola doğrulanamadı.";
+                    errEl.style.display = "block";
+                }
+                if (pwInp) {
+                    pwInp.value = "";
+                    pwInp.focus();
+                }
+            }
+        });
+    }
+
+    const st = await apiCall("auth_status");
+    if (st && st.status === "ok") {
+        cachedAuthRequired = Boolean(st.auth_required);
+        if (!st.auth_required || st.unlocked) {
+            isSessionUnlocked = true;
+            showStartupLockOverlay(false);
+            bootstrapRecoveryWorkspace();
+            return;
+        }
+        isSessionUnlocked = false;
+        showStartupLockOverlay(true, st.admin_users || []);
+        return;
+    }
+
+    // Fallback: keep lock screen visible on transient fetch error
+    showStartupLockOverlay(true);
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+    initLanguage();
+    void initStartupSecurityLock();
 });

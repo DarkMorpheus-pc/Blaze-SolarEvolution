@@ -18,9 +18,42 @@ use smithay::input::{tablet, SeatHandler};
 use smithay::output::Output;
 use smithay::utils::{IsAlive, Logical, Point, SERIAL_COUNTER};
 
+use niri_ipc::{PositionChange, SizeChange};
+
 use crate::input::AnyStartData;
+use crate::layout::LayoutElement as _;
 use crate::niri::State;
-use crate::utils::get_monotonic_time;
+use crate::utils::spawning::spawn;
+use crate::utils::{get_monotonic_time, output_size};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AeroSnapZone {
+    TopMaximize,
+    LeftHalf,
+    RightHalf,
+}
+
+fn notify_aero_snap_overlay(fn_name: &str) {
+    let qs_bin = if std::path::Path::new("/usr/bin/quickshell-fedora").is_file() {
+        "/usr/bin/quickshell-fedora"
+    } else {
+        "qs"
+    };
+    if std::path::Path::new("/usr/share/quickshell/we10x/shell.qml").is_file() {
+        spawn(
+            vec![
+                String::from(qs_bin),
+                String::from("--path"),
+                String::from("/usr/share/quickshell/we10x"),
+                String::from("ipc"),
+                String::from("call"),
+                String::from("aeroSnap"),
+                String::from(fn_name),
+            ],
+            None,
+        );
+    }
+}
 
 pub struct MoveGrab {
     start_data: AnyStartData<State>,
@@ -31,6 +64,7 @@ pub struct MoveGrab {
     gesture: GestureState,
     enable_view_offset: bool,
     move_icon: CursorIcon,
+    snap_zone: Option<AeroSnapZone>,
 
     // Accumulated and applied in frame().
     new_location: Point<f64, Logical>,
@@ -66,6 +100,7 @@ impl MoveGrab {
             enable_view_offset,
             // Moving windows by their titlebars uses the default cursor by default.
             move_icon: move_icon.unwrap_or(CursorIcon::Default),
+            snap_zone: None,
             new_location: location,
             event_timestamp: None,
             relative_delta: None,
@@ -101,7 +136,49 @@ impl MoveGrab {
 
                 layout.activate_window(&self.window);
             }
-            GestureState::Move => layout.interactive_move_end(&self.window),
+            GestureState::Move => {
+                layout.interactive_move_end(&self.window);
+                if let Some(zone) = self.snap_zone.take() {
+                    notify_aero_snap_overlay("hide");
+                    match zone {
+                        AeroSnapZone::TopMaximize => {
+                            layout.set_maximized(&self.window, true);
+                        }
+                        AeroSnapZone::LeftHalf | AeroSnapZone::RightHalf => {
+                            let is_floating = layout
+                                .workspaces()
+                                .find_map(|(_, _, ws)| {
+                                    ws.windows()
+                                        .any(|w| w.window == self.window)
+                                        .then(|| ws.is_floating(&self.window))
+                                })
+                                .unwrap_or(false);
+                            if !is_floating {
+                                layout.toggle_window_floating(Some(&self.window));
+                            }
+                            layout.set_window_width(
+                                Some(&self.window),
+                                SizeChange::SetProportion(50.0),
+                            );
+                            layout.set_window_height(
+                                Some(&self.window),
+                                SizeChange::SetProportion(100.0),
+                            );
+                            let x_prop = if zone == AeroSnapZone::LeftHalf {
+                                0.0
+                            } else {
+                                50.0
+                            };
+                            layout.move_floating_window(
+                                Some(&self.window),
+                                PositionChange::SetProportion(x_prop),
+                                PositionChange::SetProportion(0.0),
+                                true,
+                            );
+                        }
+                    }
+                }
+            }
             GestureState::ViewOffset => {
                 layout.view_offset_gesture_end(Some(false));
             }
@@ -118,6 +195,21 @@ impl MoveGrab {
     }
 
     fn begin_move(&mut self, data: &mut State) -> bool {
+        let aero_mode = {
+            let c = data.niri.config.borrow();
+            c.layout.server_titlebar.on && c.layout.server_titlebar.aero_snap
+        };
+        if aero_mode {
+            let is_max = self
+                .window
+                .toplevel()
+                .and_then(|t| data.niri.layout.find_window_and_output(t.wl_surface()))
+                .is_some_and(|(m, _)| m.pending_sizing_mode().is_maximized());
+            if is_max {
+                data.niri.layout.set_maximized(&self.window, false);
+            }
+        }
+
         if !data.niri.layout.interactive_move_begin(
             self.window.clone(),
             &self.start_output,
@@ -227,6 +319,33 @@ impl MoveGrab {
                     return true;
                 };
                 let output = output.clone();
+                let out_sz = output_size(&output);
+
+                let aero_enabled = {
+                    let c = data.niri.config.borrow();
+                    c.layout.server_titlebar.on && c.layout.server_titlebar.aero_snap
+                };
+                if aero_enabled {
+                    let next_zone = if pos_within_output.y <= 8.0 {
+                        Some(AeroSnapZone::TopMaximize)
+                    } else if pos_within_output.x <= 8.0 {
+                        Some(AeroSnapZone::LeftHalf)
+                    } else if pos_within_output.x >= out_sz.w - 8.0 {
+                        Some(AeroSnapZone::RightHalf)
+                    } else {
+                        None
+                    };
+                    if next_zone != self.snap_zone {
+                        self.snap_zone = next_zone;
+                        let fn_name = match next_zone {
+                            Some(AeroSnapZone::TopMaximize) => "showTop",
+                            Some(AeroSnapZone::LeftHalf) => "showLeft",
+                            Some(AeroSnapZone::RightHalf) => "showRight",
+                            None => "hide",
+                        };
+                        notify_aero_snap_overlay(fn_name);
+                    }
+                }
 
                 // Interactive move always uses absolute delta since the window must remain pinned
                 // to the cursor even when it's clamped to monitor bounds.

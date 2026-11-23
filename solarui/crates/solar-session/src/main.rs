@@ -109,6 +109,14 @@ fn main() -> Result<()> {
                                 || token.starts_with("HDMI")
                                 || token.starts_with("DP-")
                             {
+                                if let Some(m) = custom_outputs.iter().find(|o| o.name == token) {
+                                    if let Some(ref mode_str) = m.mode {
+                                        let subcmd = if m.custom_mode { "custom-mode" } else { "mode" };
+                                        let _ = Command::new("niri")
+                                            .args(["msg", "output", token, subcmd, mode_str])
+                                            .status();
+                                    }
+                                }
                                 let scale_to_apply = if let Some(m) = custom_outputs.iter().find(|o| o.name == token) {
                                     format!("{:.2}", m.scale)
                                 } else {
@@ -337,8 +345,5 @@ fn setup_desktop_portals() {
         .status();
     let _ = Command::new("systemctl")
         .args(["--user", "start", "solarui-session.service"])
-        .status();
-    let _ = Command::new("systemctl")
-        .args(["--user", "restart", "xdg-desktop-portal"])
         .status();
 }
