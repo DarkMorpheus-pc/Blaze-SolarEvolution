@@ -358,6 +358,11 @@ class Tier1FeatureCoverageTests(unittest.TestCase):
         self.assertIn("grub2/grub.cfg", efi_stub)
 
     def test_f01_patched_initrd_plymouth_and_script_so(self):
+        self.assertEqual(
+            self.initrd_path.stat().st_size % 4,
+            0,
+            f"Initrd size {self.initrd_path.stat().st_size} is not 4-byte aligned for trailing cpio archives",
+        )
         members = extract_initrd_zstd_cpio_list(self.initrd_path)
         for req in (
             "etc/plymouth/plymouthd.conf",
@@ -367,6 +372,9 @@ class Tier1FeatureCoverageTests(unittest.TestCase):
             "usr/share/plymouth/themes/blazeos/logo.png",
             "usr/share/plymouth/themes/spinner/watermark.png",
             "usr/lib/dracut/hooks",
+            "usr/lib/modprobe.d/blazeos-usb-quirks.conf",
+            "etc/udev/rules.d/99-blaze-ventoy-compat.rules",
+            "usr/bin/dmsquash-live-root",
         ):
             self.assertIn(req, members, f"Initrd missing required artifact: {req}")
 
@@ -376,6 +384,9 @@ class Tier1FeatureCoverageTests(unittest.TestCase):
             [
                 "etc/plymouth/plymouthd.conf",
                 "usr/share/plymouth/themes/spinner/watermark.png",
+                "usr/lib/modprobe.d/blazeos-usb-quirks.conf",
+                "etc/udev/rules.d/99-blaze-ventoy-compat.rules",
+                "usr/bin/dmsquash-live-root",
             ],
             ext_dir,
         )
@@ -385,6 +396,18 @@ class Tier1FeatureCoverageTests(unittest.TestCase):
             md5_file(ext_dir / "usr/share/plymouth/themes/spinner/watermark.png"),
             REF_SPINNER_WATERMARK_MD5,
         )
+        self.assertIn(
+            "346d:5678:u",
+            (ext_dir / "usr/lib/modprobe.d/blazeos-usb-quirks.conf").read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            'SYMLINK+="ventoy mapper/ventoy"',
+            (ext_dir / "etc/udev/rules.d/99-blaze-ventoy-compat.rules").read_text(encoding="utf-8"),
+        )
+        dmsquash = (ext_dir / "usr/bin/dmsquash-live-root").read_text(encoding="utf-8")
+        self.assertIn("cancel_wait_for_dev /dev/ventoy", dmsquash)
+        self.assertIn("blkid -s TYPE -o value", dmsquash)
+        self.assertIn("usr/lib/modprobe.d/blazeos-usb-quirks.conf", self.squashfs_paths)
 
     def test_f02_f04_rootfs_plymouth_logos_fonts_icons_and_wallpapers(self):
         ply_conf = unsquashfs_cat(self.squashfs_path, "etc/plymouth/plymouthd.conf").decode("utf-8")

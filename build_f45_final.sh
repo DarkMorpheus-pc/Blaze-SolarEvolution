@@ -14,6 +14,10 @@ SOLARUI_SRC="${BLAZEOS_ROOT:-$(pwd)}/solarui"
 
 echo "=== [0/5] Building SolarUI controller and validating tracked code ==="
 test -f "$PATCHED_INITRD"
+if (( $(stat -c %s "$PATCHED_INITRD") % 4 != 0 )); then
+    echo "Refusing to build: patched_initrd size is not 4-byte aligned for trailing cpio archives" >&2
+    exit 1
+fi
 RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=${HOME}=/build" cargo build --manifest-path "$SOLARUI_SRC/Cargo.toml" --release -p solar-shell -p solar-session -p solar-core -p blaze-recovery
 install -m 0755 "$SOLARUI_SRC/target/release/solar-shell" "$OVERLAY/usr/bin/solar-shell"
 install -m 0755 "$SOLARUI_SRC/target/release/solar-session" "$OVERLAY/usr/bin/solar-session"

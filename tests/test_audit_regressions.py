@@ -999,6 +999,14 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
         self.assertIn('../../../var/lib/dracut/hooks usr/lib/dracut/hooks', patch_sh)
         self.assertIn('var/lib/dracut/hooks/initqueue/timeout', patch_sh)
         self.assertIn('plymouth quit', (patch_sh.split('00-blaze-death-screen.sh')[1]))
+        self.assertIn('99-blaze-ventoy-compat.rules', patch_sh)
+        self.assertIn('cancel_wait_for_dev /dev/ventoy', patch_sh)
+        self.assertIn('blkid -s TYPE -o value', patch_sh)
+        self.assertIn('os.path.getsize(path) % 4', patch_sh)
+
+        usb_quirks = (OVERLAY / 'usr/lib/modprobe.d/blazeos-usb-quirks.conf').read_text(encoding='utf-8')
+        self.assertIn('346d:5678:u', usb_quirks)
+        self.assertIn('152d:0578:u', usb_quirks)
 
         nvidia_svc = (OVERLAY / 'etc/systemd/system/blazeos-nvidia-firstboot.service').read_text(encoding='utf-8')
         self.assertIn('ConditionKernelCommandLine=!rd.live.image', nvidia_svc)

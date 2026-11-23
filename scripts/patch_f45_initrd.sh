@@ -24,7 +24,8 @@ for req in \
   "$OVERLAY/usr/share/blazeos/identity/os-release" \
   "$OVERLAY/usr/share/blazeos/identity/fedora-release" \
   "$OVERLAY/usr/share/blazeos/identity/system-release-cpe" \
-  "$OVERLAY/usr/share/blazeos/identity/buildstamp"; do
+  "$OVERLAY/usr/share/blazeos/identity/buildstamp" \
+  "$OVERLAY/usr/lib/modprobe.d/blazeos-usb-quirks.conf"; do
   if [[ ! -f "$req" ]]; then
     echo "ERROR: Required asset missing: $req" >&2
     exit 1
@@ -168,10 +169,65 @@ EOF
   ln -sf fedora-release etc/system-release
   ln -sf ../usr/lib/system-release-cpe etc/system-release-cpe
 
+  # 4. Real-hardware USB bridge UAS quirks & Ventoy /dev/ventoy dmsetup resilience
+  install -D -m 0644 "$overlay/usr/lib/modprobe.d/blazeos-usb-quirks.conf" usr/lib/modprobe.d/blazeos-usb-quirks.conf
+  mkdir -p etc/udev/rules.d
+  cat > etc/udev/rules.d/99-blaze-ventoy-compat.rules <<'\''UDEVEOF'\''
+SUBSYSTEM=="block", KERNEL=="dm-[0-9]*", ATTR{dm/name}=="ventoy", ENV{DM_UDEV_DISABLE_DISK_RULES_FLAG}="", IMPORT{builtin}="blkid", SYMLINK+="ventoy mapper/ventoy", TAG+="systemd"
+UDEVEOF
+  chmod 0644 etc/udev/rules.d/99-blaze-ventoy-compat.rules
+
+  python3 - usr/bin/dmsquash-live-root <<'\''PYEOF'\''
+import pathlib, sys
+
+p = pathlib.Path(sys.argv[1])
+txt = p.read_text(encoding="utf-8")
+
+old_fs = """    livedev_fstype=$(det_fs "$livedev")
+    load_fstype "$livedev_fstype\""""
+new_fs = """    livedev_fstype=$(det_fs "$livedev")
+    if [ -z "$livedev_fstype" ] || [ "$livedev_fstype" = "auto" ]; then
+        livedev_fstype=$(blkid -s TYPE -o value "$livedev" 2>/dev/null || echo "auto")
+        [ -z "$livedev_fstype" ] && livedev_fstype="auto"
+    fi
+    if [ "$livedev_fstype" = "iso9660" ] || [ "$livedev_fstype" = "udf" ]; then
+        modprobe -q isofs 2>/dev/null || :
+    fi
+    load_fstype "$livedev_fstype\""""
+
+old_end = "ln -s null /dev/root"
+new_end = """ln -s null /dev/root
+command -v cancel_wait_for_dev > /dev/null || . /lib/dracut-dev-lib.sh
+if [ "$livedev" = "/dev/ventoy" ] || [ -e /dev/ventoy ]; then
+    cancel_wait_for_dev /dev/ventoy 2>/dev/null || :
+fi"""
+
+if old_fs not in txt:
+    raise SystemExit("ERROR: Expected det_fs block not found in usr/bin/dmsquash-live-root")
+if old_end not in txt:
+    raise SystemExit("ERROR: Expected /dev/root block not found in usr/bin/dmsquash-live-root")
+
+txt = txt.replace(old_fs, new_fs, 1).replace(old_end, new_end, 1)
+p.write_text(txt, encoding="utf-8")
+PYEOF
+  sh -n usr/bin/dmsquash-live-root
+
   find . -mindepth 1 -print0 | LC_ALL=C sort -z | cpio --null -o -H newc --quiet | zstd -T0 -15 -c > "$out_zst"
 ' _ "$ORIG_INITRD" "$OFFSET" "$OVERLAY" "$ROOTFS_SRC" "$UNPACK_DIR" "$TMP_DIR/main.cpio.zst"
 
 cat "$TMP_DIR/early.cpio" "$TMP_DIR/main.cpio.zst" > "$OUT_INITRD.tmp"
+python3 - "$OUT_INITRD.tmp" <<'PYALIGN'
+import os, sys
+
+path = sys.argv[1]
+rem = os.path.getsize(path) % 4
+if rem:
+    pad_len = 4 - rem
+    # Append RFC 8878 Zstandard skippable frame (8-byte header + pad_len bytes)
+    # so both `zstd -d` / `zstdcat` and Linux kernel initramfs trailing cpio stay valid & 4-byte aligned.
+    with open(path, "ab") as f:
+        f.write(b"\x50\x2a\x4d\x18" + pad_len.to_bytes(4, "little") + (b"\x00" * pad_len))
+PYALIGN
 mv -f "$OUT_INITRD.tmp" "$OUT_INITRD"
 
 echo "Patched initrd written to: $OUT_INITRD ($(stat -c %s "$OUT_INITRD") bytes)"
