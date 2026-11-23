@@ -60,6 +60,10 @@ pub(crate) fn find_uid_process_pids(matches_proc: impl Fn(&str, &str) -> bool) -
                 return None;
             }
             let comm = std::fs::read_to_string(entry.path().join("comm")).ok()?;
+            let status = std::fs::read_to_string(entry.path().join("status")).unwrap_or_default();
+            if status.lines().any(|l| l.starts_with("State:") && (l.contains("Z (zombie)") || l.contains("X (dead)"))) {
+                return None;
+            }
             let cmdline = std::fs::read(entry.path().join("cmdline")).ok()?;
             let text = String::from_utf8_lossy(&cmdline).replace('\0', " ");
             matches_proc(comm.trim(), &text).then_some(pid)

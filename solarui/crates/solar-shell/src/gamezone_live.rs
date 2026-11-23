@@ -78,6 +78,10 @@ pub enum MediaUpdateEvent {
         meta: TrailerMetadata,
         screenshot_paths: Vec<PathBuf>,
     },
+    AdultFiltered {
+        game_id: String,
+        app_id: String,
+    },
 }
 
 fn user_home() -> String {
@@ -231,98 +235,395 @@ fn url_encode(input: &str) -> String {
     out
 }
 
-/// Loads cached Steam Featured games immediately if present on disk.
+/// Checks whether a game title, description, or store metadata contains 18+ adult,
+/// pornographic, or hentai content. Used to protect minors by default when
+/// `is_adult_content_allowed()` is false.
+pub fn is_adult_or_nsfw_game(title: &str, desc: &str, extra: &str) -> bool {
+    let combined_raw = format!("{} {} {}", title, desc, extra);
+    for sym in ["👉👌", "💦", "🍆", "🍑", "🔞"] {
+        if combined_raw.contains(sym) {
+            return true;
+        }
+    }
+
+    let lower = combined_raw.to_lowercase();
+    let substr_patterns = [
+        "hentai",
+        "porn",
+        "nsfw",
+        "erotic",
+        "erotik",
+        "nudity",
+        "waifu",
+        "ecchi",
+        "lewd",
+        "brothel",
+        "prostitut",
+        "stripper",
+        "fetish",
+        "bdsm",
+        "succubus",
+        "tentacle",
+        "orgasm",
+        "futanari",
+        "ahegao",
+        "oppai",
+        "femboy",
+        "onlyfans",
+        "camgirl",
+        "sex doll",
+        "love doll",
+        "adult only",
+        "adults only",
+        "cinsel",
+        "çıplak",
+        "ciplak",
+        "18+",
+        "+18",
+    ];
+    for pat in substr_patterns {
+        if lower.contains(pat) {
+            return true;
+        }
+    }
+
+    let tokens: Vec<&str> = lower
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let word_blacklist = [
+        "fuck",
+        "fucking",
+        "sex",
+        "sexual",
+        "nude",
+        "nudes",
+        "naked",
+        "horny",
+        "kink",
+        "kinks",
+        "kinky",
+        "harem",
+        "boobs",
+        "tits",
+        "cum",
+        "cumming",
+        "dick",
+        "cock",
+        "pussy",
+        "milf",
+        "incest",
+        "yaoi",
+        "porno",
+        "whore",
+        "slut",
+        "dildo",
+        "vibrator",
+    ];
+    for tok in tokens {
+        if word_blacklist.contains(&tok) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Inspects official Steam `appdetails` JSON (`content_descriptors`, `ratings`, `required_age`)
+/// to detect 18+ sexual/nudity/adult-only games.
+pub fn is_steam_appdetails_adult(data: &serde_json::Value) -> bool {
+    let title = data.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let short_desc = data
+        .get("short_description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let detailed_desc = data
+        .get("detailed_description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if is_adult_or_nsfw_game(title, short_desc, detailed_desc) {
+        return true;
+    }
+
+    // Steam content descriptor IDs:
+    // 1 = Some Nudity or Sexual Content
+    // 3 = Adult Only Sexual Content
+    // 4 = Frequent Nudity or Sexual Content
+    if let Some(cd) = data.get("content_descriptors") {
+        if let Some(ids) = cd.get("ids").and_then(|v| v.as_array()) {
+            for id_val in ids {
+                if let Some(n) = id_val.as_i64() {
+                    if n == 3 || n == 4 || n == 1 {
+                        return true;
+                    }
+                }
+            }
+        }
+        if let Some(notes) = cd.get("notes").and_then(|v| v.as_str()) {
+            let nl = notes.to_lowercase();
+            if nl.contains("sexual")
+                || nl.contains("nudity")
+                || nl.contains("nude")
+                || nl.contains("adult")
+                || nl.contains("hentai")
+                || nl.contains("erotic")
+                || nl.contains("explicit")
+                || nl.contains("sex ")
+            {
+                return true;
+            }
+        }
+    }
+
+    if let Some(esrb) = data
+        .get("ratings")
+        .and_then(|r| r.get("esrb"))
+        .and_then(|e| e.get("rating"))
+        .and_then(|v| v.as_str())
+    {
+        if esrb.eq_ignore_ascii_case("ao") {
+            return true;
+        }
+    }
+    false
+}
+
+fn blocked_adult_appids_path() -> PathBuf {
+    gamezone_cache_root().join("adult_appids.json")
+}
+
+pub fn load_blocked_adult_appids() -> HashSet<String> {
+    let p = blocked_adult_appids_path();
+    if let Ok(txt) = std::fs::read_to_string(&p) {
+        if let Ok(list) = serde_json::from_str::<Vec<String>>(&txt) {
+            return list.into_iter().collect();
+        }
+    }
+    HashSet::new()
+}
+
+pub fn record_blocked_adult_appid(app_id: &str) {
+    let mut set = load_blocked_adult_appids();
+    if set.insert(app_id.to_string()) {
+        let p = blocked_adult_appids_path();
+        if let Some(parent) = p.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let mut vec: Vec<String> = set.into_iter().collect();
+        vec.sort();
+        if let Ok(json) = serde_json::to_string_pretty(&vec) {
+            let _ = std::fs::write(&p, json);
+        }
+    }
+}
+
+pub fn is_item_blocked_for_current_policy(item: &CachedFeaturedItem, allow_adult: bool) -> bool {
+    if allow_adult {
+        return false;
+    }
+    let blocked_ids = load_blocked_adult_appids();
+    if blocked_ids.contains(&item.app_id) {
+        return true;
+    }
+    if is_adult_or_nsfw_game(&item.title, &item.header_url, &item.capsule_url) {
+        record_blocked_adult_appid(&item.app_id);
+        return true;
+    }
+    let mdir = media_cache_dir_for(&format!("steam-{}", item.app_id));
+    let meta_path = mdir.join("trailer_meta.json");
+    if let Ok(saved) = std::fs::read_to_string(&meta_path) {
+        if let Ok(meta) = serde_json::from_str::<TrailerMetadata>(&saved) {
+            if is_adult_or_nsfw_game(&meta.title, &meta.short_description, "") {
+                record_blocked_adult_appid(&item.app_id);
+                return true;
+            }
+        }
+    }
+    false
+}
+
+static ROTATION_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn rotate_and_sample_featured(items: Vec<CachedFeaturedItem>, max_count: usize) -> Vec<CachedFeaturedItem> {
+    if items.len() <= max_count {
+        return items;
+    }
+    let tick = ROTATION_COUNTER.fetch_add(1, Ordering::SeqCst);
+    let now_seed = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs() / 45)
+        .unwrap_or(0)
+        .wrapping_add(tick.wrapping_mul(3));
+    let len = items.len();
+    let offset = (now_seed as usize) % len;
+    let step = if len % 3 != 0 {
+        3
+    } else if len % 2 != 0 {
+        2
+    } else {
+        1
+    };
+    let mut out = Vec::with_capacity(max_count);
+    let mut used = HashSet::new();
+    let mut cur = offset;
+    for _ in 0..len {
+        if used.insert(cur) {
+            out.push(items[cur].clone());
+            if out.len() >= max_count {
+                break;
+            }
+        }
+        cur = (cur + step) % len;
+    }
+    for (idx, it) in items.into_iter().enumerate() {
+        if out.len() >= max_count {
+            break;
+        }
+        if used.insert(idx) {
+            out.push(it);
+        }
+    }
+    out
+}
+
+/// Loads cached Steam Featured games immediately if present on disk, filtering adult titles
+/// when `is_adult_content_allowed()` is false and rotating selection for fresh recommendations.
 pub fn load_cached_featured_games(lang: Language, installed_ids: &HashSet<String>) -> Vec<GameEntry> {
+    let allow_adult = crate::gamezone_gui::is_adult_content_allowed();
     let cache_file = gamezone_cache_root().join("featured_cache.json");
     if let Ok(txt) = std::fs::read_to_string(&cache_file) {
         if let Ok(items) = serde_json::from_str::<Vec<CachedFeaturedItem>>(&txt) {
-            if !items.is_empty() {
-                return featured_items_to_entries(&items, lang, installed_ids);
+            let filtered: Vec<CachedFeaturedItem> = items
+                .into_iter()
+                .filter(|it| !is_item_blocked_for_current_policy(it, allow_adult))
+                .collect();
+            if !filtered.is_empty() {
+                let sampled = rotate_and_sample_featured(filtered, 14);
+                return featured_items_to_entries(&sampled, lang, installed_ids);
             }
         }
     }
     Vec::new()
 }
 
-/// Fetches live Steam Featured games from `https://store.steampowered.com/api/featured/`.
+fn push_featured_json_array(
+    arr: &[serde_json::Value],
+    lang: Language,
+    allow_adult: bool,
+    seen: &mut HashSet<String>,
+    items: &mut Vec<CachedFeaturedItem>,
+    max_pool: usize,
+) {
+    for entry in arr {
+        if items.len() >= max_pool {
+            break;
+        }
+        let Some(id_num) = entry.get("id").and_then(|v| v.as_i64()) else {
+            continue;
+        };
+        // Skip category pseudo-IDs or non-app IDs
+        if id_num <= 0 {
+            continue;
+        }
+        let app_id = id_num.to_string();
+        if !seen.insert(app_id.clone()) {
+            continue;
+        }
+        let Some(name) = entry.get("name").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let header_url = entry
+            .get("header_image")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let capsule_url = entry
+            .get("large_capsule_image")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&header_url)
+            .to_string();
+        if header_url.is_empty() && capsule_url.is_empty() {
+            continue;
+        }
+        let discount_percent = entry
+            .get("discount_percent")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let final_price_str = entry
+            .get("final_price")
+            .and_then(|v| v.as_i64())
+            .map(|cents| {
+                if cents == 0 {
+                    match lang {
+                        Language::TR => "Ücretsiz Oynanabilir".to_string(),
+                        Language::EN => "Free to Play".to_string(),
+                    }
+                } else {
+                    let currency = entry
+                        .get("currency")
+                        .and_then(|c| c.as_str())
+                        .unwrap_or("USD");
+                    format!("{:.2} {}", cents as f64 / 100.0, currency)
+                }
+            });
+
+        let candidate = CachedFeaturedItem {
+            app_id,
+            title: name.to_string(),
+            header_url,
+            capsule_url,
+            discount_percent,
+            final_price_str,
+        };
+        if is_item_blocked_for_current_policy(&candidate, allow_adult) {
+            continue;
+        }
+        items.push(candidate);
+    }
+}
+
+/// Fetches live Steam Featured & FeaturedCategories games (`featured` + `specials` + `top_sellers`
+/// + `new_releases`), filtering out 18+ adult content when `is_adult_content_allowed()` is false
+/// and rotating the showcase so recommendations stay fresh.
 pub fn fetch_live_steam_featured_blocking(
     lang: Language,
     installed_ids: &HashSet<String>,
 ) -> Option<Vec<GameEntry>> {
+    let allow_adult = crate::gamezone_gui::is_adult_content_allowed();
     let (cc, l_param) = match lang {
         Language::TR => ("tr", "turkish"),
         Language::EN => ("us", "english"),
     };
-    let url = format!(
+    let url_featured = format!(
         "https://store.steampowered.com/api/featured/?cc={}&l={}",
         cc, l_param
     );
-    let val = curl_json(&url, 8)?;
+    let url_cats = format!(
+        "https://store.steampowered.com/api/featuredcategories/?cc={}&l={}",
+        cc, l_param
+    );
 
     let mut seen = HashSet::new();
     let mut items = Vec::new();
+    let max_pool = 36usize;
 
-    for key in ["large_capsules", "featured_linux", "featured_win"] {
-        if let Some(arr) = val.get(key).and_then(|v| v.as_array()) {
-            for entry in arr {
-                let Some(id_num) = entry.get("id").and_then(|v| v.as_i64()) else {
-                    continue;
-                };
-                let app_id = id_num.to_string();
-                if !seen.insert(app_id.clone()) {
-                    continue;
-                }
-                let Some(name) = entry.get("name").and_then(|v| v.as_str()) else {
-                    continue;
-                };
-                let header_url = entry
-                    .get("header_image")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let capsule_url = entry
-                    .get("large_capsule_image")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or(&header_url)
-                    .to_string();
-                let discount_percent = entry
-                    .get("discount_percent")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0);
-                let final_price_str = entry
-                    .get("final_price")
-                    .and_then(|v| v.as_i64())
-                    .map(|cents| {
-                        if cents == 0 {
-                            match lang {
-                                Language::TR => "Ücretsiz Oynanabilir".to_string(),
-                                Language::EN => "Free to Play".to_string(),
-                            }
-                        } else {
-                            let currency = entry
-                                .get("currency")
-                                .and_then(|c| c.as_str())
-                                .unwrap_or("USD");
-                            format!("{:.2} {}", cents as f64 / 100.0, currency)
-                        }
-                    });
-
-                items.push(CachedFeaturedItem {
-                    app_id,
-                    title: name.to_string(),
-                    header_url,
-                    capsule_url,
-                    discount_percent,
-                    final_price_str,
-                });
-
-                if items.len() >= 12 {
-                    break;
-                }
+    if let Some(val) = curl_json(&url_featured, 8) {
+        for key in ["large_capsules", "featured_linux", "featured_win"] {
+            if let Some(arr) = val.get(key).and_then(|v| v.as_array()) {
+                push_featured_json_array(arr, lang, allow_adult, &mut seen, &mut items, max_pool);
             }
         }
-        if items.len() >= 12 {
-            break;
+    }
+
+    if let Some(cval) = curl_json(&url_cats, 8) {
+        for cat_key in ["specials", "top_sellers", "new_releases", "coming_soon"] {
+            if let Some(arr) = cval
+                .get(cat_key)
+                .and_then(|c| c.get("items"))
+                .and_then(|v| v.as_array())
+            {
+                push_featured_json_array(arr, lang, allow_adult, &mut seen, &mut items, max_pool);
+            }
         }
     }
 
@@ -345,7 +646,8 @@ pub fn fetch_live_steam_featured_blocking(
         }
     }
 
-    Some(featured_items_to_entries(&items, lang, installed_ids))
+    let sampled = rotate_and_sample_featured(items, 14);
+    Some(featured_items_to_entries(&sampled, lang, installed_ids))
 }
 
 fn featured_items_to_entries(
@@ -608,9 +910,19 @@ pub fn fetch_game_details_and_trailer_async(
         let mdir = media_cache_dir_for(&game.id);
         let _ = std::fs::create_dir_all(&mdir);
         let meta_path = mdir.join("trailer_meta.json");
+        let allow_adult = crate::gamezone_gui::is_adult_content_allowed();
 
         let meta: TrailerMetadata = if let Ok(saved) = std::fs::read_to_string(&meta_path) {
-            serde_json::from_str(&saved).unwrap_or_default()
+            let m: TrailerMetadata = serde_json::from_str(&saved).unwrap_or_default();
+            if !allow_adult && (load_blocked_adult_appids().contains(&app_id) || is_adult_or_nsfw_game(&m.title, &m.short_description, "")) {
+                record_blocked_adult_appid(&app_id);
+                let _ = tx.send_blocking(MediaUpdateEvent::AdultFiltered {
+                    game_id: game.id.clone(),
+                    app_id,
+                });
+                return;
+            }
+            m
         } else {
             let api_url = format!(
                 "https://store.steampowered.com/api/appdetails?appids={}&l=turkish",
@@ -619,6 +931,16 @@ pub fn fetch_game_details_and_trailer_async(
             let mut extracted = TrailerMetadata::default();
             if let Some(val) = curl_json(&api_url, 6) {
                 if let Some(data) = val.get(&app_id).and_then(|v| v.get("data")) {
+                    if is_steam_appdetails_adult(data) {
+                        record_blocked_adult_appid(&app_id);
+                        if !allow_adult {
+                            let _ = tx.send_blocking(MediaUpdateEvent::AdultFiltered {
+                                game_id: game.id.clone(),
+                                app_id,
+                            });
+                            return;
+                        }
+                    }
                     extracted.title = data
                         .get("name")
                         .and_then(|v| v.as_str())

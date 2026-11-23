@@ -146,12 +146,28 @@ impl ShellProvider for NoctaliaProvider {
             let _ = child.wait().await;
         });
 
+        let mut tried_software_gl = false;
         // Baslatilmasini dogrula (Reconciliation / Guard - aninda tepki icin 20ms yoklama)
         for i in 1..=500 {
             sleep(Duration::from_millis(20)).await;
             if self.health_check().await.unwrap_or(false) {
                 info!("Noctalia v5 basariyla baslatildi ve dogrulandi ({}ms).", i * 20);
                 return Ok(());
+            }
+            if !tried_software_gl && i >= 12 && self.get_pids().await.is_empty() {
+                tried_software_gl = true;
+                warn!(
+                    "Noctalia v5 donanim EGL baslatmasinda erken sonlandi; eski GPU uyumlulugu icin LIBGL_ALWAYS_SOFTWARE=1 ile yeniden deneniyor..."
+                );
+                let mut sw_cmd = self.cmd();
+                sw_cmd.env("LIBGL_ALWAYS_SOFTWARE", "1");
+                sw_cmd.env("GALLIUM_DRIVER", "llvmpipe");
+                sw_cmd.arg("--daemon");
+                if let Ok(mut sw_child) = sw_cmd.spawn() {
+                    tokio::spawn(async move {
+                        let _ = sw_child.wait().await;
+                    });
+                }
             }
         }
 

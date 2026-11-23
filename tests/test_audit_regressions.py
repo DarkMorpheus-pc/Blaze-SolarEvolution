@@ -1011,6 +1011,75 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
         nvidia_svc = (OVERLAY / 'etc/systemd/system/blazeos-nvidia-firstboot.service').read_text(encoding='utf-8')
         self.assertIn('ConditionKernelCommandLine=!rd.live.image', nvidia_svc)
 
+    def test_portable_x86_64_shells_and_gamezone_safety_focus_and_shell_restore(self):
+        import re
+        # 1. Verify noctalia, cliphist, Caelestia plugins & bundled libraries have zero unconditional VEX/BMI2 instructions in .init / startup and no x86-64-v3 ISA needed ELF property
+        for rel in (
+            'usr/bin/noctalia',
+            'usr/bin/cliphist',
+            'usr/bin/seatd',
+            'usr/lib64/libtomlplusplus.so.3.4.0',
+            'usr/lib64/libical.so.4.0.5',
+            'usr/lib64/libqalculate.so.23.3.13',
+            'usr/lib64/quickshell/libQt6Core.so.6.11.2',
+            'usr/lib64/quickshell/libcava.so.1.0.0',
+            'usr/lib64/quickshell/qml/M3Shapes/libm3shapes.so',
+        ):
+            bin_path = OVERLAY / rel
+            self.assertTrue(bin_path.exists(), f'Missing binary {bin_path}')
+            notes = subprocess.check_output(
+                ['readelf', '-n', str(bin_path)],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            )
+            self.assertNotIn('x86 ISA needed: x86-64-baseline, x86-64-v2, x86-64-v3', notes, f'{rel} still carries x86-64-v3 ISA needed ELF note!')
+            out = subprocess.check_output(
+                ['sh', '-c', f'objdump -d "{bin_path}" | head -n 1500'],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            )
+            vex_hits = re.findall(r'\b(vzeroupper|vmovdqa|vmovdqu|vpxor|shrx|shlx|sarx|rorx|pdep|pext)\b', out)
+            self.assertEqual(vex_hits, [], f'{rel} still contains x86-64-v3 VEX/BMI2 instructions in startup code: {vex_hits[:5]}')
+
+        # 2. Verify quickshell wrapper & NoctaliaProvider software-GL fallback
+        qs_sh = (OVERLAY / 'usr/bin/quickshell').read_text(encoding='utf-8')
+        self.assertIn('QSG_RENDER_LOOP', qs_sh)
+        self.assertNotIn('\nexport QSG_RENDER_LOOP=threaded\n', qs_sh)
+        noct_rs = (ROOT / 'solarui/crates/solar-shell/src/providers/noctalia.rs').read_text(encoding='utf-8')
+        self.assertIn('LIBGL_ALWAYS_SOFTWARE', noct_rs)
+        self.assertIn('llvmpipe', noct_rs)
+
+        # 3. Verify GameZone 18+ filter (stock OFF), dynamic rotation, browser focus, and Super+Q shell restore
+        gz_live = (ROOT / 'solarui/crates/solar-shell/src/gamezone_live.rs').read_text(encoding='utf-8')
+        self.assertIn('pub fn is_adult_or_nsfw_game(', gz_live)
+        self.assertIn('pub fn is_steam_appdetails_adult(', gz_live)
+        self.assertIn('AdultFiltered {', gz_live)
+        self.assertIn('featuredcategories', gz_live)
+
+        gz_gui = (ROOT / 'solarui/crates/solar-shell/src/gamezone_gui.rs').read_text(encoding='utf-8')
+        self.assertIn('pub fn is_adult_content_allowed() -> bool', gz_gui)
+        self.assertIn('pub fn set_adult_content_allowed(allow: bool)', gz_gui)
+        self.assertIn('18 Yaşından Büyüküm: KAPALI (Güvenli)', gz_gui)
+        self.assertIn('18 Yaşından Büyüküm: AÇIK (+18 Göster)', gz_gui)
+        self.assertIn('Masaüstüne Dön', gz_gui)
+        self.assertIn('REBUILDING_FOR_LANG', gz_gui)
+        self.assertIn('focus_external_window_over_gamezone', gz_gui)
+
+        # 4. Verify blaze-gamezone-browser and niri.kdl window-rule prevent snapping back to fullscreen GameZone
+        gz_browser = (OVERLAY / 'usr/bin/blaze-gamezone-browser').read_text(encoding='utf-8')
+        self.assertNotIn('self.maximize()', gz_browser)
+        self.assertIn('focus_browser_in_niri', gz_browser)
+        for niri_rel in (
+            OVERLAY / 'etc/solarui/niri.kdl',
+            OVERLAY / 'etc/skel/.config/solarui/niri.kdl',
+            OVERLAY / 'etc/skel/.config/niri/config.kdl',
+            OVERLAY / 'usr/share/solarui/niri.kdl',
+            ROOT / 'solarui/data/niri.kdl',
+        ):
+            kdl = niri_rel.read_text(encoding='utf-8')
+            self.assertIn('org\\.blazeos\\.gamezone\\.browser|blaze-gamezone-browser', kdl)
+            self.assertIn('open-focused true', kdl)
+
 
 if __name__ == '__main__':
     unittest.main()

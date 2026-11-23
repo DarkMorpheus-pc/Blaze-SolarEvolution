@@ -20,6 +20,7 @@ if (( $(stat -c %s "$PATCHED_INITRD") % 4 != 0 )); then
 fi
 RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=${HOME}=/build" cargo build --manifest-path "$SOLARUI_SRC/Cargo.toml" --release -p solar-shell -p solar-session -p solar-core -p blaze-recovery
 install -m 0755 "$SOLARUI_SRC/target/release/solar-shell" "$OVERLAY/usr/bin/solar-shell"
+install -m 0755 "$SOLARUI_SRC/target/release/solar-shell" "$OVERLAY/usr/bin/solar-settings"
 install -m 0755 "$SOLARUI_SRC/target/release/solar-session" "$OVERLAY/usr/bin/solar-session"
 install -m 0755 "$SOLARUI_SRC/target/release/solar-core" "$OVERLAY/usr/bin/solar-core"
 install -m 0755 "$SOLARUI_SRC/target/release/blaze-recovery" "$OVERLAY/usr/bin/blaze-recovery"

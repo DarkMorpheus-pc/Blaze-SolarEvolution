@@ -10,11 +10,23 @@ import sys
 import socket
 import threading
 import signal
+import subprocess
+import time
 
-# Ensure Wayland and Mesa acceleration flags
+# Ensure Wayland and Mesa acceleration flags (disable DMABUF renderer in VMs / older GPUs to avoid WebProcess crash)
 os.environ.setdefault("GDK_BACKEND", "wayland,x11")
 os.environ.setdefault("MOZ_ENABLE_WAYLAND", "1")
-os.environ.setdefault("WEBKIT_DISABLE_DMABUF_RENDERER", "0")
+try:
+    _dmi = ""
+    for _p in ("/sys/class/dmi/id/product_name", "/sys/class/dmi/id/sys_vendor", "/proc/cpuinfo"):
+        if os.path.exists(_p):
+            _dmi += open(_p, errors="ignore").read().lower()
+    if os.environ.get("LIBGL_ALWAYS_SOFTWARE") == "1" or any(k in _dmi for k in ("qemu", "kvm", "virtualbox", "vmware", "bochs")):
+        os.environ.setdefault("WEBKIT_DISABLE_DMABUF_RENDERER", "1")
+    else:
+        os.environ.setdefault("WEBKIT_DISABLE_DMABUF_RENDERER", "0")
+except Exception:
+    os.environ.setdefault("WEBKIT_DISABLE_DMABUF_RENDERER", "1")
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -54,12 +66,37 @@ def send_to_existing_instance(url):
             pass
         return False
 
+def focus_browser_in_niri():
+    def _worker():
+        import json, glob
+        env = os.environ.copy()
+        if not env.get("NIRI_SOCKET"):
+            rdir = env.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+            socks = sorted(glob.glob(os.path.join(rdir, "niri.*.sock")))
+            if socks:
+                env["NIRI_SOCKET"] = socks[-1]
+        for _ in range(18):
+            time.sleep(0.12)
+            try:
+                out = subprocess.check_output(["niri", "msg", "--json", "windows"], text=True, timeout=1.5, env=env)
+                wins = json.loads(out)
+                for w in wins:
+                    app_id = (w.get("app_id") or "")
+                    title = (w.get("title") or "")
+                    if app_id in ("org.blazeos.gamezone.browser", "blaze-gamezone-browser") or "Blaze GameZone Web" in title or "- Blaze GameZone" in title:
+                        wid = w.get("id")
+                        if wid is not None:
+                            subprocess.run(["niri", "msg", "action", "focus-window", "--id", str(wid)], timeout=1.5, env=env)
+                            return
+            except Exception:
+                pass
+    threading.Thread(target=_worker, daemon=True).start()
+
 class GameZoneBrowserWindow(Gtk.ApplicationWindow):
     def __init__(self, app, initial_url):
         super().__init__(application=app)
         self.set_title("Blaze GameZone Web")
-        self.set_default_size(1280, 760)
-        self.maximize()
+        self.set_default_size(1200, 700)
 
         self.setup_ui(initial_url)
         self.setup_key_controller()
@@ -209,6 +246,7 @@ class GameZoneBrowserWindow(Gtk.ApplicationWindow):
 class GameZoneBrowserApp(Gtk.Application):
     def __init__(self, target_url):
         super().__init__(application_id="org.blazeos.gamezone.browser")
+        GLib.set_prgname("org.blazeos.gamezone.browser")
         self.target_url = target_url
         self.window = None
         self.server_sock = None
@@ -219,6 +257,7 @@ class GameZoneBrowserApp(Gtk.Application):
             self.apply_css()
             self.start_ipc_server()
         self.window.present()
+        focus_browser_in_niri()
 
     def apply_css(self):
         css_data = b"""
@@ -304,6 +343,7 @@ class GameZoneBrowserApp(Gtk.Application):
                             if new_url and self.window:
                                 GLib.idle_add(self.window.load_url, new_url)
                                 GLib.idle_add(self.window.present)
+                                focus_browser_in_niri()
                         conn.close()
                     except Exception:
                         break

@@ -46,8 +46,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::thread;
 use std::time::{Duration, Instant};
+
+static REBUILDING_FOR_LANG: AtomicBool = AtomicBool::new(false);
 
 pub fn get_user_home() -> PathBuf {
     if let Ok(home) = std::env::var("HOME") {
@@ -62,6 +65,47 @@ pub fn get_user_home() -> PathBuf {
         }
     }
     PathBuf::from("/tmp")
+}
+
+/// Returns whether +18 / Adult / NSFW games are allowed in GameZone recommendations.
+/// Stock default is STRICTLY `false` (disabled) to protect children and minors.
+pub fn is_adult_content_allowed() -> bool {
+    let home = get_user_home();
+    let cfg_path = home.join(".config/solarui/gamezone/config.json");
+    if let Ok(content) = std::fs::read_to_string(&cfg_path) {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+            return val
+                .get("allow_adult_content")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+        }
+    }
+    false
+}
+
+/// Persists the "18 yaşından büyüğüm" (+18 adult content) preference in `config.json`.
+pub fn set_adult_content_allowed(allow: bool) {
+    let lang = Language::detect();
+    save_gamezone_config(lang, allow);
+}
+
+fn save_gamezone_config(lang: Language, allow_adult: bool) {
+    let home = get_user_home();
+    let cfg_path = home.join(".config/solarui/gamezone/config.json");
+    if let Some(parent) = cfg_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let lang_str = match lang {
+        Language::EN => "en",
+        Language::TR => "tr",
+    };
+    let payload = serde_json::json!({
+        "language": lang_str,
+        "allow_adult_content": allow_adult,
+    });
+    if let Ok(pretty) = serde_json::to_string_pretty(&payload) {
+        let _ = std::fs::write(cfg_path, format!("{}\n", pretty));
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,16 +136,8 @@ impl Language {
     }
 
     pub fn save(&self) {
-        let home = get_user_home();
-        let cfg_path = home.join(".config/solarui/gamezone/config.json");
-        if let Some(parent) = cfg_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let val = match self {
-            Language::EN => "{\n  \"language\": \"en\"\n}\n",
-            Language::TR => "{\n  \"language\": \"tr\"\n}\n",
-        };
-        let _ = std::fs::write(cfg_path, val);
+        let allow_adult = is_adult_content_allowed();
+        save_gamezone_config(*self, allow_adult);
     }
 
     pub fn toggle(&self) -> Self {
@@ -518,6 +554,67 @@ pub fn is_system_online() -> bool {
 
 static LAST_BROWSER_OPEN: Mutex<Option<Instant>> = Mutex::new(None);
 
+/// Brings any newly opened browser or external application window to the foreground in Niri
+/// so that fullscreen `solar-gamezone` never traps or steals focus from it.
+pub fn focus_external_window_over_gamezone(hint_token: &str) {
+    let hint = hint_token.to_lowercase();
+    std::thread::spawn(move || {
+        let mut before_ids = std::collections::HashSet::new();
+        if let Ok(out) = Command::new("niri").args(["msg", "--json", "windows"]).output() {
+            if let Ok(arr) = serde_json::from_slice::<Vec<serde_json::Value>>(&out.stdout) {
+                for w in arr {
+                    if let Some(id) = w.get("id").and_then(|v| v.as_u64()) {
+                        before_ids.insert(id);
+                    }
+                }
+            }
+        }
+
+        for _ in 0..22 {
+            std::thread::sleep(Duration::from_millis(120));
+            let Ok(out) = Command::new("niri").args(["msg", "--json", "windows"]).output() else {
+                continue;
+            };
+            let Ok(arr) = serde_json::from_slice::<Vec<serde_json::Value>>(&out.stdout) else {
+                continue;
+            };
+
+            let mut target_id: Option<u64> = None;
+            for w in &arr {
+                let id = w.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+                let app_id = w.get("app_id").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+                if app_id == "solar-gamezone" {
+                    continue;
+                }
+                if !before_ids.contains(&id) && id > 0 {
+                    target_id = Some(id);
+                    break;
+                }
+            }
+            if target_id.is_none() && !hint.is_empty() {
+                for w in &arr {
+                    let id = w.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let app_id = w.get("app_id").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+                    let title = w.get("title").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+                    if app_id != "solar-gamezone"
+                        && (app_id.contains(&hint) || title.contains(&hint))
+                    {
+                        target_id = Some(id);
+                        break;
+                    }
+                }
+            }
+
+            if let Some(wid) = target_id {
+                let _ = Command::new("niri")
+                    .args(["msg", "action", "focus-window", "--id", &wid.to_string()])
+                    .status();
+                return;
+            }
+        }
+    });
+}
+
 pub fn open_browser_url(url: &str) {
     {
         let mut last = LAST_BROWSER_OPEN.lock().unwrap();
@@ -533,6 +630,7 @@ pub fn open_browser_url(url: &str) {
     // 1. Primary: Blaze GameZone dedicated console mini-browser
     if Path::new("/usr/bin/blaze-gamezone-browser").exists() {
         if let Ok(mut child) = Command::new("/usr/bin/blaze-gamezone-browser").arg(url).spawn() {
+            focus_external_window_over_gamezone("org.blazeos.gamezone.browser");
             std::thread::spawn(move || {
                 let _ = child.wait();
             });
@@ -548,6 +646,7 @@ pub fn open_browser_url(url: &str) {
         .unwrap_or(false);
     if has_chromium {
         if let Ok(mut child) = Command::new("chromium").arg(format!("--app={}", url)).spawn() {
+            focus_external_window_over_gamezone("chromium");
             std::thread::spawn(move || {
                 let _ = child.wait();
             });
@@ -566,6 +665,7 @@ pub fn open_browser_url(url: &str) {
             .args(["--application-mode", "--new-window", url])
             .spawn()
         {
+            focus_external_window_over_gamezone("epiphany");
             std::thread::spawn(move || {
                 let _ = child.wait();
             });
@@ -577,6 +677,7 @@ pub fn open_browser_url(url: &str) {
     if Command::new("xdg-open").arg(url).spawn().is_err() {
         let _ = Command::new("firefox").arg(url).spawn();
     }
+    focus_external_window_over_gamezone("firefox");
 }
 
 pub fn is_game_installed(steam_app_id: Option<&str>, exec: &str, id: &str) -> bool {
@@ -1794,10 +1895,25 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
         prev_ctrl_lang.stop();
         let new_l = lang.toggle();
         new_l.save();
+        REBUILDING_FOR_LANG.store(true, AtomicOrdering::SeqCst);
         win_l_clone.close();
+        REBUILDING_FOR_LANG.store(false, AtomicOrdering::SeqCst);
         build_gamezone_ui(loop_l_clone.clone());
     });
     status_box.append(&lang_btn);
+
+    let exit_desktop_btn = Button::with_label(lang.exit_to_desktop());
+    exit_desktop_btn.add_css_class("xbox-apps-close-btn");
+    let win_exit_top = window.clone();
+    let loop_exit_top = main_loop.clone();
+    let prev_exit_top = preview_ctrl.clone();
+    exit_desktop_btn.connect_clicked(move |_| {
+        println!("Return to Desktop button clicked: exiting Blaze GameZone and restoring desktop shell...");
+        prev_exit_top.stop();
+        win_exit_top.close();
+        loop_exit_top.quit();
+    });
+    status_box.append(&exit_desktop_btn);
 
     top_bar.append(&status_box);
     root_box.append(&top_bar);
@@ -1961,6 +2077,14 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     let subtab_spacer = GtkBox::new(Orientation::Horizontal, 0);
     subtab_spacer.set_hexpand(true);
     subtab_header_row.append(&subtab_spacer);
+
+    let btn_refresh_featured = Button::with_label(match lang {
+        Language::TR => "↻ Önerilenleri Yenile",
+        Language::EN => "↻ Refresh Featured",
+    });
+    btn_refresh_featured.add_css_class("gz-hero-action-btn");
+    btn_refresh_featured.set_margin_bottom(8);
+    subtab_header_row.append(&btn_refresh_featured);
 
     let btn_add_external = Button::with_label(match lang {
         Language::TR => "+ Harici Oyun / Klasör Tanıt",
@@ -2364,6 +2488,14 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
         let prev_pic = preview_pic.clone();
         let prev_badge = preview_badge.clone();
         let prev_ctrl = preview_ctrl.clone();
+        let f_games_filt = featured_games_rc.clone();
+        let f_cbox_filt = featured_carousel_box.clone();
+        let f_btns_filt = featured_btns_rc.clone();
+        let pop_filt = populate_carousel_row.clone();
+        let tab_filt = active_tab_rc.clone();
+        let act_list_filt = active_game_list.clone();
+        let act_btns_filt = active_buttons_rc.clone();
+        let focus_filt = focus_game_ui.clone();
 
         glib::spawn_future_local(async move {
             while let Ok(ev) = rx.recv().await {
@@ -2422,6 +2554,37 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
                             );
                         }
                     }
+                    MediaUpdateEvent::AdultFiltered { game_id, .. } => {
+                        if !is_adult_content_allowed() {
+                            let mut changed = false;
+                            {
+                                let mut fg = f_games_filt.borrow_mut();
+                                let before = fg.len();
+                                fg.retain(|g| g.id != game_id);
+                                if fg.len() != before {
+                                    changed = true;
+                                }
+                            }
+                            if changed {
+                                let updated = f_games_filt.borrow().clone();
+                                pop_filt(&f_cbox_filt, &updated, &f_btns_filt);
+                                if *tab_filt.borrow() == 0 {
+                                    *act_list_filt.lock().unwrap() = updated.clone();
+                                    *act_btns_filt.borrow_mut() = f_btns_filt.borrow().clone();
+                                    let was_focused = focused_rc
+                                        .borrow()
+                                        .as_ref()
+                                        .map(|g| g.id == game_id)
+                                        .unwrap_or(false);
+                                    if was_focused {
+                                        if let Some(first) = updated.first() {
+                                            focus_filt(first);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         });
@@ -2433,41 +2596,8 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
         gamezone_live::spawn_official_media_fetcher(local_detected_initial.clone(), media_tx.clone());
     }
 
-    if is_online {
-        let (feat_tx, feat_rx) = async_channel::bounded::<Vec<GameEntry>>(1);
-        let inst_ids_bg = installed_appids.clone();
-        std::thread::spawn(move || {
-            if let Some(mut live_items) =
-                gamezone_live::fetch_live_steam_featured_blocking(lang, &inst_ids_bg)
-            {
-                let (deck_cat, deck_desc) = match lang {
-                    Language::TR => (
-                        "Konsol Arayüzü",
-                        "Tam ekran Steam Big Picture ve kumanda destekli oyun merkezi.",
-                    ),
-                    Language::EN => (
-                        "Console Interface",
-                        "Fullscreen Steam Big Picture and controller-native gaming hub.",
-                    ),
-                };
-                live_items.push(new_game_entry(
-                    "steam-deck",
-                    "Steam Big Picture",
-                    deck_cat,
-                    "steam -gamepadui",
-                    deck_desc,
-                    false,
-                    None,
-                    Some("/usr/share/solarui/covers/steam-deck.jpg".to_string()),
-                    None,
-                    None,
-                    Some("https://store.steampowered.com/".to_string()),
-                    None,
-                ));
-                let _ = feat_tx.send_blocking(live_items);
-            }
-        });
-
+    let trigger_featured_refresh: Rc<dyn Fn(bool)> = {
+        let inst_ids_base = installed_appids.clone();
         let f_games_rc = featured_games_rc.clone();
         let f_cbox = featured_carousel_box.clone();
         let f_btns = featured_btns_rc.clone();
@@ -2478,19 +2608,133 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
         let focus_fn = focus_game_ui.clone();
         let mtx_live = media_tx.clone();
 
-        glib::spawn_future_local(async move {
-            if let Ok(live_list) = feat_rx.recv().await {
-                *f_games_rc.borrow_mut() = live_list.clone();
-                pop_fn(&f_cbox, &live_list, &f_btns);
-                gamezone_live::spawn_official_media_fetcher(live_list.clone(), mtx_live);
-                if *tab_rc.borrow() == 0 {
-                    *act_list.lock().unwrap() = live_list.clone();
-                    *act_btns.borrow_mut() = f_btns.borrow().clone();
-                    if let Some(first) = live_list.first() {
-                        focus_fn(first);
+        Rc::new(move |prefer_cached_first: bool| {
+            if prefer_cached_first {
+                let mut cached = gamezone_live::load_cached_featured_games(lang, &inst_ids_base);
+                if !cached.is_empty() {
+                    let (deck_cat, deck_desc) = match lang {
+                        Language::TR => (
+                            "Konsol Arayüzü",
+                            "Tam ekran Steam Big Picture ve kumanda destekli oyun merkezi.",
+                        ),
+                        Language::EN => (
+                            "Console Interface",
+                            "Fullscreen Steam Big Picture and controller-native gaming hub.",
+                        ),
+                    };
+                    cached.push(new_game_entry(
+                        "steam-deck",
+                        "Steam Big Picture",
+                        deck_cat,
+                        "steam -gamepadui",
+                        deck_desc,
+                        false,
+                        None,
+                        Some("/usr/share/solarui/covers/steam-deck.jpg".to_string()),
+                        None,
+                        None,
+                        Some("https://store.steampowered.com/".to_string()),
+                        None,
+                    ));
+                    *f_games_rc.borrow_mut() = cached.clone();
+                    pop_fn(&f_cbox, &cached, &f_btns);
+                    gamezone_live::spawn_official_media_fetcher(cached.clone(), mtx_live.clone());
+                    if *tab_rc.borrow() == 0 {
+                        *act_list.lock().unwrap() = cached.clone();
+                        *act_btns.borrow_mut() = f_btns.borrow().clone();
+                        if let Some(first) = cached.first() {
+                            focus_fn(first);
+                        }
                     }
                 }
             }
+
+            if !is_system_online() {
+                return;
+            }
+
+            let (feat_tx, feat_rx) = async_channel::bounded::<Vec<GameEntry>>(1);
+            let inst_ids_bg = inst_ids_base.clone();
+            std::thread::spawn(move || {
+                if let Some(mut live_items) =
+                    gamezone_live::fetch_live_steam_featured_blocking(lang, &inst_ids_bg)
+                {
+                    let (deck_cat, deck_desc) = match lang {
+                        Language::TR => (
+                            "Konsol Arayüzü",
+                            "Tam ekran Steam Big Picture ve kumanda destekli oyun merkezi.",
+                        ),
+                        Language::EN => (
+                            "Console Interface",
+                            "Fullscreen Steam Big Picture and controller-native gaming hub.",
+                        ),
+                    };
+                    live_items.push(new_game_entry(
+                        "steam-deck",
+                        "Steam Big Picture",
+                        deck_cat,
+                        "steam -gamepadui",
+                        deck_desc,
+                        false,
+                        None,
+                        Some("/usr/share/solarui/covers/steam-deck.jpg".to_string()),
+                        None,
+                        None,
+                        Some("https://store.steampowered.com/".to_string()),
+                        None,
+                    ));
+                    let _ = feat_tx.send_blocking(live_items);
+                }
+            });
+
+            let f_games_ui = f_games_rc.clone();
+            let f_cbox_ui = f_cbox.clone();
+            let f_btns_ui = f_btns.clone();
+            let pop_ui = pop_fn.clone();
+            let tab_ui = tab_rc.clone();
+            let act_list_ui = act_list.clone();
+            let act_btns_ui = act_btns.clone();
+            let focus_ui = focus_fn.clone();
+            let mtx_ui = mtx_live.clone();
+
+            glib::spawn_future_local(async move {
+                if let Ok(live_list) = feat_rx.recv().await {
+                    *f_games_ui.borrow_mut() = live_list.clone();
+                    pop_ui(&f_cbox_ui, &live_list, &f_btns_ui);
+                    gamezone_live::spawn_official_media_fetcher(live_list.clone(), mtx_ui);
+                    if *tab_ui.borrow() == 0 {
+                        *act_list_ui.lock().unwrap() = live_list.clone();
+                        *act_btns_ui.borrow_mut() = f_btns_ui.borrow().clone();
+                        if let Some(first) = live_list.first() {
+                            focus_ui(first);
+                        }
+                    }
+                }
+            });
+        })
+    };
+
+    if is_online {
+        trigger_featured_refresh(false);
+    }
+
+    {
+        let refresh_click = trigger_featured_refresh.clone();
+        btn_refresh_featured.connect_clicked(move |_| {
+            refresh_click(true);
+        });
+    }
+
+    // Periodic recommendation rotation every 180 seconds while GameZone is open
+    {
+        let refresh_periodic = trigger_featured_refresh.clone();
+        let win_weak_per = window.downgrade();
+        glib::timeout_add_seconds_local(180, move || {
+            if win_weak_per.upgrade().is_none() {
+                return glib::ControlFlow::Break;
+            }
+            refresh_periodic(true);
+            glib::ControlFlow::Continue
         });
     }
 
@@ -2621,6 +2865,7 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
         if Command::new("firehub").spawn().is_err() {
             let _ = Command::new("/opt/FireHub/firehub").spawn();
         }
+        focus_external_window_over_gamezone("firehub");
     });
     store_cards_row.append(&card_soft);
 
@@ -2695,8 +2940,133 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     card_set_solar.set_child(Some(&csl_box));
     card_set_solar.connect_clicked(|_| {
         let _ = Command::new("solar-settings").spawn();
+        focus_external_window_over_gamezone("solar-settings");
     });
     set_cards_row.append(&card_set_solar);
+
+    // Setting 2.5: "18 yaşından büyüğüm" (+18 Adult / NSFW Content Filter — OFF by default)
+    let card_set_adult = Button::new();
+    card_set_adult.add_css_class("xbox-modal-card");
+    let cad_box = GtkBox::new(Orientation::Vertical, 4);
+    let adult_title_text = move |allowed: bool| -> String {
+        match (lang, allowed) {
+            (Language::TR, false) => "18 Yaşından Büyüküm: KAPALI (Güvenli)".to_string(),
+            (Language::TR, true) => "18 Yaşından Büyüküm: AÇIK (+18 Göster)".to_string(),
+            (Language::EN, false) => "I Am 18+ (Adult Content): OFF (Safe)".to_string(),
+            (Language::EN, true) => "I Am 18+ (Adult Content): ON (+18 Shown)".to_string(),
+        }
+    };
+    let adult_desc_text = move |allowed: bool| -> String {
+        match (lang, allowed) {
+            (Language::TR, false) => {
+                "Varsayılan kapalı: Pornografik, hentai ve +18 yetişkin içerikli oyunlar önerilenlere düşmez."
+                    .to_string()
+            }
+            (Language::TR, true) => {
+                "+18 yetişkin içerikli oyunların mağaza önerilerinde görünmesine izin veriliyor."
+                    .to_string()
+            }
+            (Language::EN, false) => {
+                "Default off: Pornographic, hentai, and 18+ adult games are strictly excluded from recommendations."
+                    .to_string()
+            }
+            (Language::EN, true) => {
+                "18+ adult games are permitted to appear in store recommendations."
+                    .to_string()
+            }
+        }
+    };
+    let cur_adult_allowed = is_adult_content_allowed();
+    let cad_title = Label::new(Some(&adult_title_text(cur_adult_allowed)));
+    cad_title.add_css_class("xbox-modal-card-title");
+    cad_title.set_halign(gtk4::Align::Start);
+    let cad_desc = Label::new(Some(&adult_desc_text(cur_adult_allowed)));
+    cad_desc.add_css_class("xbox-modal-card-desc");
+    cad_desc.set_halign(gtk4::Align::Start);
+    cad_desc.set_wrap(true);
+    cad_box.append(&cad_title);
+    cad_box.append(&cad_desc);
+    card_set_adult.set_child(Some(&cad_box));
+    {
+        let cad_t_lbl = cad_title.clone();
+        let cad_d_lbl = cad_desc.clone();
+        let refresh_adult = trigger_featured_refresh.clone();
+        card_set_adult.connect_clicked(move |_| {
+            let next_state = !is_adult_content_allowed();
+            set_adult_content_allowed(next_state);
+            cad_t_lbl.set_text(&adult_title_text(next_state));
+            cad_d_lbl.set_text(&adult_desc_text(next_state));
+            refresh_adult(true);
+            let msg = if next_state {
+                "18 yaş üstü (+18) yetişkin içerik filtresi devre dışı bırakıldı."
+            } else {
+                "Güvenli Aile/Çocuk Modu aktif: +18 / pornografik / hentai oyunlar gizlendi."
+            };
+            let _ = Command::new("notify-send")
+                .args(["-a", "Blaze GameZone", "-i", "preferences-system", "İçerik Filtresi", msg])
+                .spawn();
+        });
+    }
+    set_cards_row.append(&card_set_adult);
+
+    // Setting 2.6: Desktop Shell Selector & Instant Switch ("Masaüstü Kabuğu Değiştir")
+    let card_set_shell = Button::new();
+    card_set_shell.add_css_class("xbox-modal-card");
+    let csh_box = GtkBox::new(Orientation::Vertical, 4);
+    let csh_title = Label::new(Some(&match lang {
+        Language::TR => format!(
+            "Masaüstü Kabuğu: {}",
+            solar_common::SolarConfig::load().shell.engine.as_str().to_uppercase()
+        ),
+        Language::EN => format!(
+            "Desktop Shell: {}",
+            solar_common::SolarConfig::load().shell.engine.as_str().to_uppercase()
+        ),
+    }));
+    csh_title.add_css_class("xbox-modal-card-title");
+    csh_title.set_halign(gtk4::Align::Start);
+    let csh_desc = Label::new(Some(match lang {
+        Language::TR => "Tıkla: Noctalia • Caelestia • end4-pC • We10X arasında masaüstü kabuğunu değiştir",
+        Language::EN => "Click to cycle desktop shell: Noctalia • Caelestia • end4-pC • We10X",
+    }));
+    csh_desc.add_css_class("xbox-modal-card-desc");
+    csh_desc.set_halign(gtk4::Align::Start);
+    csh_desc.set_wrap(true);
+    csh_box.append(&csh_title);
+    csh_box.append(&csh_desc);
+    card_set_shell.set_child(Some(&csh_box));
+    {
+        let csh_t_lbl = csh_title.clone();
+        card_set_shell.connect_clicked(move |_| {
+            let cur = solar_common::SolarConfig::load().shell.engine;
+            let next_eng = match cur {
+                crate::engine::ShellEngine::Noctalia => crate::engine::ShellEngine::Caelestia,
+                crate::engine::ShellEngine::Caelestia => crate::engine::ShellEngine::End4Pc,
+                crate::engine::ShellEngine::End4Pc => crate::engine::ShellEngine::We10x,
+                crate::engine::ShellEngine::We10x => crate::engine::ShellEngine::Noctalia,
+            };
+            let next_prov = match next_eng {
+                crate::engine::ShellEngine::Noctalia => crate::engine::SurfaceProvider::Noctalia,
+                crate::engine::ShellEngine::Caelestia => crate::engine::SurfaceProvider::Caelestia,
+                crate::engine::ShellEngine::End4Pc => crate::engine::SurfaceProvider::End4Pc,
+                crate::engine::ShellEngine::We10x => crate::engine::SurfaceProvider::We10x,
+            };
+            let _ = solar_common::SolarConfig::update(|c| {
+                c.shell.engine = next_eng;
+                c.shell.launcher_provider = next_prov;
+                c.shell.dashboard_provider = next_prov;
+                c.shell.notifications_provider = next_prov;
+                c.shell.osd_provider = next_prov;
+            });
+            let prev_shell_file = solar_common::get_solar_runtime_dir().join("gamezone_prev_shell.txt");
+            let _ = std::fs::write(&prev_shell_file, next_eng.as_str());
+            csh_t_lbl.set_text(&match lang {
+                Language::TR => format!("Masaüstü Kabuğu: {}", next_eng.as_str().to_uppercase()),
+                Language::EN => format!("Desktop Shell: {}", next_eng.as_str().to_uppercase()),
+            });
+        });
+    }
+    set_cards_row.append(&card_set_shell);
 
     // Setting 3: sched_ext & NTSYNC Performance Governor
     let card_set_perf = Button::new();
@@ -2749,7 +3119,40 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     });
     set_cards_row.append(&card_set_cache);
 
-    settings_drawer.append(&set_cards_row);
+    // Setting 5: Return to Desktop (restores Noctalia or previous desktop shell)
+    let card_set_exit = Button::new();
+    card_set_exit.add_css_class("xbox-modal-card");
+    let cex_box = GtkBox::new(Orientation::Vertical, 4);
+    let cex_title = Label::new(Some(lang.exit_to_desktop()));
+    cex_title.add_css_class("xbox-modal-card-title");
+    cex_title.set_halign(gtk4::Align::Start);
+    let cex_desc = Label::new(Some(match lang {
+        Language::TR => "GameZone'u Kapat & Masaüstü Kabuğuna Dön",
+        Language::EN => "Close GameZone & Restore Desktop Shell",
+    }));
+    cex_desc.add_css_class("xbox-modal-card-desc");
+    cex_desc.set_halign(gtk4::Align::Start);
+    cex_box.append(&cex_title);
+    cex_box.append(&cex_desc);
+    card_set_exit.set_child(Some(&cex_box));
+    {
+        let win_exit_set = window.clone();
+        let loop_exit_set = main_loop.clone();
+        let prev_exit_set = preview_ctrl.clone();
+        card_set_exit.connect_clicked(move |_| {
+            prev_exit_set.stop();
+            win_exit_set.close();
+            loop_exit_set.quit();
+        });
+    }
+    set_cards_row.append(&card_set_exit);
+
+    let set_cards_scroll = ScrolledWindow::builder()
+        .hscrollbar_policy(gtk4::PolicyType::Automatic)
+        .vscrollbar_policy(gtk4::PolicyType::Never)
+        .child(&set_cards_row)
+        .build();
+    settings_drawer.append(&set_cards_scroll);
     content_box.append(&settings_drawer);
 
     // ── ALL APPLICATIONS DRAWER (COLLAPSIBLE / FULLSCREEN OVERLAY) ──
@@ -2836,6 +3239,7 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
             let parts: Vec<&str> = app_exec.split_whitespace().collect();
             if let Some(cmd) = parts.get(0) {
                 let _ = Command::new(cmd).args(&parts[1..]).spawn();
+                focus_external_window_over_gamezone(cmd);
             }
         });
 
@@ -3110,11 +3514,16 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
         }
     }
 
-    // Stop trailer child cleanly whenever window closes
+    // Stop trailer child cleanly AND exit main_loop whenever window closes (including Super+Q / Mod+Q)
+    // unless closing temporarily to rebuild UI for language toggle.
     {
         let prev_close = preview_ctrl.clone();
+        let loop_close = main_loop.clone();
         window.connect_close_request(move |_| {
             prev_close.stop();
+            if !REBUILDING_FOR_LANG.load(AtomicOrdering::SeqCst) {
+                loop_close.quit();
+            }
             glib::Propagation::Proceed
         });
     }
@@ -3168,6 +3577,9 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
         let is_v = drawer_set_open.is_visible();
         drawer_set_open.set_visible(!is_v);
     });
+    if std::env::var("GAMEZONE_OPEN_SETTINGS").as_deref() == Ok("1") {
+        settings_drawer.set_visible(true);
+    }
 
     // Bento Store Card opens store_drawer
     let bento_st_drawer = store_drawer.clone();
@@ -4673,5 +5085,59 @@ mod tests {
         record_game_played(test_id);
         let recents = get_recent_game_ids();
         assert!(recents.contains(&test_id.to_string()));
+    }
+
+    #[test]
+    fn test_adult_content_filter_detection() {
+        assert!(
+            crate::gamezone_live::is_adult_or_nsfw_game(
+                "Fuck Everything 👉👌💦",
+                "Your brand-new AI sex doll asked what you're into...",
+                ""
+            ),
+            "Explicit pornographic Steam title must be caught by is_adult_or_nsfw_game"
+        );
+        assert!(
+            crate::gamezone_live::is_adult_or_nsfw_game(
+                "Hentai Succubus Academy",
+                "18+ Uncensored anime visual novel",
+                ""
+            ),
+            "Hentai / 18+ title must be caught by is_adult_or_nsfw_game"
+        );
+        assert!(
+            !crate::gamezone_live::is_adult_or_nsfw_game(
+                "Stellaris: Willpower",
+                "Grand strategy space exploration",
+                ""
+            ),
+            "Safe game must not be flagged as adult"
+        );
+
+        let adult_payload = serde_json::json!({
+            "name": "Innocent Looking Title",
+            "short_description": "A regular description",
+            "content_descriptors": {
+                "ids": [1, 3, 4],
+                "notes": "Contains explicit adult sexual content and nudity."
+            }
+        });
+        assert!(
+            crate::gamezone_live::is_steam_appdetails_adult(&adult_payload),
+            "Steam content_descriptors ids 3/4 must be flagged as adult"
+        );
+
+        let safe_payload = serde_json::json!({
+            "name": "Stardew Valley",
+            "short_description": "You've inherited your grandfather's old farm plot.",
+            "content_descriptors": {
+                "ids": [],
+                "notes": null
+            }
+        });
+        assert!(
+            !crate::gamezone_live::is_steam_appdetails_adult(&safe_payload),
+            "Safe Steam appdetails must not be flagged as adult"
+        );
     }
 }

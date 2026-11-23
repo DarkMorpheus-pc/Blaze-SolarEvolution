@@ -192,9 +192,21 @@ window-rule {
 window-rule {
     match app-id="^firefox$"
     open-floating true
+    open-focused true
     default-column-width { proportion 0.82; }
     default-window-height { proportion 0.82; }
     geometry-corner-radius 16
+    clip-to-geometry true
+}
+
+window-rule {
+    match app-id=r#"^(org\.blazeos\.gamezone\.browser|blaze-gamezone-browser)$"#
+    open-floating true
+    open-focused true
+    server-titlebar false
+    default-column-width { proportion 0.94; }
+    default-window-height { proportion 0.92; }
+    geometry-corner-radius 18
     clip-to-geometry true
 }
 
@@ -212,8 +224,9 @@ window-rule {
 
 // BlazeOS Control Center & Native Tools
 window-rule {
-    match app-id=r#"^(org\.blazeos\.control|blazeos-welcome)$"#
+    match app-id=r#"^(org\.blazeos\.control|blazeos-welcome|blaze-house)$"#
     open-floating true
+    open-focused true
     server-titlebar false
     default-column-width { proportion 0.75; }
     default-window-height { proportion 0.80; }
@@ -225,6 +238,7 @@ window-rule {
 window-rule {
     match app-id=r#"^(FireHub|firehub)$"#
     open-floating true
+    open-focused true
     server-titlebar true
     default-column-width { proportion 0.78; }
     default-window-height { proportion 0.82; }
@@ -246,6 +260,7 @@ window-rule {
 window-rule {
     match app-id="dev.noctalia.Noctalia"
     open-floating true
+    open-focused true
     server-titlebar false
     default-column-width { fixed 1080; }
     default-window-height { fixed 920; }
@@ -255,6 +270,7 @@ window-rule {
 window-rule {
     match app-id="^solar-settings$"
     open-floating true
+    open-focused true
     server-titlebar false
     default-column-width { fixed 1020; }
     default-window-height { fixed 620; }
@@ -309,6 +325,7 @@ window-rule {
 // Blaze GameZone Fullscreen Gaming Shell & Native/Proton Games (Zero Blur / Zero Corner Clipping)
 window-rule {
     match app-id="^solar-gamezone$"
+    open-focused true
     open-fullscreen true
     server-titlebar false
     geometry-corner-radius 0

@@ -559,6 +559,28 @@ async fn main() -> Result<()> {
             let engine_str = args.get(2).map(|s| s.as_str()).unwrap_or("");
             let engine: engine::ShellEngine =
                 engine_str.parse().map_err(|e: String| anyhow::anyhow!(e))?;
+            if supervisor::SolarShellSupervisor::is_gamezone_active() {
+                let prev_provider = match engine {
+                    engine::ShellEngine::Noctalia => engine::SurfaceProvider::Noctalia,
+                    engine::ShellEngine::Caelestia => engine::SurfaceProvider::Caelestia,
+                    engine::ShellEngine::End4Pc => engine::SurfaceProvider::End4Pc,
+                    engine::ShellEngine::We10x => engine::SurfaceProvider::We10x,
+                };
+                SolarConfig::update(|c| {
+                    c.shell.engine = engine;
+                    c.shell.launcher_provider = prev_provider;
+                    c.shell.dashboard_provider = prev_provider;
+                    c.shell.notifications_provider = prev_provider;
+                    c.shell.osd_provider = prev_provider;
+                })?;
+                let prev_shell_file = solar_common::get_solar_runtime_dir().join("gamezone_prev_shell.txt");
+                let _ = std::fs::write(&prev_shell_file, engine.as_str());
+                info!(
+                    "GameZone aktifken kabuk tercihi {:?} olarak güncellendi; GameZone'dan çıkıldığında uygulanacak.",
+                    engine
+                );
+                return Ok(());
+            }
             let switcher = switcher::SolarShellSwitcher::new();
             switcher.switch_engine(engine).await?;
             Ok(())
@@ -888,21 +910,28 @@ async fn run_gamezone_shell_session() -> Result<()> {
         gamezone_gui::launch_gamezone_window();
     });
 
+    // Kullanıcı GameZone içerisinden (veya SolarUI Ayarları'ndan) kabuk tercihini değiştirdiyse yeni tercihi yükle
+    let target_engine = std::fs::read_to_string(&prev_shell_file)
+        .ok()
+        .and_then(|s| s.trim().parse::<engine::ShellEngine>().ok())
+        .or_else(|| supervisor.load_desired_state().ok().map(|d| d.desired_engine))
+        .unwrap_or(prev_engine);
+
     info!(
-        "GameZone kabuğundan çıkış yapıldı. Önceki masaüstü kabuğuna geri dönülüyor: {:?}...",
-        prev_engine
+        "GameZone kabuğundan çıkış yapıldı. Masaüstü kabuğuna geri dönülüyor: {:?}...",
+        target_engine
     );
 
     // 4. Kilit dosyasını kaldır
     let _ = std::fs::remove_file(&lock_file);
     let _ = std::fs::remove_file("/tmp/solar-gamezone-active.lock");
 
-    // 5. Kaydedilen masaüstü kabuğunu otomatik olarak yeniden başlat
+    // 5. Kaydedilen/seçilen masaüstü kabuğunu otomatik olarak yeniden başlat
     let switcher = switcher::SolarShellSwitcher::new();
-    if let Err(e) = switcher.switch_engine(prev_engine).await {
+    if let Err(e) = switcher.switch_engine(target_engine).await {
         tracing::error!(
             "Masaüstü kabuğunu ({:?}) geri yükleme başarısız oldu: {}. Reconcile deneniyor...",
-            prev_engine, e
+            target_engine, e
         );
         let _ = supervisor.reconcile().await;
     }
