@@ -5,6 +5,7 @@ After=network-online.target display-manager.service
 Wants=network-online.target
 ConditionPathExists=!/var/lib/blazeos/nvidia-setup-done
 ConditionVirtualization=!container
+ConditionKernelCommandLine=!rd.live.image
 
 [Service]
 Type=oneshot

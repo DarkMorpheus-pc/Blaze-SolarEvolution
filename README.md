@@ -183,7 +183,7 @@ Once the build is complete, your ISO image will be available in the repository r
 
 Official Checksum (SHA-256):
 ```text
-6a21b9d197e60d076bbaa9b694d7a733f91951810866d8b51f7fa347f5ada0dd  Blaze-SolarEvolution-5-x86_64.iso
+baa6dce0af43741588f9c5973cecff2f85eb9b085717a80a972c622a4ac4a624  Blaze-SolarEvolution-5-x86_64.iso
 ```
 
 ---

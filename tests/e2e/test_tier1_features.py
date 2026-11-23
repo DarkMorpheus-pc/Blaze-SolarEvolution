@@ -366,8 +366,9 @@ class Tier1FeatureCoverageTests(unittest.TestCase):
             "usr/share/plymouth/themes/blazeos/blazeos.script",
             "usr/share/plymouth/themes/blazeos/logo.png",
             "usr/share/plymouth/themes/spinner/watermark.png",
+            "usr/lib/dracut/hooks",
         ):
-            self.assertIn(req, members, f"Initrd missing required Plymouth artifact: {req}")
+            self.assertIn(req, members, f"Initrd missing required artifact: {req}")
 
         ext_dir = self.cache_dir / "initrd_ext"
         extract_initrd_zstd_files(
@@ -809,6 +810,7 @@ class Tier1FeatureCoverageTests(unittest.TestCase):
         )
         initrd_rel = (ext_id / "usr/lib/initrd-release").read_text(encoding="utf-8")
         self.assertIn("ID=blazeos", initrd_rel)
+        self.assertIn("Fedora", initrd_rel)
         self.assertIn('PRETTY_NAME="Blaze SolarEvolution 5.05', initrd_rel)
         self.assertEqual(
             (ext_id / "usr/lib/fedora-release").read_text(encoding="utf-8").strip(),

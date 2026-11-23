@@ -117,17 +117,38 @@ TTYPath=/dev/tty1
 EOF
   done
 
-  mkdir -p var/lib/dracut/hooks/emergency
+  mkdir -p \
+    var/lib/dracut/hooks/cmdline \
+    var/lib/dracut/hooks/emergency \
+    var/lib/dracut/hooks/initqueue/finished \
+    var/lib/dracut/hooks/initqueue/online \
+    var/lib/dracut/hooks/initqueue/settled \
+    var/lib/dracut/hooks/initqueue/timeout \
+    var/lib/dracut/hooks/mount \
+    var/lib/dracut/hooks/pre-mount \
+    var/lib/dracut/hooks/pre-pivot \
+    var/lib/dracut/hooks/pre-trigger \
+    var/lib/dracut/hooks/pre-udev \
+    var/lib/dracut/hooks/cleanup \
+    var/lib/dracut/hooks/shutdown
+  rm -rf usr/lib/dracut/hooks
+  ln -s ../../../var/lib/dracut/hooks usr/lib/dracut/hooks
+
   cat > var/lib/dracut/hooks/emergency/00-blaze-death-screen.sh <<EOF
 #!/usr/bin/sh
+/usr/bin/plymouth quit >/dev/null 2>&1 || :
+/usr/bin/chvt 1 >/dev/null 2>&1 || :
 /usr/bin/blaze-death-screen </dev/tty1 >/dev/tty1 2>&1
 EOF
   chmod 0755 var/lib/dracut/hooks/emergency/00-blaze-death-screen.sh
   printf "BLAZE_BERE_DEATH_GUARD_V1\n" > etc/blaze-bere-guard
 
   # 3. Blaze SolarEvolution identity inside initramfs (dracut/Plymouth/Anaconda)
+  # Preserve an explicit Fedora base marker in initrd-release so Ventoy'\''s
+  # rhel7/ventoy-hook.sh (`grep -q Fedora /etc/os-release`) triggers iso-scan cleanly.
   dracut_ver="$(sed -n "s/^DRACUT_VERSION=//p" usr/lib/initrd-release 2>/dev/null | head -n 1 | tr -d "\"")"
   install -D -m 0644 "$overlay/usr/share/blazeos/identity/os-release" usr/lib/initrd-release
+  printf "BASE_DISTRO=\"Fedora Linux 45\"\n" >> usr/lib/initrd-release
   if [[ -n "$dracut_ver" ]]; then
     sed -i -e "s|^VERSION=.*|VERSION=\"5.05 ${dracut_ver}\"|" \
            -e "s|^PRETTY_NAME=.*|PRETTY_NAME=\"Blaze SolarEvolution 5.05 ${dracut_ver} (Initramfs)\"|" \

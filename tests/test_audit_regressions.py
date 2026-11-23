@@ -993,6 +993,16 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
                 mod.subprocess.check_output = orig_co
                 mod.os.path.exists = orig_exists
 
+    def test_ventoy_initrd_and_live_nvidia_compatibility(self):
+        patch_sh = (ROOT / 'scripts/patch_f45_initrd.sh').read_text(encoding='utf-8')
+        self.assertRegex(patch_sh, r'BASE_DISTRO=.*Fedora Linux 45')
+        self.assertIn('../../../var/lib/dracut/hooks usr/lib/dracut/hooks', patch_sh)
+        self.assertIn('var/lib/dracut/hooks/initqueue/timeout', patch_sh)
+        self.assertIn('plymouth quit', (patch_sh.split('00-blaze-death-screen.sh')[1]))
+
+        nvidia_svc = (OVERLAY / 'etc/systemd/system/blazeos-nvidia-firstboot.service').read_text(encoding='utf-8')
+        self.assertIn('ConditionKernelCommandLine=!rd.live.image', nvidia_svc)
+
 
 if __name__ == '__main__':
     unittest.main()
