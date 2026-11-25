@@ -1,0 +1,30 @@
+{
+  "create": {
+    "http_status": 200,
+    "response": {
+      "status": "ok",
+      "message": "Anlik goruntu basariyla olusturuldu.",
+      "name": "eval-workflow-snap"
+    }
+  },
+  "list": {
+    "http_status": 200,
+    "response": {
+      "status": "ok",
+      "snapshots": [
+        {
+          "name": "eval-workflow-snap_root",
+          "path": "/.snapshots/eval-workflow-snap_root",
+          "date": "2026-11-24 23:33"
+        }
+      ]
+    }
+  },
+  "restore": {
+    "http_status": 200,
+    "response": {
+      "status": "ok",
+      "message": "eval-workflow-snap_root ba\u015far\u0131yla geri y\u00fcklendi. Sistem yeniden ba\u015flat\u0131l\u0131yor..."
+    }
+  }
+}

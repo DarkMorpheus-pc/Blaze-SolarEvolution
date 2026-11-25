@@ -407,7 +407,7 @@ printf 'no' > /tmp/anaconda_remove_solarui
 cat > /tmp/run_ks_bench.sh <<'SH'
 #!/bin/bash
 export ANACONDA_PRODUCTNAME="Blaze SolarEvolution"
-export ANACONDA_PRODUCTVERSION="5.05"
+export ANACONDA_PRODUCTVERSION="5.05.1"
 export ANACONDA_ISFINAL="true"
 export PATH=/sbin:/usr/sbin:/bin:/usr/bin
 for i in dm-mod vfat btrfs ext4 xfs loop squashfs overlay; do modprobe "$i" 2>/dev/null || true; done
@@ -883,7 +883,7 @@ def _run_f7_update_identity_guard(base_disk: Path, base_vars: Path, ovl_dir: Pat
             "printf 'NAME=\"Fedora Linux\"\\nPRETTY_NAME=\"Fedora Linux 45 (Workstation Edition)\"\\n' > /etc/os-release; "
             "blazeos-sync-identity --force; "
             "grub2-mkconfig -o /boot/grub2/grub.cfg; "
-            "grep -qx 'PRETTY_NAME=\"Blaze SolarEvolution 5.05\"' /etc/os-release; "
+            "grep -qx 'PRETTY_NAME=\"Blaze SolarEvolution 5.05.1\"' /etc/os-release; "
             "grep -qx '45' /etc/dnf/vars/releasever; "
             "grep -q 'DarkMorpheus-pc/Blaze-SolarEvolution' /etc/blazeos/update-channel.conf; "
             "grep -q 'vmlinuz-bere' /boot/grub2/grub.cfg; "

@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="968" height="708" viewBox="0 0 968 708">
+<rect width="100%" height="100%" rx="10" fill="#0f172a"/>
+<text x="24" y="30" fill="#f8fafc" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="16" font-weight="700">Phase 02 — Phoronix Test Suite: Blaze SolarEvolution 5.05.1 vs. Fedora 45 Reference</text>
+<text x="24" y="49" fill="#94a3b8" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12">Identical QEMU/KVM OVMF VM (8 vCPU, 8 GiB RAM, VirtIO-BLK); medians across 3 sequential runs (bars scaled per-metric)</text>
+<rect x="24" y="60" width="12" height="12" rx="3" fill="#f97316"/>
+<text x="42" y="70" fill="#e2e8f0" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11">Blaze SolarEvolution 5.05.1</text>
+<rect x="250" y="60" width="12" height="12" rx="3" fill="#38bdf8"/>
+<text x="268" y="70" fill="#e2e8f0" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11">Fedora 45 Workstation Ref</text>
+<text x="314" y="104" text-anchor="end" fill="#f1f5f9" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="600">7-Zip Compression (Compression Rating)</text>
+<text x="314" y="120" text-anchor="end" fill="#94a3b8" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="10">MIPS (higher=better)</text>
+<rect x="326" y="90" width="450" height="16" rx="4" fill="#1e293b"/>
+<rect x="326" y="90" width="382.8" height="16" rx="4" fill="#f97316"/>
+<text x="716.8" y="102" fill="#fed7aa" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11" font-weight="600">46856.00 MIPS</text>
+<rect x="326" y="110" width="450" height="16" rx="4" fill="#1e293b"/>
+<rect x="326" y="110" width="428.6" height="16" rx="4" fill="#38bdf8"/>
+<text x="762.6" y="122" fill="#bae6fd" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11" font-weight="600">52453.00 MIPS</text>
+<text x="314" y="158" text-anchor="end" fill="#f1f5f9" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="600">7-Zip Compression (Decompression Rating)</text>
+<text x="314" y="174" text-anchor="end" fill="#94a3b8" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="10">MIPS (higher=better)</text>
+<rect x="326" y="144" width="450" height="16" rx="4" fill="#1e293b"/>
+<rect x="326" y="144" width="323.4" height="16" rx="4" fill="#f97316"/>
+<text x="657.4" y="156" fill="#fed7aa" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11" font-weight="600">26131.00 MIPS</text>
+<rect x="326" y="164" width="450" height="16" rx="4" fill="#1e293b"/>
+<rect x="326" y="164" width="428.6" height="16" rx="4" fill="#38bdf8"/>
+<text x="762.6" y="176" fill="#bae6fd" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11" font-weight="600">34632.00 MIPS</text>
+<text x="314" y="212" text-anchor="end" fill="#f1f5f9" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="600">Timed Apache Compilation (Time To Compile)</text>
+<text x="314" y="228" text-anchor="end" fill="#94a3b8" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="10">Seconds (lower=better)</text>
+<rect x="326" y="198" width="450" height="16" rx="4" fill="#1e293b"/>
+<rect x="326" y="198" width="428.6" height="16" rx="4" fill="#f97316"/>
+<text x="762.6" y="210" fill="#fed7aa" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11" font-weight="600">32.75 Seconds</text>
+<rect x="326" y="218" width="450" height="16" rx="4" fill="#1e293b"/>
+<rect x="326" y="218" width="390.5" height="16" rx="4" fill="#38bdf8"/>
+<text x="724.5" y="230" fill="#bae6fd" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11" font-weight="600">29.84 Seconds</text>
+<text x="314" y="266" text-anchor="end" fill="#f1f5f9" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="600">Coremark</text>
+<text x="314" y="282" text-anchor="end" fill="#94a3b8" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="10">Iterations/Sec (higher=better)</text>
+<rect x="326" y="252" width="450" height="16" rx="4" fill="#1e293b"/>
+<rect x="326" y="252" width="346.8" height="16" rx="4" fill="#f97316"/>
+<text x="680.8" y="264" fill="#fed7aa" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11" font-weight="600">197987.13 Iterations/Sec</text>
+<rect x="326" y="272" width="450" height="16" rx="4" fill="#1e293b"/>
+<rect x="326" y="272" width="428.6" height="16" rx="4" fill="#38bdf8"/>
+<text x="762.6" y="284" fill="#bae6fd" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11" font-weight="600">244660.79 Iterations/Sec</text>
+<text x="314" y="320" text-anchor="end" fill="#f1f5f9" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="600">C-Ray (1080p - Rays Per Pixel: 16)</text>
+<text x="314" y="336" text-anchor="end" fill="#94a3b8" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="10">Seconds (lower=better)</text>
+<rect x="326" y="306" width="450" height="16" rx="4" fill="#1e293b"/>
+<rect x="326" y="306" width="428.6" height="16" rx="4" fill="#f97316"/>
+<text x="762.6" y="318" fill="#fed7aa" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11" font-weight="600">125.46 Seconds</text>
+<rect x="326" y="326" width="450" height="16" rx="4" fill="#1e293b"/>
+<rect x="326" y="326" width="359.1" height="16" rx="4" fill="#38bdf8"/>
+<text x="693.1" y="338" fill="#bae6fd" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11" font-weight="600">105.11 Seconds</text>
+<text x="314" y="374" text-anchor="end" fill="#f1f5f9" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="600">CacheBench (Read / Modify / Write)</text>
+<text x="314" y="390" text-anchor="end" fill="#94a3b8" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="10">MB/s (higher=better)</text>
+<rect x="326" y="360" width="450" height="16" rx="4" fill="#1e293b"/>
+<rect x="326" y="360" width="406.1" height="16" rx="4" fill="#f97316"/>
+<text x="740.1" y="372" fill="#fed7aa" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11" font-weight="600">98041.38 MB/s</text>
+<rect x="326" y="380" width="450" height="16" rx="4" fill="#1e293b"/>
+<rect x="326" y="380" width="428.6" height="16" rx="4" fill="#38bdf8"/>
+<text x="762.6" y="392" fill="#bae6fd" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11" font-weight="600">103457.71 MB/s</text>
+<text x="314" y="428" text-anchor="end" fill="#f1f5f9" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="600">Stream (Copy)</text>
+<text x="314" y="444" text-anchor="end" fill="#94a3b8" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="10">MB/s (higher=better)</text>
+<rect x="326" y="414" width="450" height="16" rx="4" fill="#1e293b"/>
+<rect x="326" y="414" width="428.6" height="16" rx="4" fill="#f97316"/>
+<text x="762.6" y="426" fill="#fed7aa" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11" font-weight="600">33367.40 MB/s</text>
+<rect x="326" y="434" width="450" height="16" rx="4" fill="#1e293b"/>
+<rect x="326" y="434" width="428.4" height="16" rx="4" fill="#38bdf8"/>
+<text x="762.4" y="446" fill="#bae6fd" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11" font-weight="600">33355.60 MB/s</text>
+<text x="314" y="482" text-anchor="end" fill="#f1f5f9" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="600">Stream (Scale)</text>
+<text x="314" y="498" text-anchor="end" fill="#94a3b8" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="10">MB/s (higher=better)</text>
+<rect x="326" y="468" width="450" height="16" rx="4" fill="#1e293b"/>
+<rect x="326" y="468" width="427.0" height="16" rx="4" fill="#f97316"/>
+<text x="761.0" y="480" fill="#fed7aa" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11" font-weight="600">22512.40 MB/s</text>
+<rect x="326" y="488" width="450" height="16" rx="4" fill="#1e293b"/>
+<rect x="326" y="488" width="428.6" height="16" rx="4" fill="#38bdf8"/>
+<text x="762.6" y="500" fill="#bae6fd" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11" font-weight="600">22595.70 MB/s</text>
+<text x="314" y="536" text-anchor="end" fill="#f1f5f9" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="600">Stream (Triad)</text>
+<text x="314" y="552" text-anchor="end" fill="#94a3b8" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="10">MB/s (higher=better)</text>
+<rect x="326" y="522" width="450" height="16" rx="4" fill="#1e293b"/>
+<rect x="326" y="522" width="428.5" height="16" rx="4" fill="#f97316"/>
+<text x="762.5" y="534" fill="#fed7aa" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11" font-weight="600">25198.60 MB/s</text>
+<rect x="326" y="542" width="450" height="16" rx="4" fill="#1e293b"/>
+<rect x="326" y="542" width="428.6" height="16" rx="4" fill="#38bdf8"/>
+<text x="762.6" y="554" fill="#bae6fd" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11" font-weight="600">25200.00 MB/s</text>
+<text x="314" y="590" text-anchor="end" fill="#f1f5f9" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="600">Stream (Add)</text>
+<text x="314" y="606" text-anchor="end" fill="#94a3b8" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="10">MB/s (higher=better)</text>
+<rect x="326" y="576" width="450" height="16" rx="4" fill="#1e293b"/>
+<rect x="326" y="576" width="428.1" height="16" rx="4" fill="#f97316"/>
+<text x="762.1" y="588" fill="#fed7aa" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11" font-weight="600">25198.50 MB/s</text>
+<rect x="326" y="596" width="450" height="16" rx="4" fill="#1e293b"/>
+<rect x="326" y="596" width="428.6" height="16" rx="4" fill="#38bdf8"/>
+<text x="762.6" y="608" fill="#bae6fd" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11" font-weight="600">25227.80 MB/s</text>
+<text x="314" y="644" text-anchor="end" fill="#f1f5f9" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="600">Timed Linux Kernel Compilation (defconfig)</text>
+<text x="314" y="660" text-anchor="end" fill="#94a3b8" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="10">Seconds (lower=better)</text>
+<rect x="326" y="630" width="450" height="16" rx="4" fill="#1e293b"/>
+<rect x="326" y="630" width="428.6" height="16" rx="4" fill="#f97316"/>
+<text x="762.6" y="642" fill="#fed7aa" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11" font-weight="600">281.50 Seconds</text>
+<rect x="326" y="650" width="450" height="16" rx="4" fill="#1e293b"/>
+<rect x="326" y="650" width="377.1" height="16" rx="4" fill="#38bdf8"/>
+<text x="711.1" y="662" fill="#bae6fd" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="11" font-weight="600">247.69 Seconds</text>
+</svg>

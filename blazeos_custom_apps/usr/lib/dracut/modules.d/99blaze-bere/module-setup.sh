@@ -28,7 +28,16 @@ install() {
     fi
 
     inst_multiple -o stty dd chvt clear reset sync reboot poweroff \
-        btrfs findmnt lsblk blkid mount umount losetup kexec modprobe sulogin
+        btrfs findmnt lsblk blkid blockdev mount umount losetup kexec modprobe sulogin
+
+    # Ensure udev callouts referencing /sbin/blockdev (99-blaze-recovery-vault.rules) always resolve inside initramfs.
+    if [ ! -e "${initdir}/sbin/blockdev" ]; then
+        if [ -x /usr/bin/blockdev ]; then
+            inst_simple /usr/bin/blockdev /sbin/blockdev
+        elif [ -x /sbin/blockdev ]; then
+            inst_simple /sbin/blockdev /sbin/blockdev
+        fi
+    fi
 
     for unit_dir in \
         "${initdir}/etc/systemd/system/emergency.service.d" \

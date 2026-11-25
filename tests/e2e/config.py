@@ -93,17 +93,21 @@ def get_niri_validate_binary() -> str | None:
     return shutil.which("niri")
 
 
-# R1: 8 signed RPM packages in packaging/out/repo/
-EXPECTED_8_RPMS = (
+# R1: First-party signed RPM packages in packaging/out/repo/
+EXPECTED_CORE_RPMS = (
     "blaze-continuum-0.1.0-1.blaze.x86_64.rpm",
+    "blaze-firehub-5.05.1-1.blaze.x86_64.rpm",
     "blaze-house-2.1.0-1.blaze.x86_64.rpm",
-    "blaze-oobe-5.05-1.blaze.noarch.rpm",
-    "blaze-recovery-5.05-2.blaze.x86_64.rpm",
-    "blaze-release-5.05-3.blaze.noarch.rpm",
-    "blaze-sentinel-0.3.1-1.blaze.x86_64.rpm",
-    "blaze-tools-5.05-1.blaze.noarch.rpm",
-    "solarui-5.05-1.blaze.x86_64.rpm",
+    "blaze-oobe-5.05.1-1.blaze.noarch.rpm",
+    "blaze-recovery-5.05.1-1.blaze.x86_64.rpm",
+    "blaze-release-5.05.1-1.blaze.noarch.rpm",
+    "blaze-scap-compat-5.05.1-1.blaze.noarch.rpm",
+    "blaze-sentinel-0.3.1-2.blaze.x86_64.rpm",
+    "blaze-tools-5.05.1-1.blaze.noarch.rpm",
+    "solarui-5.05.1-1.blaze.x86_64.rpm",
+    "solarui-config-5.05.1-1.blaze.noarch.rpm",
 )
+EXPECTED_8_RPMS = EXPECTED_CORE_RPMS
 
 # R2: GNOME / Workstation bloat packages that must be purged from live rootfs
 FORBIDDEN_LIVE_RPMS = (

@@ -17,12 +17,15 @@ OVERLAY="${BLAZEOS_ROOT:-$(pwd)}/blazeos_custom_apps"
 SOLARUI_SRC="${BLAZEOS_ROOT:-$(pwd)}/solarui"
 
 echo "=== [0/5] Building the current SolarUI controller ==="
-RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=${HOME}=/build" cargo build --manifest-path "$SOLARUI_SRC/Cargo.toml" --release -p solar-shell -p solar-session -p solar-core -p blaze-recovery
+RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=${HOME}=/build" cargo build --manifest-path "$SOLARUI_SRC/Cargo.toml" --locked --release -p solar-shell -p solar-session -p solar-core -p blaze-recovery -p blaze-akrep-daemon -p blaze-akrep-ui
 install -m 0755 "$SOLARUI_SRC/target/release/solar-shell" "$OVERLAY/usr/bin/solar-shell"
 install -m 0755 "$SOLARUI_SRC/target/release/solar-shell" "$OVERLAY/usr/bin/solar-settings"
 install -m 0755 "$SOLARUI_SRC/target/release/solar-session" "$OVERLAY/usr/bin/solar-session"
 install -m 0755 "$SOLARUI_SRC/target/release/solar-core" "$OVERLAY/usr/bin/solar-core"
 install -m 0755 "$SOLARUI_SRC/target/release/blaze-recovery" "$OVERLAY/usr/bin/blaze-recovery"
+install -m 0755 "$SOLARUI_SRC/target/release/blaze-sentinel" "$OVERLAY/usr/bin/blaze-sentinel"
+install -m 0755 "$SOLARUI_SRC/target/release/akrepd" "$OVERLAY/usr/bin/akrepd"
+install -m 0755 "$SOLARUI_SRC/target/release/akrep-ui" "$OVERLAY/usr/bin/akrep-ui"
 SOLAR_SHELL_PROBE="$($OVERLAY/usr/bin/solar-shell switch __blazeos_build_probe__ 2>&1 || true)"
 if ! grep -q 'end4-pc' <<<"$SOLAR_SHELL_PROBE"; then
     echo "Refusing to build: solar-shell does not contain the End4 switch implementation" >&2
@@ -187,7 +190,7 @@ setcap cap_setgid+ep "$ROOTFS/usr/bin/newgidmap" 2>/dev/null || chmod 4755 "$ROO
 chmod 4755 "$ROOTFS/opt/FireHub/chrome-sandbox" 2>/dev/null || true
 chmod 0600 "$ROOTFS/etc/shadow" "$ROOTFS/etc/gshadow" 2>/dev/null || true
 grep -q "^sddm:" "$ROOTFS/etc/shadow" || echo "sddm:!*:20726::::::" >> "$ROOTFS/etc/shadow"
-grep -q "^blaze-setup:" "$ROOTFS/etc/shadow" || echo "blaze-setup::20726::::::" >> "$ROOTFS/etc/shadow"
+grep -q "^blaze-setup:" "$ROOTFS/etc/shadow" || echo "blaze-setup:!*:20726::::::" >> "$ROOTFS/etc/shadow"
 grep -q "^sddm:" "$ROOTFS/etc/gshadow" || echo "sddm:!*::" >> "$ROOTFS/etc/gshadow"
 grep -q "^blaze-setup:" "$ROOTFS/etc/gshadow" || echo "blaze-setup:!::" >> "$ROOTFS/etc/gshadow"
 for grp in wheel video audio input render; do

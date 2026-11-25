@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<!--Phoronix Test Suite v10.8.6-->
+<PhoronixTestSuite>
+  <Generated>
+    <Title>sys_build_linux_kernel</Title>
+    <LastModified>2026-11-25 00:58:35</LastModified>
+    <TestClient>Phoronix Test Suite v10.8.6</TestClient>
+    <Description>KVM testing on Fedora Linux 45 via the Phoronix Test Suite.</Description>
+  </Generated>
+  <System>
+    <Identifier>fedora45</Identifier>
+    <Hardware>Processor: Intel Core i9-10885H (8 Cores), Motherboard: QEMU Standard PC (i440FX + PIIX 1996), Chipset: Intel 440FX 82441FX PMC, Memory: 8192 MB Virtual, Disk: 38GB, Graphics: Red Hat Virtio 1.0 GPU, Monitor: QEMU Monitor, Network: Red Hat Virtio device</Hardware>
+    <Software>OS: Fedora Linux 45, Kernel: 7.2.11-300.fc45.x86_64 (x86_64), Compiler: GCC 16.2.1 20261029, File-System: btrfs, Screen Resolution: 1280x800, System Layer: KVM</Software>
+    <User>root</User>
+    <TimeStamp>2026-11-25 00:45:38</TimeStamp>
+    <TestClientVersion>10.8.6</TestClientVersion>
+    <Notes></Notes>
+    <JSON>{"compiler-configuration":"--build=x86_64-redhat-linux --disable-libssp --disable-libunwind-exceptions --enable-__cxa_atexit --enable-bootstrap --enable-cet --enable-checking=release --enable-gnu-indirect-function --enable-gnu-unique-object --enable-initfini-array --enable-languages=c,c++,fortran,objc,obj-c++,ada,go,d,m2,cobol,algol68,lto --enable-libstdcxx-backtrace --enable-link-serialization=1 --enable-multilib --enable-offload-defaulted --enable-offload-targets=nvptx-none,amdgcn-amdhsa --enable-plugin --enable-shared --enable-threads=posix --mandir=\/usr\/share\/man --with-arch_32=i686 --with-build-config=bootstrap-lto --with-gcc-major-version-only --with-libstdcxx-zoneinfo=\/usr\/share\/zoneinfo --with-linker-hash-style=gnu --with-tls=gnu2 --with-tune=generic --without-cuda-driver","cpu-microcode":"0x100","kernel-extra-details":"Transparent Huge Pages: madvise","security":"SELinux + gather_data_sampling: Not affected + ghostwrite: Not affected + indirect_target_selection: Mitigation of Aligned branch\/return thunks + itlb_multihit: Not affected + l1tf: Not affected + mds: Not affected + meltdown: Not affected + mmio_stale_data: Mitigation of Clear buffers; SMT Host state unknown + old_microcode: Not affected + reg_file_data_sampling: Not affected + retbleed: Mitigation of Enhanced IBRS + spec_rstack_overflow: Not affected + spec_store_bypass: Mitigation of SSB disabled via prctl + spectre_v1: Mitigation of usercopy\/swapgs barriers and __user pointer sanitization + spectre_v2: Mitigation of Enhanced \/ Automatic IBRS; IBPB: conditional; PBRSB-eIBRS: SW sequence; BHI: SW loop KVM: SW loop + srbds: Unknown: Dependent on hypervisor status + tsa: Not affected + tsx_async_abort: Not affected + vmscape: Not affected"}</JSON>
+  </System>
+  <Result>
+    <Identifier>pts/build-linux-kernel-1.18.0</Identifier>
+    <Title>Timed Linux Kernel Compilation</Title>
+    <AppVersion>7.0</AppVersion>
+    <Arguments>defconfig</Arguments>
+    <Description>Build: defconfig</Description>
+    <Scale>Seconds</Scale>
+    <Proportion>LIB</Proportion>
+    <DisplayFormat>BAR_GRAPH</DisplayFormat>
+    <Data>
+      <Entry>
+        <Identifier>fedora45</Identifier>
+        <Value>247.901</Value>
+        <RawString>248.764:247.246:247.694</RawString>
+        <JSON>{"test-run-times":"248.76:247.25:247.69"}</JSON>
+      </Entry>
+    </Data>
+  </Result>
+</PhoronixTestSuite>

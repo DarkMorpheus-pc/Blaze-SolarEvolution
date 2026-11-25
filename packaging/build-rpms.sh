@@ -38,7 +38,8 @@ for p in json.load(open(os.path.join(here, 'packages.json'))):
             sys.exit(f"{p['name']}: missing in overlay: {rel}")
     tar = os.path.join(dest, f"{p['name']}-{p['ver']}.tar")
     subprocess.check_call(['tar', '-C', overlay, '--owner=0', '--group=0', '--numeric-owner',
-                           '--exclude=__pycache__', '-cf', tar] + paths)
+                           '--exclude=__pycache__', '--exclude=*.pyc', '--exclude=.env*',
+                           '--exclude=.git*', '--exclude=*.map', '--exclude=*.log', '-cf', tar] + paths)
     print('  ', os.path.basename(tar))
 PY
 cp "$HERE/blaze.repo" "$HERE/keys/RPM-GPG-KEY-blaze" "$OUT/SOURCES/"

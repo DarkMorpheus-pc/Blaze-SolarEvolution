@@ -1,10 +1,13 @@
 NAME="Blaze SolarEvolution"
-VERSION="5.05"
+VERSION="5.05.1"
 ID=blazeos
 ID_LIKE=fedora
-VERSION_ID=5.05
+BLAZE_BASE_ID=fedora
+BLAZE_BASE_VERSION_ID=45
+VERSION_ID=5.05.1
 VERSION_CODENAME="SolarEvolution"
-PRETTY_NAME="Blaze SolarEvolution 5.05"
+PRETTY_NAME="Blaze SolarEvolution 5.05.1"
+CPE_NAME="cpe:/o:blazeos:solarevolution:5.05.1"
 ANSI_COLOR="0;31"
 LOGO=blazeos-logo
 HOME_URL="https://blazeos.com.tr/"

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<cpe-list xmlns="http://cpe.mitre.org/dictionary/2.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <cpe-item name="cpe:/o:blazeos:solarevolution:5.05.1">
+    <title xml:lang="en-us">Blaze SolarEvolution 5.05.1 (Fedora 45 Base)</title>
+    <notes xml:lang="en-us">
+      Maps Blaze SolarEvolution 5.05.x with ID=blazeos, BLAZE_BASE_ID=fedora,
+      BLAZE_BASE_VERSION_ID=45 onto Fedora 45 SCAP applicability checks while
+      keeping upstream scap-security-guide untouched.
+    </notes>
+    <check system="http://oval.mitre.org/XMLSchema/oval-definitions-5"
+           href="ssg-fedora-cpe-oval.xml">oval:blazeos-installed_OS_is_solarevolution_fedora45:def:1</check>
+  </cpe-item>
+  <cpe-item name="cpe:/o:blazeos:solarevolution:5.05">
+    <title xml:lang="en-us">Blaze SolarEvolution 5.05 (Fedora 45 Base)</title>
+    <check system="http://oval.mitre.org/XMLSchema/oval-definitions-5"
+           href="ssg-fedora-cpe-oval.xml">oval:blazeos-installed_OS_is_solarevolution_fedora45:def:1</check>
+  </cpe-item>
+</cpe-list>

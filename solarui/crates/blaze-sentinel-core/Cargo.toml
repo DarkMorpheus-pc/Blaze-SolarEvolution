@@ -1,0 +1,15 @@
+[package]
+name = "blaze-sentinel-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Shared core security posture, canary integrity, and Akrep domain models for BlazeOS"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

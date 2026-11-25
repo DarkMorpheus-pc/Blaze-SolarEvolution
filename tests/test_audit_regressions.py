@@ -491,7 +491,9 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
         self.assertNotIn('After=NetworkManager.service', postinstall_svc)
 
         postinstall_sh = (OVERLAY / 'usr/bin/blazeos-postinstall').read_text()
-        self.assertIn('blaze-setup::20726::::::', postinstall_sh)
+        self.assertIn('blaze-setup:!*:20726::::::', postinstall_sh)
+        self.assertIn('blaze-setup:!*:'.strip(), postinstall_sh)
+        self.assertNotIn('blaze-setup::', postinstall_sh)
         self.assertIn('/var/lib/sddm/state.conf', postinstall_sh)
 
         inst_py = (OVERLAY / 'usr/lib64/python3.15/site-packages/pyanaconda/modules/boss/installation.py').read_text()
@@ -788,7 +790,7 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
 
         self.assertEqual((OVERLAY / 'etc/os-release').read_text(), (id_dir / 'os-release').read_text())
         self.assertEqual((OVERLAY / 'usr/lib/os-release').read_text(), (id_dir / 'os-release').read_text())
-        self.assertEqual((OVERLAY / 'usr/lib/fedora-release').read_text().strip(), 'Blaze SolarEvolution release 5.05 (SolarEvolution)')
+        self.assertEqual((OVERLAY / 'usr/lib/fedora-release').read_text().strip(), 'Blaze SolarEvolution release 5.05.1 (SolarEvolution)')
         self.assertIn('GRUB_DISTRIBUTOR="Blaze SolarEvolution"', (OVERLAY / 'etc/default/grub').read_text())
         self.assertEqual((OVERLAY / 'etc/dnf/vars/releasever').read_text().strip(), '45')
         self.assertIn('excludepkgs=fedora-release*', (OVERLAY / 'etc/dnf/libdnf5.conf.d/10-blaze-identity.conf').read_text())
@@ -840,16 +842,19 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
 
             res = subprocess.run([str(sync_bin), f'--sysroot={root}'], capture_output=True, text=True, timeout=15)
             self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
-            self.assertIn('PRETTY_NAME="Blaze SolarEvolution 5.05"', (root / 'usr/lib/os-release').read_text())
-            self.assertEqual((root / 'usr/lib/fedora-release').read_text().strip(), 'Blaze SolarEvolution release 5.05 (SolarEvolution)')
+            self.assertIn('PRETTY_NAME="Blaze SolarEvolution 5.05.1"', (root / 'usr/lib/os-release').read_text())
+            self.assertEqual((root / 'usr/lib/fedora-release').read_text().strip(), 'Blaze SolarEvolution release 5.05.1 (SolarEvolution)')
+            self.assertIn('BLAZE_BASE_ID=fedora', (root / 'usr/lib/os-release').read_text())
+            self.assertIn('BLAZE_BASE_VERSION_ID=45', (root / 'usr/lib/os-release').read_text())
+            self.assertNotIn('PLATFORM_ID=', (root / 'usr/lib/os-release').read_text())
             self.assertIn('GRUB_DISTRIBUTOR="Blaze SolarEvolution"', (root / 'etc/default/grub').read_text())
             self.assertEqual((root / 'etc/dnf/vars/releasever').read_text().strip(), '45')
 
             bls1 = (root / 'boot/loader/entries/abc-7.3.4-300.fc45.x86_64.conf').read_text()
-            self.assertIn('title Blaze SolarEvolution (7.3.4-300.fc45.x86_64) 5.05', bls1)
+            self.assertIn('title Blaze SolarEvolution (7.3.4-300.fc45.x86_64) 5.05.1', bls1)
             self.assertIn('grub_class blazeos', bls1)
             bls2 = (root / 'boot/loader/entries/abc-7.2.11-300.fc45.x86_64~debug.conf').read_text()
-            self.assertIn('title Blaze SolarEvolution (7.2.11-300.fc45.x86_64) 5.05 with debugging', bls2)
+            self.assertIn('title Blaze SolarEvolution (7.2.11-300.fc45.x86_64) 5.05.1 with debugging', bls2)
             snap_bls = (root / 'boot/loader/entries/abc-snapshot.conf').read_text()
             self.assertIn('title Blaze snapshot 20261123 (kernel 7.2.11-300.fc45.x86_64)', snap_bls)
 
@@ -1079,6 +1084,370 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
             kdl = niri_rel.read_text(encoding='utf-8')
             self.assertIn('org\\.blazeos\\.gamezone\\.browser|blaze-gamezone-browser', kdl)
             self.assertIn('open-focused true', kdl)
+
+    def test_gate1_transactional_grub_efi_repair(self):
+        from importlib.machinery import SourceFileLoader
+        mod = SourceFileLoader('berp_gui_g1', str(OVERLAY / 'usr/bin/berp-recovery-gui')).load_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            troot = Path(tmp)
+            esp = troot / 'boot/efi'
+            efi_fedora = esp / 'EFI/fedora'
+            efi_boot = esp / 'EFI/BOOT'
+            bls = troot / 'boot/loader/entries'
+            grub2 = troot / 'boot/grub2'
+            for d in (efi_fedora, efi_boot, bls, grub2, troot / 'etc'):
+                d.mkdir(parents=True, exist_ok=True)
+
+            (efi_fedora / 'shimx64.efi').write_bytes(b'SHIM_ORIG')
+            (efi_fedora / 'grubx64.efi').write_bytes(b'GRUB_ORIG')
+            (efi_boot / 'BOOTX64.EFI').write_bytes(b'BOOTX64_ORIG')
+            (troot / 'boot/vmlinuz-7.2.11-300.fc45.x86_64').write_bytes(b'VMLINUZ')
+            (troot / 'boot/initramfs-7.2.11-300.fc45.x86_64.img').write_bytes(b'INITRD')
+            (troot / 'etc/machine-id').write_text('abc123machid\n', encoding='utf-8')
+            (efi_fedora / 'grub.cfg').write_text('ORIG_STUB\n', encoding='utf-8')
+            (grub2 / 'grub.cfg').write_text('ORIG_GRUB_CFG\n', encoding='utf-8')
+
+            # 1. Verify samefile detection skips identical source/dest cleanly without SameFileError
+            tx_same = mod.FileRepairTransaction(backup_roots=[str(esp)])
+            self.assertTrue(mod.is_same_target_file(str(efi_boot / 'BOOTX64.EFI'), str(efi_boot / 'BOOTX64.EFI')))
+            self.assertEqual(
+                tx_same.copy_file(str(efi_boot / 'BOOTX64.EFI'), str(efi_boot / 'BOOTX64.EFI')),
+                'skipped_samefile',
+            )
+            tx_same.cleanup()
+
+            # 2. Verify multi-file rollback restores ALL EFI + BLS + GRUB files if late stage fails
+            tx_rb = mod.FileRepairTransaction(backup_roots=[str(esp), str(troot / 'boot')])
+            tx_rb.write_text(str(efi_boot / 'BOOTX64.EFI'), 'MODIFIED_EFI')
+            tx_rb.write_text(str(bls / 'abc123machid-7.2.11.conf'), 'NEW_BLS_ENTRY\n')
+            tx_rb.write_text(str(grub2 / 'grub.cfg'), 'NEW_GRUB_CFG\n')
+            self.assertEqual((efi_boot / 'BOOTX64.EFI').read_text(encoding='utf-8'), 'MODIFIED_EFI')
+            self.assertTrue((bls / 'abc123machid-7.2.11.conf').exists())
+            errs = tx_rb.rollback()
+            self.assertEqual(errs, [])
+            self.assertEqual((efi_boot / 'BOOTX64.EFI').read_bytes(), b'BOOTX64_ORIG')
+            self.assertFalse((bls / 'abc123machid-7.2.11.conf').exists())
+            self.assertEqual((grub2 / 'grub.cfg').read_text(encoding='utf-8'), 'ORIG_GRUB_CFG\n')
+
+            # 3. Verify _repair_efi_binaries when source == destination path
+            tx_efi = mod.FileRepairTransaction(backup_roots=[str(esp)])
+            try:
+                log_efi = mod._repair_efi_binaries(tx_efi, str(esp))
+                self.assertIn('skipped_samefile', log_efi)
+                self.assertEqual((efi_boot / 'BOOTX64.EFI').read_bytes(), b'BOOTX64_ORIG')
+            finally:
+                tx_efi.cleanup()
+
+    def test_gate2_blaze_setup_locked_and_pam_autologin(self):
+        checked_paths = [
+            OVERLAY / 'usr/bin/blazeos-postinstall',
+            OVERLAY / 'usr/lib64/python3.15/site-packages/pyanaconda/modules/boss/installation.py',
+            OVERLAY / 'usr/bin/berp-recovery-gui',
+            ROOT / 'build_f45_final.sh',
+            ROOT / 'build_f45_offline.sh',
+        ]
+        for p in checked_paths:
+            txt = p.read_text(encoding='utf-8')
+            self.assertNotIn('blaze-setup::', txt, f'Found unlocked empty blaze-setup shadow entry in {p}')
+            self.assertIn('blaze-setup:!*:20726::::::', txt, f'Missing locked blaze-setup shadow entry in {p}')
+
+        build_final = (ROOT / 'build_f45_final.sh').read_text(encoding='utf-8')
+        self.assertIn('($2 == "" || $2 == "::")', build_final)
+
+        pam_autologin = (OVERLAY / 'etc/pam.d/sddm-autologin').read_text(encoding='utf-8')
+        self.assertIn('pam_permit.so', pam_autologin)
+        self.assertIn('pam_succeed_if.so user in blaze-setup:liveuser', pam_autologin)
+        self.assertIn('pam_selinux.so close', pam_autologin)
+        self.assertIn('pam_selinux.so open', pam_autologin)
+
+        setup_backend = (OVERLAY / 'usr/bin/blaze-setup').read_text(encoding='utf-8')
+        self.assertIn('if not password:', setup_backend)
+        self.assertIn('Boş parola kullanılamaz', setup_backend)
+        self.assertIn('"--no-block"', setup_backend)
+        self.assertNotIn('"--on-active=2s"', setup_backend)
+
+    def test_gate3_ownership_manifest_and_scap_compat(self):
+        # 1. Verify 100% overlay ownership manifest coverage
+        chk = subprocess.run(
+            ['python3', str(ROOT / 'packaging/check_ownership.py')],
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(chk.returncode, 0, chk.stdout + chk.stderr)
+
+        # 2. Verify canonical identity contract (BLAZE_BASE_ID/VERSION_ID, no PLATFORM_ID)
+        for rel in ('etc/os-release', 'usr/lib/os-release', 'usr/share/blazeos/identity/os-release'):
+            osr = (OVERLAY / rel).read_text(encoding='utf-8')
+            self.assertIn('ID=blazeos', osr)
+            self.assertIn('ID_LIKE=fedora', osr)
+            self.assertIn('BLAZE_BASE_ID=fedora', osr)
+            self.assertIn('BLAZE_BASE_VERSION_ID=45', osr)
+            self.assertIn('PRETTY_NAME="Blaze SolarEvolution 5.05.1"', osr)
+            self.assertNotIn('PLATFORM_ID=', osr)
+
+        # 3. Verify CI .grype.yaml exists cleanly scoped
+        grype_cfg = (ROOT / '.grype.yaml').read_text(encoding='utf-8')
+        self.assertIn('distro: "fedora:45"', grype_cfg)
+
+        # 4. Verify blazeos-scap-adapt cleanly injects BlazeOS CPE/OVAL without touching rule platforms
+        from importlib.machinery import SourceFileLoader
+        import importlib.util, xml.etree.ElementTree as ET
+        loader = SourceFileLoader('scap_adapt', str(OVERLAY / 'usr/bin/blazeos-scap-adapt'))
+        spec = importlib.util.spec_from_loader('scap_adapt', loader)
+        mod = importlib.util.module_from_spec(spec)
+        loader.exec_module(mod)
+
+        sample_ds = '''<?xml version="1.0" encoding="UTF-8"?>
+<ds:data-stream-collection xmlns:ds="http://scap.nist.gov/schema/scap/source/1.2"
+  xmlns:cpe="http://cpe.mitre.org/dictionary/2.0"
+  xmlns:xccdf="http://checklists.nist.gov/xccdf/1.2"
+  xmlns:oval="http://oval.mitre.org/XMLSchema/oval-definitions-5"
+  xmlns:ind="http://oval.mitre.org/XMLSchema/oval-definitions-5#independent"
+  xmlns:lin="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux">
+  <ds:component id="scap_org.open-scap_comp_ssg-fedora-cpe-dictionary.xml" timestamp="2026-01-01T00:00:00">
+    <cpe:cpe-list>
+      <cpe:cpe-item name="cpe:/o:fedoraproject:fedora:45"><cpe:title xml:lang="en-us">Fedora 45</cpe:title></cpe:cpe-item>
+    </cpe:cpe-list>
+  </ds:component>
+  <ds:component id="scap_org.open-scap_comp_ssg-fedora-xccdf.xml" timestamp="2026-01-01T00:00:00">
+    <xccdf:Benchmark id="xccdf_org.ssgproject.content_benchmark_FEDORA">
+      <xccdf:platform idref="cpe:/o:fedoraproject:fedora:45"/>
+      <xccdf:Rule id="xccdf_org.ssgproject.content_rule_example"><xccdf:platform idref="#grub2"/></xccdf:Rule>
+    </xccdf:Benchmark>
+  </ds:component>
+  <ds:component id="scap_org.open-scap_comp_ssg-fedora-cpe-oval.xml" timestamp="2026-01-01T00:00:00">
+    <oval:oval_definitions>
+      <oval:definitions>
+        <oval:definition id="oval:ssg-installed_OS_is_part_of_Unix_family:def:1" version="1" class="inventory"><oval:metadata><oval:title>Unix</oval:title></oval:metadata><oval:criteria/></oval:definition>
+      </oval:definitions>
+      <oval:tests>
+        <lin:rpminfo_test id="oval:ssg-test_fedora_release_rpm:tst:1" version="1" check="all" comment="fedora-release"><lin:object object_ref="oval:ssg-object_fedora_release_rpm:obj:1"/></lin:rpminfo_test>
+      </oval:tests>
+      <oval:objects>
+        <lin:rpminfo_object id="oval:ssg-object_fedora_release_rpm:obj:1" version="1"><lin:name>fedora-release</lin:name></lin:rpminfo_object>
+      </oval:objects>
+    </oval:oval_definitions>
+  </ds:component>
+</ds:data-stream-collection>'''
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / 'ssg-fedora-ds.xml'
+            dst = Path(tmp) / 'ssg-blazeos-fedora45-ds.xml'
+            src.write_text(sample_ds, encoding='utf-8')
+            mod.adapt_fedora_datastream(src, dst)
+            out_txt = dst.read_text(encoding='utf-8')
+            self.assertIn('cpe:/o:blazeos:solarevolution:5.05.1', out_txt)
+            self.assertIn('cpe:/o:fedoraproject:fedora:45', out_txt)
+            self.assertIn('oval:blazeos-installed_OS_is_solarevolution_fedora45:def:1', out_txt)
+            self.assertIn('^BLAZE_BASE_ID=fedora$', out_txt)
+            self.assertIn('^BLAZE_BASE_VERSION_ID=45$', out_txt)
+            self.assertIn('#grub2', out_txt)
+
+
+    def test_gate4_audit_log_gshadow_sync_and_initrd_blockdev(self):
+        import importlib.machinery
+        import importlib.util
+        import json as _json
+        import stat as _stat
+        import tempfile
+        from unittest import mock
+
+        gui_path = str(OVERLAY / 'usr/bin/berp-recovery-gui')
+        loader = importlib.machinery.SourceFileLoader('berp_recovery_gui_gate4', gui_path)
+        spec = importlib.util.spec_from_loader('berp_recovery_gui_gate4', loader)
+        mod = importlib.util.module_from_spec(spec)
+        loader.exec_module(mod)
+
+        # 1. Persistent structured audit log with secret redaction + dual-target write + 0600 perms
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            rt_log = t / 'runtime/var/log/bere-recovery.log'
+            target_root = t / 'target_root'
+            (target_root / 'var/log').mkdir(parents=True)
+            with mock.patch.dict(
+                os.environ,
+                {
+                    'BLAZE_BERE_AUDIT_LOG': str(rt_log),
+                    'BLAZE_BERE_TARGET_ROOT': str(target_root),
+                },
+                clear=False,
+            ):
+                mod.append_recovery_audit_event(
+                    action='auth_unlock',
+                    outcome='denied',
+                    target='session',
+                    details={'password': 'UltraSecretPassword!', 'reason': 'bad_pw'},
+                    actor='unauthenticated',
+                    client_ip='127.0.0.1',
+                )
+                mod.append_recovery_audit_event(
+                    action='boot_repair',
+                    outcome='ok',
+                    target='grub',
+                    details={'token': 'SecretTok99', 'command': 'grub2-mkconfig --password=LeakMe'},
+                    actor='adminuser',
+                    client_ip='127.0.0.1',
+                )
+                events, paths = mod.read_recovery_audit_events(limit=10)
+                self.assertEqual(len(events), 2)
+                self.assertEqual([e['action'] for e in events], ['auth_unlock', 'boot_repair'])
+                self.assertEqual(events[0]['outcome'], 'denied')
+                self.assertEqual(events[1]['outcome'], 'ok')
+
+                # Verify locked API call records an audit event via handle_api
+                handler = mod.RecoveryAPIHandler.__new__(mod.RecoveryAPIHandler)
+                handler.client_address = ('127.0.0.1', 54321)
+                with (
+                    mock.patch.object(mod, 'get_target_admin_hashes', return_value=([], True, ['adminuser'])),
+                    mock.patch.dict(mod._AUTH_STATE, {'unlocked': False, 'unlocked_user': ''}),
+                ):
+                    res = handler.handle_api('boot_repair', {'target': 'grub', 'password': 'NeverLogThisPassword'})
+                    self.assertEqual(res['status'], 'locked')
+
+                with (
+                    mock.patch.object(mod, 'get_target_admin_hashes', return_value=([], False, ['adminuser'])),
+                    mock.patch.object(mod, 'resolve_target_context', return_value=(str(target_root), True, '/dev/vda4', '@', 'btrfs', False)),
+                ):
+                    res_list = handler.handle_api('audit_log', {'limit': 10})
+                    self.assertEqual(res_list['status'], 'ok')
+                    self.assertEqual(res_list['count'], 3)
+                    self.assertEqual(res_list['events'][-1]['action'], 'boot_repair')
+                    self.assertEqual(res_list['events'][-1]['outcome'], 'locked')
+
+            mirror_log = target_root / 'var/log/bere-recovery.log'
+            for log_p in (rt_log, mirror_log):
+                self.assertTrue(log_p.is_file(), f'Missing audit log: {log_p}')
+                self.assertEqual(_stat.S_IMODE(log_p.stat().st_mode), 0o600)
+                raw = log_p.read_text(encoding='utf-8')
+                self.assertNotIn('UltraSecretPassword!', raw)
+                self.assertNotIn('SecretTok99', raw)
+                self.assertNotIn('LeakMe', raw)
+                self.assertNotIn('NeverLogThisPassword', raw)
+                self.assertIn('[REDACTED]', raw)
+                parsed = [_json.loads(ln) for ln in raw.splitlines() if ln.strip()]
+                self.assertEqual(len(parsed), 3)
+
+        # 2. /etc/group and /etc/gshadow synchronized helper (grpck -r parity)
+        inst_py = (
+            OVERLAY / 'usr/lib64/python3.15/site-packages/pyanaconda/modules/boss/installation.py'
+        ).read_text(encoding='utf-8')
+        self.assertIn('_sync_gshadow_with_groups', inst_py)
+        post_sh = (OVERLAY / 'usr/bin/blazeos-postinstall').read_text(encoding='utf-8')
+        self.assertIn('AUTH-9216', post_sh)
+        self.assertIn('/etc/gshadow', post_sh)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            etc = t / 'etc'
+            etc.mkdir()
+            (etc / 'group').write_text(
+                'root:x:0:\nwheel:x:10:alice\nvideo:x:39:\naudio:x:63:\ninput:x:104:\nrender:x:105:\nextragrp:x:999:alice\n',
+                encoding='utf-8',
+            )
+            gshadow_p = etc / 'gshadow'
+            gshadow_p.write_text(
+                'root::: \nwheel:!::\nvideo:!::\naudio:!::\ninput:!::\n'.replace(' ', ''),
+                encoding='utf-8',
+            )
+            os.chmod(gshadow_p, 0o400)
+
+            # Emulate installation.py _add_user_to_groups logic directly without importing pyanaconda
+            ns = {}
+            class DummyLog:
+                def warning(self, *args, **kwargs):
+                    pass
+            def join_paths(a, b):
+                return str(Path(a) / b)
+            # Parse _sync_gshadow_with_groups and _add_user_to_groups cleanly via ast
+            import ast
+            tree = ast.parse(inst_py)
+            fn_src = []
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name in ('_sync_gshadow_with_groups', '_add_user_to_groups'):
+                    fn_src.append(ast.get_source_segment(inst_py, node).lstrip())
+            # Dedent class methods to module functions
+            import textwrap
+            src_block = '\n\n'.join(textwrap.dedent('    ' + s) for s in fn_src)
+            helper_globals = {'os': os, 'join_paths': join_paths, 'log': DummyLog()}
+            exec(src_block, helper_globals)
+
+            class FakeTask:
+                _sysroot = str(t)
+            FakeTask._sync_gshadow_with_groups = helper_globals['_sync_gshadow_with_groups']
+            FakeTask._add_user_to_groups = helper_globals['_add_user_to_groups']
+            FakeTask()._add_user_to_groups('bob', ['wheel', 'video', 'audio', 'input', 'render'])
+
+            self.assertEqual(_stat.S_IMODE(gshadow_p.stat().st_mode), 0o400)
+            os.chmod(gshadow_p, 0o600)
+            grp_map = {
+                ln.split(':')[0]: ln.strip().split(':')[3]
+                for ln in (etc / 'group').read_text(encoding='utf-8').splitlines() if ln
+            }
+            gsh_map = {
+                ln.split(':')[0]: ln.strip().split(':')[3]
+                for ln in gshadow_p.read_text(encoding='utf-8').splitlines() if ln
+            }
+            self.assertEqual(grp_map, gsh_map)
+            for req_g in ('wheel', 'video', 'audio', 'input', 'render'):
+                self.assertIn('bob', grp_map[req_g].split(','))
+
+        # 3. Initrd blockdev callout & RO=1 udev rule
+        mod_setup = (
+            OVERLAY / 'usr/lib/dracut/modules.d/99blaze-bere/module-setup.sh'
+        ).read_text(encoding='utf-8')
+        self.assertIn('blockdev', mod_setup)
+        self.assertIn('/sbin/blockdev', mod_setup)
+
+        patch_sh = (ROOT / 'scripts/patch_f45_initrd.sh').read_text(encoding='utf-8')
+        self.assertIn('blockdev', patch_sh)
+        self.assertIn('sbin/blockdev', patch_sh)
+
+        vault_rule = (OVERLAY / 'etc/udev/rules.d/99-blaze-recovery-vault.rules').read_text(encoding='utf-8')
+        self.assertIn('ENV{ID_FS_LABEL}=="BLAZE_REC"', vault_rule)
+        self.assertIn('/sbin/blockdev --setro $devnode', vault_rule)
+
+
+    def test_gate45_akrep_readonly_contract_and_specs(self):
+        cargo_toml = (ROOT / 'solarui/Cargo.toml').read_text(encoding='utf-8')
+        for member in ('blaze-sentinel-core', 'blaze-akrep-daemon', 'blaze-akrep-ui'):
+            self.assertIn(member, cargo_toml)
+
+        daemon_cargo = (ROOT / 'solarui/crates/blaze-akrep-daemon/Cargo.toml').read_text(encoding='utf-8')
+        for forbidden_gui in ('gtk4', 'gdk4', 'libadwaita'):
+            self.assertNotIn(forbidden_gui, daemon_cargo)
+
+        dbus_src = (ROOT / 'solarui/crates/blaze-akrep-daemon/src/dbus.rs').read_text(encoding='utf-8')
+        for ro_fn in ('fn get_version', 'fn get_capabilities', 'fn get_snapshot', 'fn get_findings', 'fn get_section_detail'):
+            self.assertIn(ro_fn, dbus_src)
+        for forbidden_mutator in ('fn set_', 'fn toggle_', 'fn apply_', 'fn execute', 'fn run_shell', 'fn write_'):
+            self.assertNotIn(forbidden_mutator, dbus_src)
+
+        ui_src = (ROOT / 'solarui/crates/blaze-akrep-ui/src/main.rs').read_text(encoding='utf-8')
+        self.assertIn('spawn_local', ui_src)
+        ui_dbus = (ROOT / 'solarui/crates/blaze-akrep-ui/src/dbus_client.rs').read_text(encoding='utf-8')
+        self.assertIn('async_channel', ui_dbus)
+
+        self.assertTrue((OVERLAY / 'usr/lib/sysusers.d/blaze-akrep.conf').is_file())
+        svc = (OVERLAY / 'usr/lib/systemd/system/akrepd.service').read_text(encoding='utf-8')
+        self.assertIn('User=akrep', svc)
+        self.assertIn('BusName=tr.com.blazeos.Akrep1', svc)
+        self.assertTrue((OVERLAY / 'usr/lib/systemd/system-preset/90-blaze-akrep.preset').is_file())
+
+        dbus_pol = (OVERLAY / 'usr/share/dbus-1/system.d/tr.com.blazeos.Akrep1.conf').read_text(encoding='utf-8')
+        self.assertIn('<deny own="tr.com.blazeos.Akrep1"/>', dbus_pol)
+        self.assertIn('<allow own="tr.com.blazeos.Akrep1"/>', dbus_pol)
+
+        polkit_pol = (OVERLAY / 'usr/share/polkit-1/actions/tr.com.blazeos.Akrep1.policy').read_text(encoding='utf-8')
+        self.assertIn('auth_admin', polkit_pol)
+
+        desktop = (OVERLAY / 'usr/share/applications/tr.com.blazeos.Akrep.desktop').read_text(encoding='utf-8')
+        self.assertIn('Exec=akrep-ui', desktop)
+
+        omnibar = (ROOT / 'solarui/crates/solar-shell/src/omnibar.rs').read_text(encoding='utf-8')
+        self.assertIn('"akrep-ui"', omnibar)
+
+        spec = (ROOT / 'packaging/specs/blaze-akrep.spec').read_text(encoding='utf-8')
+        for sub in ('%package daemon', '%package ui', 'Requires:       gtk4', '%systemd_post akrepd.service'):
+            self.assertIn(sub, spec)
 
 
 if __name__ == '__main__':

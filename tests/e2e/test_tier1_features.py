@@ -255,8 +255,11 @@ class Tier1FeatureCoverageTests(unittest.TestCase):
             )
 
         sentinel_rs = (crates_dir / "blaze-recovery/src/sentinel.rs").read_text(encoding="utf-8")
-        self.assertIn('SENTINEL_VERSION: &str = "0.3.1"', sentinel_rs)
+        sentinel_core_rs = (crates_dir / "blaze-sentinel-core/src/engine.rs").read_text(encoding="utf-8")
+        self.assertIn("SENTINEL_VERSION", sentinel_rs)
+        self.assertIn('SENTINEL_VERSION: &str = "0.3.1"', sentinel_core_rs)
         self.assertIn("is_canary_intact", sentinel_rs)
+        self.assertIn("pub fn is_canary_intact", sentinel_core_rs)
 
         overlay_tools = discover_overlay_usr_bin_tools()
         self.assertTrue(
@@ -790,11 +793,11 @@ class Tier1FeatureCoverageTests(unittest.TestCase):
         self.assertIn("blaze-release", installed_set, "blaze-release RPM not installed in squashfs")
 
         for rel, expected in (
-            ("etc/os-release", 'PRETTY_NAME="Blaze SolarEvolution 5.05"'),
-            ("usr/lib/os-release", 'PRETTY_NAME="Blaze SolarEvolution 5.05"'),
-            ("etc/redhat-release", "Blaze SolarEvolution release 5.05 (SolarEvolution)"),
-            ("etc/system-release", "Blaze SolarEvolution release 5.05 (SolarEvolution)"),
-            ("etc/fedora-release", "Blaze SolarEvolution release 5.05 (SolarEvolution)"),
+            ("etc/os-release", 'PRETTY_NAME="Blaze SolarEvolution 5.05.1"'),
+            ("usr/lib/os-release", 'PRETTY_NAME="Blaze SolarEvolution 5.05.1"'),
+            ("etc/redhat-release", "Blaze SolarEvolution release 5.05.1 (SolarEvolution)"),
+            ("etc/system-release", "Blaze SolarEvolution release 5.05.1 (SolarEvolution)"),
+            ("etc/fedora-release", "Blaze SolarEvolution release 5.05.1 (SolarEvolution)"),
             (".buildstamp", "Product=Blaze SolarEvolution"),
             ("etc/default/grub", 'GRUB_DISTRIBUTOR="Blaze SolarEvolution"'),
             ("etc/dnf/vars/releasever", "45"),
@@ -834,10 +837,10 @@ class Tier1FeatureCoverageTests(unittest.TestCase):
         initrd_rel = (ext_id / "usr/lib/initrd-release").read_text(encoding="utf-8")
         self.assertIn("ID=blazeos", initrd_rel)
         self.assertIn("Fedora", initrd_rel)
-        self.assertIn('PRETTY_NAME="Blaze SolarEvolution 5.05', initrd_rel)
+        self.assertIn('PRETTY_NAME="Blaze SolarEvolution 5.05.1', initrd_rel)
         self.assertEqual(
             (ext_id / "usr/lib/fedora-release").read_text(encoding="utf-8").strip(),
-            "Blaze SolarEvolution release 5.05 (SolarEvolution)",
+            "Blaze SolarEvolution release 5.05.1 (SolarEvolution)",
         )
         self.assertIn("Product=Blaze SolarEvolution", (ext_id / ".buildstamp").read_text(encoding="utf-8"))
 

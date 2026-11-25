@@ -1,0 +1,91 @@
+=== systemd-analyze time ===
+Startup finished in 403ms (kernel) + 1.612s (initrd) + 3.142s (userspace) = 5.158s 
+multi-user.target reached after 3.141s in userspace.
+
+=== systemd-analyze critical-chain ===
+The time when unit became active or started is printed after the "@" character.
+The time the unit took to start is printed after the "+" character.
+
+multi-user.target @3.141s
+└─getty.target @3.141s
+  └─kmsconvt@tty1.service @3.141s
+    └─plymouth-quit-wait.service @3.108s +30ms
+      └─systemd-user-sessions.service @3.089s +12ms
+        └─remote-fs.target @3.087s
+          └─remote-fs-pre.target @3.086s
+            └─nfs-client.target @3.086s
+              └─gssproxy.service @2.307s +25ms
+                └─network.target @2.298s
+                  └─NetworkManager.service @2.180s +117ms
+                    └─network-pre.target @2.179s
+                      └─firewalld.service @2.179s
+                        └─basic.target @2.162s
+                          └─dbus-broker.service @2.144s +18ms
+                            └─dbus.socket @2.132s +316us
+                              └─sysinit.target @2.130s
+                                └─systemd-update-utmp.service @2.123s +7ms
+                                  └─auditd.service @2.105s +15ms
+                                    └─systemd-tmpfiles-setup.service @2.070s +33ms
+                                      └─local-fs.target @2.060s
+                                        └─run-stratisd-ns_mounts.mount @3.111s
+                                          └─swap.target @1.327s
+                                            └─dev-zram0.swap @1.262s +63ms
+                                              └─systemd-zram-setup@zram0.service @1.237s +22ms
+                                                └─dev-zram0.device @1.236s
+
+=== systemd-analyze blame (top 50) ===
+2.214s sys-devices-pci0000:00-0000:00:04.0-virtio2-virtio\x2dports-vport2p1.device
+2.214s dev-virtio\x2dports-org.qemu.guest_agent.0.device
+2.214s dev-vport2p1.device
+2.169s dev-vda3.device
+2.169s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart-by\x2dpartuuid-fca5dba1\x2d4a03\x2d4aec\x2d9afa\x2d1367027f11ac.device
+2.169s dev-disk-by\x2dlabel-fedora_fedora45\x2dref\x2deval.device
+2.169s dev-disk-by\x2ddiskseq-1\x2dpart3.device
+2.169s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart-by\x2dpartnum-3.device
+2.169s dev-disk-by\x2dpath-virtio\x2dpci\x2d0000:00:06.0\x2dpart3.device
+2.169s sys-devices-pci0000:00-0000:00:06.0-virtio4-block-vda-vda3.device
+2.169s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart-by\x2dlabel-fedora_fedora45\x2dref\x2deval.device
+2.169s dev-disk-by\x2dpartuuid-fca5dba1\x2d4a03\x2d4aec\x2d9afa\x2d1367027f11ac.device
+2.169s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart-by\x2duuid-a5efd6bf\x2df18b\x2d4f2d\x2d8b49\x2d5f687318b3c3.device
+2.169s dev-disk-by\x2duuid-a5efd6bf\x2df18b\x2d4f2d\x2d8b49\x2d5f687318b3c3.device
+2.169s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart3.device
+2.162s sys-devices-pci0000:00-0000:00:01.1-ata2-host1-target1:0:0-1:0:0:0-block-sr0.device
+2.162s dev-sr0.device
+2.162s dev-disk-by\x2dpath-pci\x2d0000:00:01.1\x2data\x2d2.device
+2.162s dev-disk-by\x2dpath-pci\x2d0000:00:01.1\x2data\x2d2.0.device
+2.162s dev-disk-by\x2ddiskseq-4.device
+2.162s dev-disk-by\x2did-ata\x2dQEMU_DVD\x2dROM_QM00003.device
+2.162s dev-cdrom.device
+2.155s dev-ttyS0.device
+2.155s sys-devices-pnp0-00:04-00:04:0-00:04:0.0-tty-ttyS0.device
+2.154s sys-devices-platform-serial8250-serial8250:0-serial8250:0.1-tty-ttyS1.device
+2.154s dev-ttyS1.device
+2.152s dev-vda2.device
+2.152s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart-by\x2duuid-10479e20\x2de64b\x2d455d\x2dae3d\x2d4f1a3b631e3f.device
+2.152s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart2.device
+2.152s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart-by\x2dpartnum-2.device
+2.152s sys-devices-pci0000:00-0000:00:06.0-virtio4-block-vda-vda2.device
+2.152s dev-disk-by\x2ddiskseq-1\x2dpart2.device
+2.152s dev-disk-by\x2dpath-virtio\x2dpci\x2d0000:00:06.0\x2dpart2.device
+2.152s dev-disk-by\x2duuid-10479e20\x2de64b\x2d455d\x2dae3d\x2d4f1a3b631e3f.device
+2.152s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart-by\x2dpartuuid-99a30d03\x2d1a4f\x2d472b\x2da533\x2d64476daa4b1e.device
+2.152s dev-disk-by\x2dpartuuid-99a30d03\x2d1a4f\x2d472b\x2da533\x2d64476daa4b1e.device
+2.151s dev-ttyS2.device
+2.151s sys-devices-platform-serial8250-serial8250:0-serial8250:0.2-tty-ttyS2.device
+2.148s dev-disk-by\x2dpath-pci\x2d0000:00:06.0.device
+2.148s dev-disk-by\x2dpath-virtio\x2dpci\x2d0000:00:06.0.device
+2.148s dev-vda.device
+2.148s dev-disk-by\x2ddiskseq-1.device
+2.148s sys-devices-pci0000:00-0000:00:06.0-virtio4-block-vda.device
+2.143s dev-disk-by\x2ddiskseq-2.device
+2.143s dev-disk-by\x2dpath-virtio\x2dpci\x2d0000:00:07.0.device
+2.143s sys-devices-pci0000:00-0000:00:07.0-virtio5-block-vdb.device
+2.143s dev-disk-by\x2dlabel-EVAL_STRESS.device
+2.143s dev-vdb.device
+2.143s dev-disk-by\x2dpath-pci\x2d0000:00:07.0.device
+2.143s dev-disk-by\x2duuid-cdb469e5\x2dc699\x2d42f3\x2d9023\x2dec5219a6da8f.device
+
+=== systemctl --failed ===
+  UNIT LOAD ACTIVE SUB DESCRIPTION
+
+0 loaded units listed.

@@ -24,6 +24,47 @@ systemctl disable livesys.service livesys-late.service 2>/dev/null || true
 find /home -maxdepth 3 -type f -name liveinst.desktop -delete 2>/dev/null || true
 
 # 1. Check if Apple-Style OOBE has completed
+# Ensure /etc/group and /etc/gshadow remain strictly synchronized (grpck -r / AUTH-9216 parity)
+sync_group_gshadow() {
+    if [ -f /etc/group ] && [ -f /etc/gshadow ] && command -v python3 >/dev/null 2>&1; then
+        python3 - <<'PYGRP' 2>/dev/null || true
+import os
+group_path = "/etc/group"
+gshadow_path = "/etc/gshadow"
+group_members = {}
+with open(group_path, "r", encoding="utf-8") as gf:
+    for line in gf:
+        parts = line.rstrip("\n").split(":")
+        if len(parts) == 4:
+            group_members[parts[0]] = [m for m in parts[3].split(",") if m]
+
+orig_mode = os.stat(gshadow_path).st_mode & 0o7777
+try:
+    os.chmod(gshadow_path, 0o600)
+    out = []
+    seen = set()
+    with open(gshadow_path, "r", encoding="utf-8") as gsf:
+        for line in gsf:
+            parts = line.rstrip("\n").split(":")
+            if len(parts) == 4:
+                gname = parts[0]
+                seen.add(gname)
+                if gname in group_members and parts[3] != ",".join(group_members[gname]):
+                    parts[3] = ",".join(group_members[gname])
+                    line = ":".join(parts) + "\n"
+            out.append(line)
+    for gname, members in group_members.items():
+        if gname not in seen:
+            out.append(f"{gname}:!::{','.join(members)}\n")
+    with open(gshadow_path, "w", encoding="utf-8") as gsf:
+        gsf.writelines(out)
+finally:
+    os.chmod(gshadow_path, orig_mode)
+PYGRP
+        restorecon -F /etc/group /etc/gshadow 2>/dev/null || true
+    fi
+}
+
 if [ ! -f /etc/blazeos-setup-completed ]; then
     echo "BlazeOS first-boot OOBE pending. Ensuring SDDM 00-blaze-oobe.conf and blaze-setup account integrity..."
     rm -f /etc/sddm.conf.d/autologin.conf /var/lib/sddm/state.conf
@@ -36,9 +77,9 @@ if [ ! -f /etc/blazeos-setup-completed ]; then
         printf 'sddm:!*:20726::::::\n' >> /etc/shadow
     fi
     if ! grep -q '^blaze-setup:' /etc/shadow 2>/dev/null; then
-        printf 'blaze-setup::20726::::::\n' >> /etc/shadow
+        printf 'blaze-setup:!*:20726::::::\n' >> /etc/shadow
     else
-        sed -i 's/^blaze-setup:[^:]*:/blaze-setup::/' /etc/shadow 2>/dev/null || true
+        sed -i 's/^blaze-setup:[^:]*:/blaze-setup:!*:/' /etc/shadow 2>/dev/null || true
     fi
     chmod 0000 /etc/shadow 2>/dev/null || true
     if ! grep -q '^sddm:' /etc/gshadow 2>/dev/null && grep -q '^sddm:' /etc/group 2>/dev/null; then
@@ -76,6 +117,7 @@ RememberLastUser=false
 RememberLastSession=false
 OOBESDDM
     restorecon -F /etc/shadow /etc/gshadow /etc/passwd /etc/group /etc/sudoers.d/99-blaze-setup /etc/sddm.conf.d/00-blaze-oobe.conf 2>/dev/null || true
+    sync_group_gshadow
     restorecon -FR /var/lib/blaze-setup 2>/dev/null || true
 
     mkdir -p /etc/systemd/system
@@ -223,6 +265,9 @@ if [ -n "$FIRST_HUMAN_USER" ]; then
         usermod -aG wheel "$FIRST_HUMAN_USER" 2>/dev/null || true
     fi
 fi
+
+# Ensure /etc/group and /etc/gshadow remain strictly synchronized (grpck -r / AUTH-9216 parity)
+sync_group_gshadow
 
 # 4. Synchronize the session selected by the non-blocking desktop provisioner.
 # Package downloads are owned by blazeos-desktop-provision.service and must

@@ -3,8 +3,8 @@
 %global _build_id_links none
 # Binary repack of artefacts built from the repositories listed in SOURCES.md
 Name:           blaze-recovery
-Version:        5.05
-Release:        2%{?dist}
+Version:        5.05.1
+Release:        1%{?dist}
 Summary:        BlazeOS BERP/BERE emergency recovery environment
 License:        GPL-3.0-or-later
 URL:            https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
@@ -35,8 +35,18 @@ rm -f %{buildroot}/%{name}-%{version}.tar
 /usr/lib/dracut/modules.d/99blaze-bere
 %config(noreplace) /etc/dracut.conf.d/99-blaze-bere.conf
 %config(noreplace) /etc/udev/rules.d/99-blaze-recovery-vault.rules
+%attr(0755,root,root) /etc/grub.d/09_berp
+%attr(0755,root,root) /etc/grub.d/99_berp
+/etc/systemd/system/blaze-recovery.service
+/etc/systemd/system/blaze-recovery.target
+/etc/systemd/system/blaze-recovery.target.wants
+/etc/systemd/system/blaze-recovery-gui.service
+/etc/systemd/system/blaze-recovery-gui.target
+/etc/systemd/system/blaze-recovery-gui.target.wants
 
 %changelog
+* Tue Nov 24 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-1
+- Transactional GRUB/EFI repair, recovery systemd units, and GRUB hooks
 * Mon Nov 23 2026 Blaze Release <release@blazeos.com.tr> - 5.05-2
 - Support optional full-OS BLAZE_REC vault, SHA-256 Zero-USB kexec reinstall, and udev RO lock
 * Mon Oct 26 2026 Blaze Release <release@blazeos.com.tr> - 5.05-1

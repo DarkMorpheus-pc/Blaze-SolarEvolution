@@ -3,7 +3,7 @@
 %global _build_id_links none
 # Binary repack of artefacts built from the repositories listed in SOURCES.md
 Name:           blaze-oobe
-Version:        5.05
+Version:        5.05.1
 Release:        1%{?dist}
 Summary:        BlazeOS Out-Of-Box Experience first-boot wizard
 License:        GPL-3.0-or-later
@@ -30,7 +30,12 @@ rm -f %{buildroot}/%{name}-%{version}.tar
 /usr/share/blaze-setup
 /usr/libexec/blaze-oobe-session
 /usr/libexec/blazeos-oobe-hygiene
+%config(missingok) /etc/sddm.conf.d/00-blaze-oobe.conf
+%config(missingok) /usr/share/wayland-sessions/blaze-oobe.desktop
+%config(missingok) %attr(0440,root,root) /etc/sudoers.d/99-blaze-setup
 
 %changelog
+* Tue Nov 24 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-1
+- Track one-shot OOBE SDDM/sudoers drop-ins with missingok and harden post-OOBE transition
 * Wed Nov 18 2026 Blaze Release <release@blazeos.com.tr> - 5.05-1
 - Initial RPM packaging of BlazeOS OOBE for the Blaze repository

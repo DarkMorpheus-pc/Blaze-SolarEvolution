@@ -1,0 +1,172 @@
+=== OS_RELEASE ===
+NAME="Blaze SolarEvolution"
+VERSION="5.05.1"
+ID=blazeos
+ID_LIKE=fedora
+BLAZE_BASE_ID=fedora
+BLAZE_BASE_VERSION_ID=45
+VERSION_ID=5.05.1
+VARIANT="SolarEvolution"
+VARIANT_ID=solarevolution
+PRETTY_NAME="Blaze SolarEvolution 5.05.1"
+ANSI_COLOR="0;38;2;255;102;0"
+LOGO=blazeos-logo
+CPE_NAME="cpe:/o:blazeos:solarevolution:5.05.1"
+DEFAULT_HOSTNAME="blazeos"
+HOME_URL="https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution"
+DOCUMENTATION_URL="https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution"
+SUPPORT_URL="https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution/issues"
+BUG_REPORT_URL="https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution/issues"
+REDHAT_BUGZILLA_PRODUCT="Blaze SolarEvolution"
+REDHAT_BUGZILLA_PRODUCT_VERSION="5.05.1"
+REDHAT_SUPPORT_PRODUCT="Blaze SolarEvolution"
+REDHAT_SUPPORT_PRODUCT_VERSION="5.05.1"
+SUPPORT_END=2027-06-01
+=== FAILED_UNITS ===
+=== BTRFS_DEVICE_STATS ===
+[/dev/vda4].write_io_errs    0
+[/dev/vda4].read_io_errs     0
+[/dev/vda4].flush_io_errs    0
+[/dev/vda4].corruption_errs  0
+[/dev/vda4].generation_errs  0
+=== RPM_IDENTITY ===
+blaze-release-5.05.1-1.blaze.noarch
+=== BLAZE_SENTINEL ===
+{
+  "passed": 7,
+  "total": 7,
+  "verified": true,
+  "integrity_ok": true,
+  "controls": [
+    {
+      "id": "mac",
+      "name": "SELinux/AppArmor MAC",
+      "title": "Mandatory access control",
+      "passed": true,
+      "level": "pass",
+      "critical": true,
+      "detail": "SELinux enforcing"
+    },
+    {
+      "id": "firewall",
+      "name": "Firewall (firewalld/nftables)",
+      "title": "Firewall",
+      "passed": true,
+      "level": "pass",
+      "critical": true,
+      "detail": "firewalld active"
+    },
+    {
+      "id": "kernel.kptr_restrict",
+      "name": "Kernel kptr_restrict",
+      "title": "Kernel kptr_restrict",
+      "passed": true,
+      "level": "pass",
+      "critical": false,
+      "detail": "kernel.kptr_restrict = 1 (expected >= 1)"
+    },
+    {
+      "id": "kernel.dmesg_restrict",
+      "name": "Kernel dmesg_restrict",
+      "title": "Kernel dmesg_restrict",
+      "passed": true,
+      "level": "pass",
+      "critical": false,
+      "detail": "kernel.dmesg_restrict = 1 (expected >= 1)"
+    },
+    {
+      "id": "kernel.yama.ptrace_scope",
+      "name": "Kernel yama.ptrace_scope",
+      "title": "Kernel yama.ptrace_scope",
+      "passed": true,
+      "level": "pass",
+      "critical": false,
+      "detail": "kernel.yama.ptrace_scope = 1 (expected >= 1)"
+    },
+    {
+      "id": "fs.protected_hardlinks",
+      "name": "FS protected_hardlinks",
+      "title": "FS protected_hardlinks",
+      "passed": true,
+      "level": "pass",
+      "critical": false,
+      "detail": "fs.protected_hardlinks = 1 (expected >= 1)"
+    },
+    {
+      "id": "fs.protected_symlinks",
+      "name": "FS protected_symlinks",
+      "title": "FS protected_symlinks",
+      "passed": true,
+      "level": "pass",
+      "critical": false,
+      "detail": "fs.protected_symlinks = 1 (expected >= 1)"
+    }
+  ],
+  "checks": [
+    {
+      "id": "mac",
+      "name": "SELinux/AppArmor MAC",
+      "title": "Mandatory access control",
+      "passed": true,
+      "level": "pass",
+      "critical": true,
+      "detail": "SELinux enforcing"
+    },
+    {
+      "id": "firewall",
+      "name": "Firewall (firewalld/nftables)",
+      "title": "Firewall",
+      "passed": true,
+      "level": "pass",
+      "critical": true,
+      "detail": "firewalld active"
+    },
+    {
+      "id": "kernel.kptr_restrict",
+      "name": "Kernel kptr_restrict",
+      "title": "Kernel kptr_restrict",
+      "passed": true,
+      "level": "pass",
+      "critical": false,
+      "detail": "kernel.kptr_restrict = 1 (expected >= 1)"
+    },
+    {
+      "id": "kernel.dmesg_restrict",
+      "name": "Kernel dmesg_restrict",
+      "title": "Kernel dmesg_restrict",
+      "passed": true,
+      "level": "pass",
+      "critical": false,
+      "detail": "kernel.dmesg_restrict = 1 (expected >= 1)"
+    },
+    {
+      "id": "kernel.yama.ptrace_scope",
+      "name": "Kernel yama.ptrace_scope",
+      "title": "Kernel yama.ptrace_scope",
+      "passed": true,
+      "level": "pass",
+      "critical": false,
+      "detail": "kernel.yama.ptrace_scope = 1 (expected >= 1)"
+    },
+    {
+      "id": "fs.protected_hardlinks",
+      "name": "FS protected_hardlinks",
+      "title": "FS protected_hardlinks",
+      "passed": true,
+      "level": "pass",
+      "critical": false,
+      "detail": "fs.protected_hardlinks = 1 (expected >= 1)"
+    },
+    {
+      "id": "fs.protected_symlinks",
+      "name": "FS protected_symlinks",
+      "title": "FS protected_symlinks",
+      "passed": true,
+      "level": "pass",
+      "critical": false,
+      "detail": "fs.protected_symlinks = 1 (expected >= 1)"
+    }
+  ]
+}
+=== KERNEL_ERRORS ===
+1

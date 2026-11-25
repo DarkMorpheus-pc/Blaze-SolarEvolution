@@ -1,0 +1,63 @@
+Module                  Size  Used by
+sunrpc                974848  1
+nf_conntrack_netbios_ns    12288  1
+nf_conntrack_broadcast    12288  1 nf_conntrack_netbios_ns
+nft_fib_inet           12288  1
+nft_fib_ipv4           12288  1 nft_fib_inet
+nft_fib_ipv6           12288  1 nft_fib_inet
+nft_fib                12288  3 nft_fib_ipv6,nft_fib_ipv4,nft_fib_inet
+nft_reject_inet        12288  6
+nf_reject_ipv4         16384  1 nft_reject_inet
+nf_reject_ipv6         24576  1 nft_reject_inet
+nft_reject             12288  1 nft_reject_inet
+nft_ct                 32768  9
+nft_chain_nat          12288  3
+nf_nat                 65536  1 nft_chain_nat
+nf_conntrack          221184  4 nf_nat,nft_ct,nf_conntrack_netbios_ns,nf_conntrack_broadcast
+nf_defrag_ipv6         24576  1 nf_conntrack
+nf_defrag_ipv4         12288  1 nf_conntrack
+nf_tables             434176  266 nft_ct,nft_reject_inet,nft_fib_ipv6,nft_fib_ipv4,nft_chain_nat,nft_reject,nft_fib,nft_fib_inet
+qrtr                   57344  2
+rfkill                 45056  1
+vfat                   24576  1
+fat                   126976  1 vfat
+intel_rapl_msr         24576  0
+intel_rapl_common      53248  1 intel_rapl_msr
+intel_uncore_frequency_common    16384  0
+intel_pmc_core        196608  0
+pmt_telemetry          16384  1 intel_pmc_core
+pmt_discovery          24576  1 pmt_telemetry
+pmt_class              20480  2 pmt_telemetry,pmt_discovery
+intel_pmc_ssram_telemetry    20480  1 intel_pmc_core
+intel_pmc_pwrm_telemetry    12288  1 intel_pmc_ssram_telemetry
+intel_vsec             28672  3 intel_pmc_ssram_telemetry,intel_pmc_pwrm_telemetry,pmt_telemetry
+kvm_intel             557056  0
+kvm                  1568768  1 kvm_intel
+ppdev                  24576  0
+irqbypass              16384  1 kvm
+rapl                   20480  0
+virtio_net            139264  0
+net_failover           24576  1 virtio_net
+pcspkr                 12288  0
+parport_pc             57344  0
+failover               16384  1 net_failover
+virtio_input           20480  0
+parport                90112  2 parport_pc,ppdev
+i2c_piix4              40960  0
+i2c_smbus              20480  1 i2c_piix4
+joydev                 32768  0
+zram                   77824  1
+lz4hc_compress         20480  1 zram
+vsock_loopback         12288  0
+vmw_vsock_virtio_transport    20480  0
+vmw_vsock_virtio_transport_common    65536  2 vsock_loopback,vmw_vsock_virtio_transport
+vsock                  77824  3 vmw_vsock_virtio_transport_common,vsock_loopback,vmw_vsock_virtio_transport
+virtio_gpu            122880  1
+virtio_dma_buf         12288  1 virtio_gpu
+serio_raw              20480  0
+ata_generic            12288  0
+pata_acpi              12288  0
+i2c_dev                28672  0
+qemu_fw_cfg            24576  0
+virtiofs               49152  0
+fuse                  315392  2 virtiofs

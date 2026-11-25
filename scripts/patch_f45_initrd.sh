@@ -94,11 +94,17 @@ fakeroot bash -c '
   # 2. BlazeOS Screen of Death (blaze-death-screen) & standalone BERP (blaze-recovery)
   install -D -m 0755 "$overlay/usr/bin/blaze-death-screen" usr/bin/blaze-death-screen
   install -D -m 0755 "$overlay/usr/bin/blaze-recovery" usr/bin/blaze-recovery
-  for helper_bin in lsblk chvt du; do
+  for helper_bin in lsblk chvt du blockdev; do
     if [[ -x "$rootfs_src/usr/bin/$helper_bin" ]]; then
       install -D -m 0755 "$rootfs_src/usr/bin/$helper_bin" "usr/bin/$helper_bin"
+    elif [[ -x "$rootfs_src/usr/sbin/$helper_bin" ]]; then
+      install -D -m 0755 "$rootfs_src/usr/sbin/$helper_bin" "usr/sbin/$helper_bin"
     fi
   done
+  if [[ ! -e sbin/blockdev ]]; then
+    mkdir -p sbin
+    ln -sf ../usr/bin/blockdev sbin/blockdev
+  fi
 
   for unit_dir in \
     etc/systemd/system/emergency.service.d \
@@ -151,12 +157,12 @@ EOF
   install -D -m 0644 "$overlay/usr/share/blazeos/identity/os-release" usr/lib/initrd-release
   printf "BASE_DISTRO=\"Fedora Linux 45\"\n" >> usr/lib/initrd-release
   if [[ -n "$dracut_ver" ]]; then
-    sed -i -e "s|^VERSION=.*|VERSION=\"5.05 ${dracut_ver}\"|" \
-           -e "s|^PRETTY_NAME=.*|PRETTY_NAME=\"Blaze SolarEvolution 5.05 ${dracut_ver} (Initramfs)\"|" \
+    sed -i -e "s|^VERSION=.*|VERSION=\"5.05.1 ${dracut_ver}\"|" \
+           -e "s|^PRETTY_NAME=.*|PRETTY_NAME=\"Blaze SolarEvolution 5.05.1 ${dracut_ver} (Initramfs)\"|" \
            usr/lib/initrd-release
     printf "DRACUT_VERSION=\"%s\"\n" "$dracut_ver" >> usr/lib/initrd-release
   else
-    sed -i -e "s|^PRETTY_NAME=.*|PRETTY_NAME=\"Blaze SolarEvolution 5.05 (Initramfs)\"|" usr/lib/initrd-release
+    sed -i -e "s|^PRETTY_NAME=.*|PRETTY_NAME=\"Blaze SolarEvolution 5.05.1 (Initramfs)\"|" usr/lib/initrd-release
   fi
   ln -sf ../usr/lib/initrd-release etc/initrd-release
   ln -sf initrd-release usr/lib/os-release

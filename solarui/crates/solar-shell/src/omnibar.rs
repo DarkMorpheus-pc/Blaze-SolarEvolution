@@ -832,6 +832,8 @@ fn generate_omnibar_items(raw_query: &str, apps: &[AppInfo]) -> Vec<OmnibarItem>
         ("setup", "İlk Kurulum Asistanı (OOBE)", "Sistem ayarlarını ve kullanıcı tercihlerini yapılandır", "/usr/bin/blaze-setup", "system-software-install"),
         ("berp", "Blaze Emergency Recovery Protocol (BERP)", "Kurtarma ve Zaman Makinesi Konsolunu Başlat", "ptyxis -- blaze-recovery", "system-error"),
         ("kurtarma", "Blaze Acil Kurtarma ve Zaman Makinesi", "Sistem geri yükleme ve donanım denetim konsolu", "ptyxis -- blaze-recovery", "system-error"),
+        ("akrep", "Akrep Güvenlik Merkezi (Security Center)", "SELinux, Firewalld, Flatpak ve cihaz güvenliği teşhis merkezi", "akrep-ui", "security-high"),
+        ("security", "Akrep Security Center (Salt Okunur)", "BlazeOS sistem güvenlik duruşu ve bütünlük görünümü", "akrep-ui", "security-high"),
         ("konami", "Blaze SolarEvolution Retro Modu (Easter Egg)", "80'ler CRT ve Matrix atmosferini tetikle", "solar-shell konami", "input-gaming"),
         ("season", "Mevsimsel Atmosfer ve Renk Teması", "Gündönümü ve ekinoks renk tonunu göster", "solar-shell season", "preferences-desktop-wallpaper"),
         ("theme", "Masaüstü Kabuk Motorunu Değiştir (Hızlı Geçiş)", toggle_shell_desc, toggle_shell_cmd, "preferences-desktop-theme"),

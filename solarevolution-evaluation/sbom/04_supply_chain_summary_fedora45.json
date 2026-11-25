@@ -1,0 +1,52 @@
+{
+  "collected_at_utc": "2026-11-24T23:08:49.413796+00:00",
+  "target": "fedora45",
+  "syft_scan_scope": "dir:/ (full rootfs excluding virtual/cache mounts)",
+  "syft_version": {
+    "application": "syft",
+    "buildDate": "2026-11-16T19:59:16Z",
+    "compiler": "gc",
+    "gitCommit": "1a72047fd46c72e0a12ee77e24b23d2316753d08",
+    "gitDescription": "v1.57.2",
+    "goVersion": "go1.27.3",
+    "platform": "linux/amd64",
+    "schemaVersion": "16.1.13",
+    "version": "1.57.2"
+  },
+  "grype_version": {
+    "application": "grype",
+    "buildDate": "2026-11-18T14:07:06Z",
+    "compiler": "gc",
+    "gitCommit": "8f3ddeddc4a4ed6314248aaf0a7c510f98db8882",
+    "gitDescription": "v0.122.1",
+    "goVersion": "go1.27.3",
+    "platform": "linux/amd64",
+    "supportedDbSchema": 6,
+    "syftVersion": "v1.57.2",
+    "version": "0.122.1"
+  },
+  "grype_db_status": {
+    "schemaVersion": "v6.1.10",
+    "from": "https://grype.anchore.io/databases/v6/vulnerability-db_v6.1.10_2026-11-24T00:20:31Z_1795501325.tar.zst?checksum=sha256%3Afdf0cdec0b112f6769c3fd38cd5f992a3bb6162a4ab2fe30d639d14ae41ea8a9",
+    "built": "2026-11-24T06:22:05Z",
+    "path": "/.cache/grype/db/6/vulnerability.db",
+    "valid": true
+  },
+  "cyclonedx_component_count": 138222,
+  "spdx_package_count": 7257,
+  "rpm_package_count": 1974,
+  "first_party_blaze_rpms_count": 0,
+  "total_vulnerability_matches": 1406,
+  "native_autodetect_matches": 1406,
+  "grype_policy_used": ".grype.yaml (distro: fedora:45)",
+  "unique_vulnerability_ids": 526,
+  "severity_counts": {
+    "Critical": 40,
+    "High": 457,
+    "Medium": 403,
+    "Low": 56,
+    "Negligible": 0,
+    "Unknown": 450
+  },
+  "matches_with_fix_available": 1203
+}

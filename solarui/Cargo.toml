@@ -7,7 +7,10 @@ members = [
     "crates/solar-core",
     "crates/solar-shell",
     "crates/solar-session",
+    "crates/blaze-sentinel-core",
     "crates/blaze-recovery",
+    "crates/blaze-akrep-daemon",
+    "crates/blaze-akrep-ui",
 ]
 
 [workspace.package]
@@ -39,3 +42,4 @@ toml = "0.8"
 solar-common = { path = "crates/solar-common" }
 solar-niri = { path = "crates/solar-niri" }
 solar-adapter = { path = "crates/solar-adapter" }
+blaze-sentinel-core = { path = "crates/blaze-sentinel-core" }

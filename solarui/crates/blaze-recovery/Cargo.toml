@@ -21,3 +21,4 @@ chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 solar-common = { workspace = true }
+blaze-sentinel-core = { workspace = true }

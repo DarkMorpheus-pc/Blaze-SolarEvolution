@@ -4,7 +4,7 @@
 # Binary repack of artefacts built from the repositories listed in SOURCES.md
 Name:           blaze-sentinel
 Version:        0.3.1
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Blaze Sentinel security posture inspector
 License:        MIT or GPL-3.0-or-later
 URL:            https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
@@ -26,8 +26,11 @@ rm -f %{buildroot}/%{name}-%{version}.tar
 
 %files
 /usr/bin/blaze-sentinel
+/etc/systemd/system/blaze-sentinel.service
 
 %changelog
+* Tue Nov 24 2026 Blaze Release <release@blazeos.com.tr> - 0.3.1-2
+- Own /etc/systemd/system/blaze-sentinel.service cleanly in RPM payload
 * Thu Nov 19 2026 Blaze Release <release@blazeos.com.tr> - 0.3.1-1
 - Fail-closed SHA-256 canary verification and unified CLI posture/JSON handling
 

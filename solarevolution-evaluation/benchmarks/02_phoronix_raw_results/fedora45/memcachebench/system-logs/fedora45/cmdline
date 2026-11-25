@@ -1,0 +1,1 @@
+BOOT_IMAGE=(hd0,gpt2)/vmlinuz-7.2.11-300.fc45.x86_64 root=UUID=a5efd6bf-f18b-4f2d-8b49-5f687318b3c3 ro rootflags=subvol=root rhgb quiet

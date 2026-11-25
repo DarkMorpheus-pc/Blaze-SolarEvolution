@@ -1,4 +1,4 @@
-"""CLI runner for the BlazeOS / SolarEvolution 5.05 E2E test suite (Tiers 1-4)."""
+"""CLI runner for the BlazeOS / SolarEvolution 5.05.1 E2E test suite (Tiers 1-4)."""
 import argparse
 import os
 from pathlib import Path
@@ -18,7 +18,7 @@ TIER_MODULES = {
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="python3 -m tests.e2e.run_e2e",
-        description="Run BlazeOS / SolarEvolution 5.05 opaque-box E2E tests (Tiers 1-5).",
+        description="Run BlazeOS / SolarEvolution 5.05.1 opaque-box E2E tests (Tiers 1-5).",
     )
     parser.add_argument(
         "--tier",

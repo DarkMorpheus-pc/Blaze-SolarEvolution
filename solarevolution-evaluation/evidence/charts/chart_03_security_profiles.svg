@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="964" height="388" viewBox="0 0 964 388">
+<rect width="100%" height="100%" rx="10" fill="#0f172a"/>
+<text x="24" y="30" fill="#f8fafc" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="16" font-weight="700">Phase 03 — Automated Security Baseline Metrics (Blaze SolarEvolution 5.05.1 vs. Fedora 45)</text>
+<text x="24" y="50" fill="#94a3b8" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12">OpenSCAP pass % computed strictly as Passed / (Passed + Failed) x 100; Lynis index shown separately</text>
+<line x1="361.0" y1="64" x2="361.0" y2="356" stroke="#1e293b" stroke-width="1"/>
+<text x="361.0" y="376" text-anchor="middle" fill="#64748b" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="10">0</text>
+<line x1="458.5" y1="64" x2="458.5" y2="356" stroke="#1e293b" stroke-width="1"/>
+<text x="458.5" y="376" text-anchor="middle" fill="#64748b" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="10">25</text>
+<line x1="556.0" y1="64" x2="556.0" y2="356" stroke="#1e293b" stroke-width="1"/>
+<text x="556.0" y="376" text-anchor="middle" fill="#64748b" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="10">50</text>
+<line x1="653.5" y1="64" x2="653.5" y2="356" stroke="#1e293b" stroke-width="1"/>
+<text x="653.5" y="376" text-anchor="middle" fill="#64748b" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="10">75</text>
+<line x1="751.0" y1="64" x2="751.0" y2="356" stroke="#1e293b" stroke-width="1"/>
+<text x="751.0" y="376" text-anchor="middle" fill="#64748b" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="10">100 %</text>
+<text x="349" y="90.2" text-anchor="end" fill="#e2e8f0" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12">Blaze CIS Workstation L1 (blaze-scap-compat)</text>
+<rect x="361" y="72" width="390" height="28" rx="5" fill="#1e293b"/>
+<rect x="361" y="72" width="226.8" height="28" rx="5" fill="#38bdf8"/>
+<text x="595.8" y="90.2" fill="#f8fafc" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="600">58.16% (171/294)</text>
+<text x="349" y="130.2" text-anchor="end" fill="#e2e8f0" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12">Blaze Fedora CUSP Workstation (blaze-scap-compat)</text>
+<rect x="361" y="112" width="390" height="28" rx="5" fill="#1e293b"/>
+<rect x="361" y="112" width="198.6" height="28" rx="5" fill="#a855f7"/>
+<text x="567.6" y="130.2" fill="#f8fafc" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="600">50.93% (137/269)</text>
+<text x="349" y="170.2" text-anchor="end" fill="#e2e8f0" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12">Blaze Standard Profile (blaze-scap-compat)</text>
+<rect x="361" y="152" width="390" height="28" rx="5" fill="#1e293b"/>
+<rect x="361" y="152" width="142.3" height="28" rx="5" fill="#eab308"/>
+<text x="511.3" y="170.2" fill="#f8fafc" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="600">36.49% (27/74)</text>
+<text x="349" y="210.2" text-anchor="end" fill="#e2e8f0" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12">Blaze Unmodified Upstream CPE (ssg-fedora-ds.xml)</text>
+<rect x="361" y="192" width="390" height="28" rx="5" fill="#1e293b"/>
+<rect x="361" y="192" width="2.0" height="28" rx="5" fill="#ef4444"/>
+<text x="371.0" y="210.2" fill="#f8fafc" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="600">0.00% (0/316 notapplicable)</text>
+<text x="349" y="250.2" text-anchor="end" fill="#e2e8f0" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12">Blaze Lynis Hardening Index (Not a Certification)</text>
+<rect x="361" y="232" width="390" height="28" rx="5" fill="#1e293b"/>
+<rect x="361" y="232" width="280.8" height="28" rx="5" fill="#22c55e"/>
+<text x="649.8" y="250.2" fill="#f8fafc" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="600">72 / 100 (251 tests)</text>
+<text x="349" y="290.2" text-anchor="end" fill="#e2e8f0" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12">Fedora 45 Ref CIS Workstation L1 (Native SSG)</text>
+<rect x="361" y="272" width="390" height="28" rx="5" fill="#1e293b"/>
+<rect x="361" y="272" width="215.0" height="28" rx="5" fill="#64748b"/>
+<text x="584.0" y="290.2" fill="#f8fafc" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="600">55.12% (167/303)</text>
+<text x="349" y="330.2" text-anchor="end" fill="#e2e8f0" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12">Fedora 45 Ref Lynis Hardening Index</text>
+<rect x="361" y="312" width="390" height="28" rx="5" fill="#1e293b"/>
+<rect x="361" y="312" width="276.9" height="28" rx="5" fill="#94a3b8"/>
+<text x="645.9" y="330.2" fill="#f8fafc" font-family="Inter,DejaVu Sans,Arial,sans-serif" font-size="12" font-weight="600">71 / 100 (260 tests)</text>
+</svg>

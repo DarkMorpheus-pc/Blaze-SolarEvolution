@@ -1,0 +1,514 @@
+{
+  "schema_version": "1.0",
+  "collected_at_utc": "2026-11-24T23:02:10.373315+00:00",
+  "pii_sanitized": true,
+  "distribution": {
+    "name": "Blaze SolarEvolution",
+    "pretty_name": "Blaze SolarEvolution 5.05.1",
+    "id": "blazeos",
+    "id_like": "fedora",
+    "version": "5.05.1",
+    "version_id": "5.05.1",
+    "fedora_base_version": "45",
+    "fedora_release_file": "Blaze SolarEvolution release 5.05.1 (SolarEvolution)",
+    "blaze_release_file": "",
+    "release_rpms": [
+      "blaze-release-5.05.1-1.blaze.noarch",
+      "package fedora-release is not installed",
+      "fedora-release-common-45-13.noarch"
+    ],
+    "blazeos_release_file": "BlazeOS Galaxy SolarEvolution\nCodename: SolarEvolution\nVariant: Workstation Live\nBase: Fedora 45\nVersion: 5.05.1\nChanges: SolarUI, one-shot OOBE, portable GRUB recovery, BERP and Limine support",
+    "first_party_blaze_rpms": [
+      "blaze-release\t5.05.1-1.blaze\tEdDSA/SHA512, Tue 24 Nov 2026 10:18:01 PM UTC, Key ID 51a9c9f830e024ee",
+      "blaze-sentinel\t0.3.1-2.blaze\tEdDSA/SHA512, Tue 24 Nov 2026 10:18:01 PM UTC, Key ID 51a9c9f830e024ee",
+      "blaze-tools\t5.05.1-1.blaze\tEdDSA/SHA512, Tue 24 Nov 2026 10:18:01 PM UTC, Key ID 51a9c9f830e024ee",
+      "blaze-recovery\t5.05.1-1.blaze\tEdDSA/SHA512, Tue 24 Nov 2026 10:18:01 PM UTC, Key ID 51a9c9f830e024ee",
+      "blaze-continuum\t0.1.0-1.blaze\tEdDSA/SHA512, Tue 24 Nov 2026 10:18:01 PM UTC, Key ID 51a9c9f830e024ee",
+      "blaze-house\t2.1.0-1.blaze\tEdDSA/SHA512, Tue 24 Nov 2026 10:18:01 PM UTC, Key ID 51a9c9f830e024ee",
+      "solarui\t5.05.1-1.blaze\tEdDSA/SHA512, Tue 24 Nov 2026 10:18:02 PM UTC, Key ID 51a9c9f830e024ee",
+      "solarui-config\t5.05.1-1.blaze\tEdDSA/SHA512, Tue 24 Nov 2026 10:18:02 PM UTC, Key ID 51a9c9f830e024ee",
+      "blaze-oobe\t5.05.1-1.blaze\tEdDSA/SHA512, Tue 24 Nov 2026 10:18:01 PM UTC, Key ID 51a9c9f830e024ee",
+      "blaze-firehub\t5.05.1-1.blaze\tEdDSA/SHA512, Tue 24 Nov 2026 10:18:01 PM UTC, Key ID 51a9c9f830e024ee",
+      "blaze-scap-compat\t5.05.1-1.blaze\tEdDSA/SHA512, Tue 24 Nov 2026 10:18:01 PM UTC, Key ID 51a9c9f830e024ee",
+      "blaze-akrep\t0.1.0-1.blaze\tEdDSA/SHA512, Tue 24 Nov 2026 10:18:01 PM UTC, Key ID 51a9c9f830e024ee",
+      "blaze-akrep-daemon\t0.1.0-1.blaze\tEdDSA/SHA512, Tue 24 Nov 2026 10:18:01 PM UTC, Key ID 51a9c9f830e024ee",
+      "blaze-akrep-ui\t0.1.0-1.blaze\tEdDSA/SHA512, Tue 24 Nov 2026 10:18:01 PM UTC, Key ID 51a9c9f830e024ee"
+    ],
+    "first_party_rpm_verify": [
+      "missing     /etc/skel/Desktop/liveinst.desktop",
+      "S.5....T.    /usr/share/wayland-sessions/solarui.desktop",
+      ".......T.  c /etc/sddm.conf.d/00-blaze-oobe.conf",
+      ".......T.  c /etc/sudoers.d/99-blaze-setup",
+      "RPM_V_RC=2"
+    ]
+  },
+  "kernel": {
+    "release": "7.2.11-300.fc45.x86_64",
+    "architecture": "x86_64",
+    "uname_sanitized": "Linux [REDACTED-HOSTNAME] 7.2.11-300.fc45.x86_64 #1 SMP PREEMPT_DYNAMIC Thu Oct 15 17:29:26 UTC 2026 x86_64 GNU/Linux"
+  },
+  "virtual_hardware": {
+    "hypervisor": "KVM",
+    "virtualization_type": "full",
+    "cpu_model": "Intel(R) Core(TM) i9-10885H CPU @ 2.40GHz",
+    "virtual_cores": 8,
+    "memory": {
+      "ram_total_bytes": 8304484352,
+      "ram_used_bytes": 1032876032,
+      "ram_free_bytes": 5855571968,
+      "ram_available_bytes": 7271608320,
+      "ram_total_gib": 7.73,
+      "swap_total_bytes": 8303669248,
+      "swap_used_bytes": 0,
+      "swap_total_gib": 7.73
+    },
+    "boot_mode": "UEFI",
+    "secure_boot_state": "This system doesn't support Secure Boot",
+    "graphics": {
+      "pci_lines": [
+        "Kernel driver in use: ata_piix",
+        "Kernel driver in use: piix4_smbus",
+        "00:02.0 VGA compatible controller [0300]: Red Hat, Inc. Virtio 1.0 GPU [1af4:1050] (rev 01)",
+        "Kernel driver in use: virtio-pci",
+        "Kernel driver in use: virtio-pci",
+        "Kernel driver in use: virtio-pci",
+        "Kernel driver in use: virtio-pci",
+        "Kernel driver in use: virtio-pci"
+      ],
+      "dri_devices": [
+        "crw-rw----+  1 root video  226,   1 Nov 24 22:55 card1",
+        "crw-rw-rw-.  1 root render 226, 128 Nov 24 22:55 renderD128"
+      ],
+      "opengl_renderer": "llvmpipe / software (no X11 glxinfo or Wayland-only)",
+      "hardware_accelerated": false,
+      "rendering_classification": "software_rendering_virtio_vga",
+      "eglinfo_summary": "bash: eglinfo: command not found"
+    }
+  },
+  "storage": {
+    "block_devices": [
+      {
+        "name": "sr0",
+        "type": "rom",
+        "size": "1024M",
+        "fstype": null,
+        "label": null,
+        "mountpoint": null,
+        "model": "QEMU DVD-ROM",
+        "ro": true
+      },
+      {
+        "name": "zram0",
+        "type": "disk",
+        "size": "7.7G",
+        "fstype": "swap",
+        "label": "zram0",
+        "mountpoint": "[SWAP]",
+        "model": null,
+        "ro": false
+      },
+      {
+        "name": "vda",
+        "type": "disk",
+        "size": "40G",
+        "fstype": null,
+        "label": null,
+        "mountpoint": null,
+        "model": null,
+        "ro": false,
+        "children": [
+          {
+            "name": "vda1",
+            "type": "part",
+            "size": "600M",
+            "fstype": "vfat",
+            "label": null,
+            "mountpoint": "/boot/efi",
+            "model": null,
+            "ro": false
+          },
+          {
+            "name": "vda2",
+            "type": "part",
+            "size": "2G",
+            "fstype": "ext4",
+            "label": null,
+            "mountpoint": "/boot",
+            "model": null,
+            "ro": false
+          },
+          {
+            "name": "vda3",
+            "type": "part",
+            "size": "4.3G",
+            "fstype": "ext4",
+            "label": "BLAZE_REC",
+            "mountpoint": null,
+            "model": null,
+            "ro": true
+          },
+          {
+            "name": "vda4",
+            "type": "part",
+            "size": "33.1G",
+            "fstype": "btrfs",
+            "label": "bs_[REDACTED-HOSTNAME]",
+            "mountpoint": "/home",
+            "model": null,
+            "ro": false
+          }
+        ]
+      }
+    ],
+    "filesystems": [
+      {
+        "target": "/",
+        "source": "/dev/vda4[/root]",
+        "fstype": "btrfs",
+        "options": "rw,relatime,seclabel,compress=zstd:1,discard=async,space_cache=v2,subvolid=257,subvol=/root"
+      },
+      {
+        "target": "/tmp",
+        "source": "tmpfs",
+        "fstype": "tmpfs",
+        "options": "rw,nosuid,nodev,seclabel,nr_inodes=1048576,inode64,usrquota"
+      },
+      {
+        "target": "/home",
+        "source": "/dev/vda4[/home]",
+        "fstype": "btrfs",
+        "options": "rw,relatime,seclabel,compress=zstd:1,discard=async,space_cache=v2,subvolid=256,subvol=/home"
+      },
+      {
+        "target": "/boot",
+        "source": "/dev/vda2",
+        "fstype": "ext4",
+        "options": "rw,relatime,seclabel"
+      },
+      {
+        "target": "/boot/efi",
+        "source": "/dev/vda1",
+        "fstype": "vfat",
+        "options": "rw,relatime,fmask=0077,dmask=0077,codepage=437,iocharset=ascii,shortname=winnt,errors=remount-ro"
+      }
+    ]
+  },
+  "software_baseline": {
+    "installed_rpm_count": 1904,
+    "systemd_version": "systemd 262 (262-3.fc45)",
+    "selinux_mode": "Enforcing",
+    "firewalld_state": "running",
+    "running_service_count": 29,
+    "failed_unit_count": 0,
+    "failed_units": [],
+    "running_services": [
+      {
+        "unit": "accounts-daemon.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "Accounts Service"
+      },
+      {
+        "unit": "akrepd.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "BlazeOS Akrep Security Center Telemetry Daemon (Read-Only v0.1)"
+      },
+      {
+        "unit": "blaze-sentinel.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "Blaze Sentinel Threat & Integrity Watchdog"
+      },
+      {
+        "unit": "blazeos-plymouth-failsafe.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "BlazeOS Plymouth failsafe"
+      },
+      {
+        "unit": "chronyd.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "NTP client/server"
+      },
+      {
+        "unit": "dbus-broker.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "D-Bus System Message Bus"
+      },
+      {
+        "unit": "firewalld.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "firewalld - dynamic firewall daemon"
+      },
+      {
+        "unit": "gssproxy.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "GSSAPI Proxy Daemon"
+      },
+      {
+        "unit": "irqbalance.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "irqbalance daemon"
+      },
+      {
+        "unit": "NetworkManager-dispatcher.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "Network Manager Script Dispatcher Service"
+      },
+      {
+        "unit": "NetworkManager.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "Network Manager"
+      },
+      {
+        "unit": "polkit.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "Authorization Manager"
+      },
+      {
+        "unit": "qemu-guest-agent.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "QEMU Guest Agent"
+      },
+      {
+        "unit": "rtkit-daemon.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "RealtimeKit Scheduling Policy Service"
+      },
+      {
+        "unit": "sddm.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "Simple Desktop Display Manager"
+      },
+      {
+        "unit": "switcheroo-control.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "Switcheroo Control Proxy service"
+      },
+      {
+        "unit": "systemd-hostnamed.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "Hostname Service"
+      },
+      {
+        "unit": "systemd-journald.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "Journal Service"
+      },
+      {
+        "unit": "systemd-localed.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "Locale Service"
+      },
+      {
+        "unit": "systemd-logind.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "User Login Management"
+      },
+      {
+        "unit": "systemd-oomd.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "Userspace Out-Of-Memory (OOM) Killer"
+      },
+      {
+        "unit": "systemd-resolved.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "Network Name Resolution"
+      },
+      {
+        "unit": "systemd-udevd.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "Rule-based Manager for Device Events and Files"
+      },
+      {
+        "unit": "systemd-userdbd.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "User Database Manager"
+      },
+      {
+        "unit": "tuned-ppd.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "PPD-to-TuneD API Translation Daemon"
+      },
+      {
+        "unit": "tuned.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "Dynamic System Tuning Daemon"
+      },
+      {
+        "unit": "udisks2.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "Disk Manager"
+      },
+      {
+        "unit": "upower.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "Daemon for power management"
+      },
+      {
+        "unit": "user@961.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "description": "User Manager for UID 961"
+      }
+    ]
+  },
+  "network_sanitized": {
+    "interfaces": [
+      {
+        "ifname": "lo",
+        "operstate": "UNKNOWN",
+        "mtu": 65536,
+        "link_type": "loopback",
+        "address": "[REDACTED-MAC]"
+      },
+      {
+        "ifname": "ens5",
+        "operstate": "UP",
+        "mtu": 1500,
+        "link_type": "ether",
+        "address": "[REDACTED-MAC]"
+      }
+    ],
+    "nmcli_status": "ens5:ethernet:connected:Wired Auto\nlo:loopback:connected (externally):lo",
+    "isolation_mode": "QEMU user-mode SLIRP NAT (isolated guest network)"
+  },
+  "stock_boot_measurements": {
+    "runs": [
+      {
+        "run": 1,
+        "raw": "Startup finished in 404ms (kernel) + 1.633s (initrd) + 3.483s (userspace) = 5.521s \ngraphical.target reached after 3.216s in userspace.",
+        "parsed_seconds": {
+          "kernel": 0.404,
+          "initrd": 1.633,
+          "userspace": 3.483,
+          "total": 5.521
+        }
+      },
+      {
+        "run": 2,
+        "raw": "Startup finished in 426ms (kernel) + 1.608s (initrd) + 3.339s (userspace) = 5.374s \ngraphical.target reached after 3.145s in userspace.",
+        "parsed_seconds": {
+          "kernel": 0.426,
+          "initrd": 1.608,
+          "userspace": 3.339,
+          "total": 5.374
+        }
+      },
+      {
+        "run": 3,
+        "raw": "Startup finished in 397ms (kernel) + 1.611s (initrd) + 3.378s (userspace) = 5.386s \ngraphical.target reached after 3.167s in userspace.",
+        "parsed_seconds": {
+          "kernel": 0.397,
+          "initrd": 1.611,
+          "userspace": 3.378,
+          "total": 5.386
+        }
+      }
+    ],
+    "median_total_seconds": 5.386,
+    "median_userspace_seconds": 3.378,
+    "critical_chain": "The time when unit became active or started is printed after the \"@\" character.\nThe time the unit took to start is printed after the \"+\" character.\n\ngraphical.target @3.216s\n└─multi-user.target @3.183s\n  └─sddm.service @3.183s\n    └─plymouth-quit.service @3.152s +29ms\n      └─systemd-user-sessions.service @3.136s +12ms\n        └─remote-fs.target @3.135s\n          └─remote-fs-pre.target @3.134s\n            └─nfs-client.target @3.134s\n              └─gssproxy.service @2.545s +265ms\n                └─network.target @2.535s\n                  └─NetworkManager.service @2.217s +317ms\n                    └─network-pre.target @2.216s\n                      └─firewalld.service @2.216s\n                        └─basic.target @2.202s\n                          └─dbus-broker.service @2.180s +21ms\n                            └─dbus.socket @2.169s +762us\n                              └─sysinit.target @2.167s\n                                └─systemd-update-utmp.service @2.152s +14ms\n                                  └─systemd-tmpfiles-setup.service @2.106s +43ms\n                                    └─local-fs.target @2.100s\n                                      └─run-user-961.mount @3.334s\n                                        └─swap.target @1.339s\n                                          └─dev-zram0.swap @1.277s +60ms\n                                            └─systemd-zram-setup@zram0.service @1.260s +15ms\n                                              └─dev-zram0.device @1.258s",
+    "top_blame_units": "2.291s dev-vport2p1.device\n2.291s dev-virtio\\x2dports-org.qemu.guest_agent.0.device\n2.291s sys-devices-pci0000:00-0000:00:04.0-virtio2-virtio\\x2dports-vport2p1.device\n2.278s sys-devices-pci0000:00-0000:00:01.1-ata2-host1-target1:0:0-1:0:0:0-block-sr0.device\n2.278s dev-disk-by\\x2dpath-pci\\x2d0000:00:01.1\\x2data\\x2d2.device\n2.278s dev-sr0.device\n2.278s dev-disk-by\\x2dpath-pci\\x2d0000:00:01.1\\x2data\\x2d2.0.device\n2.278s dev-disk-by\\x2ddiskseq-3.device\n2.278s dev-cdrom.device\n2.278s dev-disk-by\\x2did-ata\\x2dQEMU_DVD\\x2dROM_QM00003.device\n2.266s sys-devices-platform-serial8250-serial8250:0-serial8250:0.2-tty-ttyS2.device\n2.266s dev-ttyS2.device\n2.250s dev-ttyS1.device\n2.250s sys-devices-platform-serial8250-serial8250:0-serial8250:0.1-tty-ttyS1.device\n2.246s dev-disk-by\\x2dpath-pci\\x2d0000:00:06.0\\x2dpart-by\\x2duuid-439d107a\\x2dcd69\\x2d4173\\x2d80d7\\x2d5760598152ee.device\n2.246s dev-disk-by\\x2duuid-439d107a\\x2dcd69\\x2d4173\\x2d80d7\\x2d5760598152ee.device\n2.246s dev-disk-by\\x2dpartuuid-2aa23238\\x2db11f\\x2d4ce0\\x2da38c\\x2de632b253aa62.device\n2.246s sys-devices-pci0000:00-0000:00:06.0-virtio4-block-vda-vda2.device\n2.246s dev-disk-by\\x2dpath-virtio\\x2dpci\\x2d0000:00:06.0\\x2dpart2.device\n2.246s dev-vda2.device\n2.246s dev-disk-by\\x2dpath-pci\\x2d0000:00:06.0\\x2dpart-by\\x2dpartuuid-2aa23238\\x2db11f\\x2d4ce0\\x2da38c\\x2de632b253aa62.device\n2.246s dev-disk-by\\x2dpath-pci\\x2d0000:00:06.0\\x2dpart-by\\x2dpartnum-2.device\n2.246s dev-disk-by\\x2ddiskseq-1\\x2dpart2.device\n2.246s dev-disk-by\\x2dpath-pci\\x2d0000:00:06.0\\x2dpart2.device\n2.245s dev-ttyS3.device\n2.245s sys-devices-platform-serial8250-serial8250:0-serial8250:0.3-tty-ttyS3.device\n2.242s sys-devices-pci0000:00-0000:00:06.0-virtio4-block-vda-vda4.device\n2.242s dev-disk-by\\x2dpath-pci\\x2d0000:00:06.0\\x2dpart4.device\n2.242s dev-disk-by\\x2dpath-pci\\x2d0000:00:06.0\\x2dpart-by\\x2dlabel-bs_solarevolution\\x2deval.device\n2.242s dev-disk-by\\x2dpartuuid-333e7a40\\x2d4b37\\x2d4719\\x2d9ad0\\x2dbedaeb8f3c9c.device\n2.242s dev-disk-by\\x2dlabel-bs_solarevolution\\x2deval.device\n2.242s dev-disk-by\\x2dpath-pci\\x2d0000:00:06.0\\x2dpart-by\\x2dpartuuid-333e7a40\\x2d4b37\\x2d4719\\x2d9ad0\\x2dbedaeb8f3c9c.device\n2.242s dev-disk-by\\x2dpath-pci\\x2d0000:00:06.0\\x2dpart-by\\x2dpartnum-4.device\n2.242s dev-disk-by\\x2dpath-pci\\x2d0000:00:06.0\\x2dpart-by\\x2duuid-c44bcc8b\\x2dbf2d\\x2d4c92\\x2d90d9\\x2d9531c86d17b7.device\n2.242s dev-disk-by\\x2duuid-c44bcc8b\\x2dbf2d\\x2d4c92\\x2d90d9\\x2d9531c86d17b7.device\n2.242s dev-disk-by\\x2dpath-virtio\\x2dpci\\x2d0000:00:06.0\\x2dpart4.device\n2.242s dev-vda4.device\n2.242s dev-disk-by\\x2ddiskseq-1\\x2dpart4.device\n2.240s dev-ttyS0.device\n2.240s sys-devices-pnp0-00:04-00:04:0-00:04:0.0-tty-ttyS0.device"
+  },
+  "akrep_overhead": {
+    "collected_at_utc": "2026-11-24T23:02:08.578593+00:00",
+    "daemon_metrics": {
+      "pid": 769,
+      "active": "active",
+      "enabled": "enabled",
+      "user": "akrep",
+      "vm_rss_kb": 6004,
+      "vm_hwm_kb": 6364,
+      "threads": 1,
+      "idle_cpu_ticks_3s": 0,
+      "dbus_calls": {
+        "GetVersion": {
+          "rc": 0,
+          "latency_ms": 3.81
+        },
+        "GetCapabilities": {
+          "rc": 0,
+          "latency_ms": 2.69
+        },
+        "GetSnapshot": {
+          "rc": 0,
+          "latency_ms": 68.83
+        }
+      },
+      "akrep_card_count": 7,
+      "sentinel_control_count": 7,
+      "selinux_avc_denials_akrep": 0
+    },
+    "boot_with_akrepd_seconds": [
+      5.521,
+      5.374,
+      5.386
+    ],
+    "boot_with_akrepd_median_s": 5.386,
+    "boot_without_akrepd_seconds": [
+      5.366,
+      5.361
+    ],
+    "boot_without_akrepd_median_s": 5.3635,
+    "boot_delta_ms": 22.5,
+    "binary_sizes": {
+      "/usr/bin/akrepd": 7447392,
+      "/usr/bin/akrep-ui": 6920552
+    }
+  }
+}

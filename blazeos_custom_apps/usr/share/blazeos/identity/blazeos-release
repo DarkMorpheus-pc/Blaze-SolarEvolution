@@ -2,5 +2,5 @@ BlazeOS Galaxy SolarEvolution
 Codename: SolarEvolution
 Variant: Workstation Live
 Base: Fedora 45
-Version: 5.05
+Version: 5.05.1
 Changes: SolarUI, one-shot OOBE, portable GRUB recovery, BERP and Limine support

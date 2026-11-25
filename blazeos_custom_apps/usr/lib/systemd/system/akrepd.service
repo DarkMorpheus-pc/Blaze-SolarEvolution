@@ -1,0 +1,27 @@
+[Unit]
+Description=BlazeOS Akrep Security Center Telemetry Daemon (Read-Only v0.1)
+Documentation=https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
+After=dbus.service firewalld.service
+Wants=dbus.service
+
+[Service]
+Type=dbus
+BusName=tr.com.blazeos.Akrep1
+User=akrep
+Group=akrep
+ExecStart=/usr/bin/akrepd
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+MemoryMax=96M
+CPUQuota=15%
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

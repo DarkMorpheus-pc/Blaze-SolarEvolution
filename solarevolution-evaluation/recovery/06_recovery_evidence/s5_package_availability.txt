@@ -1,0 +1,21 @@
+=== BINARIES ===
+OK /usr/bin/berp-recovery-gui
+OK /usr/bin/blaze-recovery
+OK /usr/bin/blaze-snapshot
+OK /usr/bin/blaze-sentinel
+OK /usr/bin/blaze-death-screen
+OK /usr/bin/blaze-bootloader
+OK /usr/bin/blaze-recovery-gui-launcher
+=== ASSETS ===
+OK /usr/share/berp-recovery/index.html
+OK /usr/share/berp-recovery/style.css
+OK /usr/share/berp-recovery/app.js
+OK /etc/systemd/system/blaze-recovery-gui.service
+OK /etc/systemd/system/blaze-recovery-gui.target
+OK /etc/grub.d/99_berp
+=== BLAZE_REC VAULT ===
+/dev/vda3
+RO=1
+=== SNAPSHOT STATUS ===
+blaze-snapshot: supported: root is btrfs (subvol=root, source=/dev/vda4)
+blaze-snapshot: snapshots: 0 (no snapshot directory yet)

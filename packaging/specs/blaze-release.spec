@@ -1,6 +1,6 @@
 Name:           blaze-release
-Version:        5.05
-Release:        3%{?dist}
+Version:        5.05.1
+Release:        1%{?dist}
 Summary:        Blaze repository definition, GPG key and OS identity guard
 License:        GPL-3.0-or-later
 URL:            https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
@@ -15,7 +15,7 @@ Requires:       grep
 %description
 Installs the Blaze package repository definition, the public GPG signing key,
 DNF5 releasever=45 pinning and excludepkgs protections, kernel-install hooks,
-and the Blaze SolarEvolution 5.05 identity guard so system updates preserve
+and the Blaze SolarEvolution 5.05.1 identity guard so system updates preserve
 BlazeOS branding across release files, GRUB entries, Anaconda, and logos.
 
 %prep
@@ -79,6 +79,9 @@ fi
 /etc/blazeos/update-channel.conf
 
 %changelog
+* Tue Nov 24 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-1
+- Bump SolarEvolution identity to 5.05.1 with BLAZE_BASE_ID=fedora and BLAZE_BASE_VERSION_ID=45
+
 * Mon Nov 23 2026 Blaze Release <release@blazeos.com.tr> - 5.05-3
 - Update Blaze-SolarEvolution GitHub URLs and add /etc/blazeos/update-channel.conf for BlazeHouse channel upgrades
 

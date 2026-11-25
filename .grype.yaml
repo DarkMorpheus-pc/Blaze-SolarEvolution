@@ -1,0 +1,4 @@
+# CI / ISO Build / Security Evaluation Vulnerability Matching Policy
+# Deliberately scoped to explicit invocation (`grype -c .grype.yaml`) so arbitrary
+# end-user Grype runs are not globally overridden behind the scenes.
+distro: "fedora:45"

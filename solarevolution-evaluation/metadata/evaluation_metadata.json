@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "generated_at_utc": "2026-11-25T01:14:21.441676+00:00",
+  "project": "Blaze SolarEvolution",
+  "evaluated_version": "Blaze SolarEvolution 5.05.1",
+  "fedora_base": "45",
+  "guest_kernel": "7.2.11-300.fc45.x86_64",
+  "assessment_classification": "Internal reproducible technical evaluation conducted in isolated QEMU/KVM virtual machines. This evaluation is NOT an independent third-party audit, NOT an official CIS/NIST certification, and does NOT claim a formal MTBF.",
+  "integrity_vs_signature_note": "metadata/SHA256SUMS.txt provides SHA-256 cryptographic hashes for file integrity verification only. Checksums are NOT digital signatures and do not provide third-party cryptographic identity attestation.",
+  "virtualization_platform": {
+    "hypervisor": "QEMU emulator version 11.1.3",
+    "acceleration": "KVM (-enable-kvm -cpu host)",
+    "host_kernel": "7.3.4-1-cachyos",
+    "guest_firmware": "UEFI OVMF 4M (Secure Boot not supported by virtual firmware)",
+    "guest_vcpus": 8,
+    "guest_ram_mib": 8192,
+    "guest_os_disk": "40 GiB VirtIO-BLK QCOW2 (disposable CoW overlays over pristine base image)",
+    "guest_scratch_disk": "6 GiB isolated disposable VirtIO-BLK QCOW2 (/dev/vdb, ext4) for fio",
+    "guest_graphics": "VirtIO-VGA (software rendering / llvmpipe — 3D GPU benchmarks skipped)"
+  },
+  "tool_versions": {
+    "phoronix_test_suite": "Phoronix Test Suite v10.8.6",
+    "fio": "fio-3.42",
+    "stress_ng": "stress-ng, version 0.22.02 (gcc 16.2.1, x86_64 Linux 7.2.11-300.fc45.x86_64)",
+    "openscap": "OpenSCAP command line tool (oscap) 1.4.6",
+    "scap_security_guide": [
+      "scap-security-guide-0.1.82-1.fc45.noarch"
+    ],
+    "lynis": "3.1.7",
+    "syft": "syft v1.57.2",
+    "grype": "grype v0.122.1",
+    "grype_db_built": "2026-11-24T06:22:05Z"
+  },
+  "phase_timestamps_utc": {
+    "phase01_inventory": "2026-11-24T23:02:10.373315+00:00",
+    "phase02_performance": "2026-11-24T23:35:07.863600+00:00",
+    "phase03_security": "2026-11-24T23:13:59.966018+00:00",
+    "phase04_supply_chain": "2026-11-24T23:02:11.480624+00:00",
+    "phase05_reliability": "2026-11-24T23:25:29.752046+00:00",
+    "phase06_recovery": "2026-11-24T23:35:07.802752+00:00"
+  }
+}

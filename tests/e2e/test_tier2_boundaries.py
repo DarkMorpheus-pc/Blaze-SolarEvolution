@@ -118,7 +118,7 @@ class Tier2BoundaryAndNegativeTests(unittest.TestCase):
 
     def test_rpm_and_repomd_tamper_rejected(self):
         gpg_key = PACKAGING_REPO_DIR / "RPM-GPG-KEY-blaze"
-        orig_rpm = PACKAGING_REPO_DIR / "blaze-sentinel-0.3.1-1.blaze.x86_64.rpm"
+        orig_rpm = PACKAGING_REPO_DIR / "blaze-sentinel-0.3.1-2.blaze.x86_64.rpm"
         orig_repomd = PACKAGING_REPO_DIR / "repodata/repomd.xml"
         orig_asc = PACKAGING_REPO_DIR / "repodata/repomd.xml.asc"
 
@@ -178,11 +178,11 @@ class Tier2BoundaryAndNegativeTests(unittest.TestCase):
             )
             res = subprocess.run([sync_bin, f"--sysroot={root}"], capture_output=True, text=True, timeout=10)
             self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
-            self.assertIn('PRETTY_NAME="Blaze SolarEvolution 5.05"', (root / "etc/os-release").read_text(encoding="utf-8"))
-            self.assertEqual((root / "etc/redhat-release").read_text(encoding="utf-8").strip(), "Blaze SolarEvolution release 5.05 (SolarEvolution)")
+            self.assertIn('PRETTY_NAME="Blaze SolarEvolution 5.05.1"', (root / "etc/os-release").read_text(encoding="utf-8"))
+            self.assertEqual((root / "etc/redhat-release").read_text(encoding="utf-8").strip(), "Blaze SolarEvolution release 5.05.1 (SolarEvolution)")
             self.assertEqual((root / "etc/dnf/vars/releasever").read_text(encoding="utf-8").strip(), "45")
             bls = (root / "boot/loader/entries/test-7.3.4.conf").read_text(encoding="utf-8")
-            self.assertIn("title Blaze SolarEvolution (7.3.4-300.fc45.x86_64) 5.05", bls)
+            self.assertIn("title Blaze SolarEvolution (7.3.4-300.fc45.x86_64) 5.05.1", bls)
             self.assertIn("grub_class blazeos", bls)
 
 

@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=Akrep Güvenlik Merkezi
+Name[en]=Akrep Security Center
+GenericName=Güvenlik Merkezi
+GenericName[en]=Security Center
+Comment=BlazeOS sistem güvenlik duruşu, SELinux, güvenlik duvarı ve bütünlük denetimi (Salt Okunur)
+Comment[en]=BlazeOS system security posture, SELinux, firewall, and integrity diagnostics (Read-Only)
+Exec=akrep-ui
+TryExec=akrep-ui
+Icon=security-high
+Terminal=false
+Categories=System;Security;Settings;
+Keywords=akrep;security;güvenlik;selinux;firewall;firewalld;flatpak;sentinel;
+StartupNotify=true
+StartupWMClass=tr.com.blazeos.Akrep

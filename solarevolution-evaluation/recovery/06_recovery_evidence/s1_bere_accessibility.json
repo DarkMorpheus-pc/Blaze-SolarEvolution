@@ -1,0 +1,80 @@
+{
+  "no_token_probe": {
+    "http_status": 403,
+    "response": {
+      "raw": "<!DOCTYPE HTML>\n<html lang=\"en\">\n    <head>\n        <meta charset=\"utf-8\">\n        <style type=\"text/css\">\n            :root {\n                color-scheme: light dark;\n            }\n        </style>\n        <title>Error response</title>\n    </head>\n    <body>\n        <h1>Error response</h1>\n        <p>Error code: 403</p>\n        <p>Message: Forbidden.</p>\n        <p>Error code explanation: 403 - Request forbidden -- authorization will not help.</p>\n    </body>\n</html>\n"
+    }
+  },
+  "locked_probe": {
+    "http_status": 401,
+    "response": {
+      "status": "locked",
+      "auth_required": true,
+      "unlocked": false,
+      "message": "BERE kilitli: Devam etmek i\u00e7in Yetkili Kullan\u0131c\u0131 (wheel) veya Root parolas\u0131 girin."
+    }
+  },
+  "auth_status": {
+    "http_status": 200,
+    "response": {
+      "status": "ok",
+      "auth_required": true,
+      "unlocked": false,
+      "unlocked_user": "",
+      "admin_users": [
+        "root",
+        "[REDACTED-USER]"
+      ]
+    }
+  },
+  "vault_status": {
+    "http_status": 200,
+    "response": {
+      "status": "ok",
+      "present": true,
+      "device": "/dev/vda3",
+      "uuid": "09b526ed-b624-41ce-8f5b-ebd7c331c234",
+      "mountpoint": "/run/bere_vault_ro",
+      "did_mount": true,
+      "mode": "full",
+      "full_os_embedded": true,
+      "squashfs_mb": 2982,
+      "kernel_ready": true,
+      "hash_verified": false,
+      "tamper_error": null
+    }
+  },
+  "vault_sha256_verify": {
+    "mode": "full",
+    "full_os_embedded": true,
+    "checks": {
+      "squashfs": {
+        "size_bytes": 3127537664,
+        "sha256_match": true
+      },
+      "vmlinuz": {
+        "size_bytes": 19024232,
+        "sha256_match": true
+      },
+      "initrd": {
+        "size_bytes": 275402504,
+        "sha256_match": true
+      }
+    },
+    "all_verified": true
+  },
+  "info": {
+    "http_status": 200,
+    "response": {
+      "status": "ok",
+      "target_root": "/",
+      "live_ram_only": false,
+      "root_btrfs": true,
+      "root_fstype": "btrfs",
+      "root_device": "/dev/vda4",
+      "root_subvol": "root",
+      "uefi": true,
+      "has_factory_image": false
+    }
+  }
+}

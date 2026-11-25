@@ -1,0 +1,148 @@
+{
+  "schema_version": "1.0",
+  "collected_at_utc": "2026-11-24T23:35:07.802752+00:00",
+  "isolation_note": "All 9 scenarios executed strictly on disposable QCOW2 copy-on-write clones; the base installed VM disk was never modified.",
+  "automation_distinction": "Boot into BERE via GRUB, vault SHA-256 verification, Btrfs subvolume isolation, and systemd journal logging are automated; destructive rollback and boot-repair execution intentionally require explicit operator root-password authentication (mandatory BERE security lock).",
+  "metrics": {
+    "total_scenarios": 9,
+    "completed_applicable_attempts": 9,
+    "successful_attempts": 9,
+    "failed_attempts": 0,
+    "incomplete_scenarios": 0,
+    "recovery_success_rate_pct": 100.0,
+    "formula": "Successful applicable recovery attempts / Total completed applicable attempts * 100",
+    "median_all_scenario_duration_s": 14.45,
+    "median_recovery_workflow_duration_s": 17.92
+  },
+  "scenarios": [
+    {
+      "id": "S1",
+      "name": "Recovery environment accessibility (GRUB -> BERE + Auth + Vault SHA-256)",
+      "mode": "automated_boot_operator_unlock",
+      "applicable": true,
+      "completed": true,
+      "success": true,
+      "duration_s": 14.45,
+      "data_preserved": null,
+      "details": "BERE boot+ready=5.61s; missing-token HTTP=403; locked HTTP=401; full vault present=True; SHA-256 manifest verified=True",
+      "evidence_files": [
+        "s1_bere_recovery_gui.png",
+        "s1_bere_accessibility.json"
+      ]
+    },
+    {
+      "id": "S2",
+      "name": "Recovery workflow completion (BERE snapshot create -> list -> rollback)",
+      "mode": "operator_triggered_api",
+      "applicable": true,
+      "completed": true,
+      "success": true,
+      "duration_s": 1.2,
+      "data_preserved": true,
+      "details": "create=ok, listed=True, restore=ok",
+      "evidence_files": [
+        "s2_recovery_workflow.json"
+      ]
+    },
+    {
+      "id": "S3",
+      "name": "Recovery after synthetic configuration error",
+      "mode": "operator_triggered_bere_rollback",
+      "applicable": true,
+      "completed": true,
+      "success": true,
+      "duration_s": 18.31,
+      "data_preserved": true,
+      "details": "Snapshot /.blaze-snapshots/20261124T233344Z restored via BERE; synthetic config reverted to HEALTHY_BASELINE_V1=True",
+      "evidence_files": [
+        "s3_bere_config_rollback.png",
+        "s3_s9_config_and_data_verify.txt"
+      ]
+    },
+    {
+      "id": "S4",
+      "name": "Recovery after failed test update on disposable clone",
+      "mode": "operator_triggered_bere_rollback",
+      "applicable": true,
+      "completed": true,
+      "success": true,
+      "duration_s": 17.92,
+      "data_preserved": true,
+      "details": "Pre-transaction snapshot /.blaze-snapshots/20261124T233416Z rolled back cleanly; broken artifacts removed & RPM DB SHA-256 identical=True",
+      "evidence_files": [
+        "s4_failed_update_rollback.txt"
+      ]
+    },
+    {
+      "id": "S5",
+      "name": "Recovery package & component availability",
+      "mode": "automated_inspection",
+      "applicable": true,
+      "completed": true,
+      "success": true,
+      "duration_s": 0.4,
+      "data_preserved": null,
+      "details": "Missing components: 0; BLAZE_REC read-only vault present=True",
+      "evidence_files": [
+        "s5_package_availability.txt"
+      ]
+    },
+    {
+      "id": "S6",
+      "name": "Boot recovery procedure (GRUB2 + BLS regeneration via BERE)",
+      "mode": "operator_triggered_bere_boot_repair",
+      "applicable": true,
+      "completed": true,
+      "success": true,
+      "duration_s": 19.98,
+      "data_preserved": true,
+      "details": "Deleted grub.cfg & BLS entries on disposable clone -> BERE boot_repair(grub) returned status=ok -> normal OS cold boot succeeded=True",
+      "evidence_files": [
+        "s6_bere_boot_repair.png",
+        "s6_boot_recovery_procedure.txt"
+      ]
+    },
+    {
+      "id": "S7",
+      "name": "Post-recovery system integrity",
+      "mode": "automated_verification",
+      "applicable": true,
+      "completed": true,
+      "success": true,
+      "duration_s": 0.4,
+      "data_preserved": true,
+      "details": "Blaze identity intact=True; Btrfs 0 I/O & corruption errors=True; failed_units='none'",
+      "evidence_files": [
+        "s7_post_recovery_integrity.txt"
+      ]
+    },
+    {
+      "id": "S8",
+      "name": "Recovery log & structured audit generation",
+      "mode": "automated_logging",
+      "applicable": true,
+      "completed": true,
+      "success": true,
+      "duration_s": 0.8,
+      "data_preserved": null,
+      "details": "Captured 37 journal lines + 7 redacted /api/audit_log events (mode 0600, zero secret leak).",
+      "evidence_files": [
+        "s8_recovery_logs.log"
+      ]
+    },
+    {
+      "id": "S9",
+      "name": "Preservation of designated test data across root rollback",
+      "mode": "btrfs_subvolume_isolation",
+      "applicable": true,
+      "completed": true,
+      "success": true,
+      "duration_s": 18.31,
+      "data_preserved": true,
+      "details": "Pre-snapshot /home canary SHA-256 intact=True; post-snapshot /home canary SHA-256 intact=True",
+      "evidence_files": [
+        "s3_s9_config_and_data_verify.txt"
+      ]
+    }
+  ]
+}

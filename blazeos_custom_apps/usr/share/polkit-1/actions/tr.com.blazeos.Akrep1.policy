@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/polkit/1.0/policyconfig.dtd">
+<policyconfig>
+  <vendor>BlazeOS</vendor>
+  <vendor_url>https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution</vendor_url>
+
+  <!-- Unused in Akrep v0.1 (strictly read-only). Reserved for future admin-authenticated controls. -->
+  <action id="tr.com.blazeos.Akrep1.manage">
+    <description>Manage Akrep system security configuration (disabled in v0.1)</description>
+    <description xml:lang="tr">Akrep sistem güvenlik yapılandırmasını yönet (v0.1 sürümünde devre dışı)</description>
+    <message>Administrator authentication is required to modify Akrep security settings.</message>
+    <message xml:lang="tr">Akrep güvenlik ayarlarını değiştirmek için yönetici kimlik doğrulaması gereklidir.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+</policyconfig>

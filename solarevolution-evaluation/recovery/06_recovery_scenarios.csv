@@ -1,0 +1,10 @@
+id,name,mode,applicable,completed,success,duration_s,data_preserved,details
+S1,Recovery environment accessibility (GRUB -> BERE + Auth + Vault SHA-256),automated_boot_operator_unlock,True,True,True,14.45,,BERE boot+ready=5.61s; missing-token HTTP=403; locked HTTP=401; full vault present=True; SHA-256 manifest verified=True
+S2,Recovery workflow completion (BERE snapshot create -> list -> rollback),operator_triggered_api,True,True,True,1.2,True,"create=ok, listed=True, restore=ok"
+S3,Recovery after synthetic configuration error,operator_triggered_bere_rollback,True,True,True,18.31,True,Snapshot /.blaze-snapshots/20261124T233344Z restored via BERE; synthetic config reverted to HEALTHY_BASELINE_V1=True
+S4,Recovery after failed test update on disposable clone,operator_triggered_bere_rollback,True,True,True,17.92,True,Pre-transaction snapshot /.blaze-snapshots/20261124T233416Z rolled back cleanly; broken artifacts removed & RPM DB SHA-256 identical=True
+S5,Recovery package & component availability,automated_inspection,True,True,True,0.4,,Missing components: 0; BLAZE_REC read-only vault present=True
+S6,Boot recovery procedure (GRUB2 + BLS regeneration via BERE),operator_triggered_bere_boot_repair,True,True,True,19.98,True,Deleted grub.cfg & BLS entries on disposable clone -> BERE boot_repair(grub) returned status=ok -> normal OS cold boot succeeded=True
+S7,Post-recovery system integrity,automated_verification,True,True,True,0.4,True,Blaze identity intact=True; Btrfs 0 I/O & corruption errors=True; failed_units='none'
+S8,Recovery log & structured audit generation,automated_logging,True,True,True,0.8,,"Captured 37 journal lines + 7 redacted /api/audit_log events (mode 0600, zero secret leak)."
+S9,Preservation of designated test data across root rollback,btrfs_subvolume_isolation,True,True,True,18.31,True,Pre-snapshot /home canary SHA-256 intact=True; post-snapshot /home canary SHA-256 intact=True

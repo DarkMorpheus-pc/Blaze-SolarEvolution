@@ -1,0 +1,64 @@
+status_before={"http_status": 200, "response": {"status": "ok", "output": "=== [ BlazeOS \u00d6ny\u00fckleyici (Bootloader) Durumu ] ===\n\n  EFI B\u00f6l\u00fcm\u00fc: /boot/efi\n  Limine Bootloader: Kurulu de\u011fil\n  GNU GRUB2:         Kurulu (/boot/efi/EFI/fedora/shimx64.efi)\n\n=== [ Aktif EFI Boot S\u0131ralamas\u0131 ] ===\n  BootOrder: 0009,0000,0001,0003,0004,0005,0006,0007,0008,000A\n    Boot0000* BootManagerMenuApp\tFvVol(7cb8bdc9-f8eb-4f34-aaea-3ee4af6516a1)/FvFile(eec25bdc-67f2-4d95-b1d5-f81b2039d11d)\n    Boot0001* EFI Firmware Setup\tFvVol(7cb8bdc9-f8eb-4f34-aaea-3ee4af6516a1)/FvFile(462caa21-7614-4503-836e-8ab6f4662331)\n    Boot0003* UEFI Misc Device\tPciRoot(0x0)/Pci(0x6,0x0){auto_created_boot_option}\n    Boot0004* UEFI PXEv4 (MAC:[REDACTED-MAC])\tPciRoot(0x0)/Pci(0x5,0x0)/MAC([REDACTED-MAC],1)/IPv4(0.0.0.0,0,DHCP,0.0.0.0,0.0.0.0,0.0.0.0){auto_created_boot_option}\n    Boot0005* UEFI PXEv6 (MAC:[REDACTED-MAC])\tPciRoot(0x0)/Pci(0x5,0x0)/MAC([REDACTED-MAC],1)/IPv6([::],0,Static,[::],[::],64){auto_created_boot_option}\n    Boot0006* UEFI HTTPv4 (MAC:[REDACTED-MAC])\tPciRoot(0x0)/Pci(0x5,0x0)/MAC([REDACTED-MAC],1)/IPv4(0.0.0.0,0,DHCP,0.0.0.0,0.0.0.0,0.0.0.0)/Uri(){auto_created_boot_option}\n    Boot0007* UEFI HTTPv6 (MAC:[REDACTED-MAC])\tPciRoot(0x0)/Pci(0x5,0x0)/MAC([REDACTED-MAC],1)/IPv6([::],0,Static,[::],[::],64)/Uri(){auto_created_boot_option}\n    Boot0008* EFI Internal Shell\tFvVol(7cb8bdc9-f8eb-4f34-aaea-3ee4af6516a1)/FvFile(7c04a583-9e3e-4f1c-ad65-e05268d0b4d1)\n  * Boot0009* Blaze SolarEvolution\tHD(1,GPT,f1a61286-a796-469e-a67d-09eb98966b0a,0x800,0x12c000)/\u001bFI\fedora\\shimx64.efi (Blaze SolarEvolution GRUB)\n    Boot000A* BlazeOS Recovery (BERE Vault)\tHD(1,GPT,f1a61286-a796-469e-a67d-09eb98966b0a,0x800,0x12c000)/\\EFI\\BlazeRecovery\\shimx64.efi\n=== [/boot \u00c7ekirdek ve Initramfs Kal\u0131plar\u0131] ===\n  \u00c7ekirdekler : vmlinuz-0-rescue-370b0f7ad1214327a8967c4c694a1737, vmlinuz-7.2.11-300.fc45.x86_64\n  Initramfs   : initramfs-0-rescue-370b0f7ad1214327a8967c4c694a1737.img, initramfs-7.2.11-300.fc45.x86_64.img"}}
+repair_resp={"http_status": 200, "response": {"status": "ok", "output": "[EFI] BOOTX64.EFI: skipped_samefile (already valid on ESP)\n[BLS] 1 \u00e7ekirdek giri\u015fi atomik olarak yenilendi.\nGenerating grub configuration file ...\nAdding boot menu entry for UEFI Firmware Settings ...\ndone\n[UEFI] BlazeOS GRUB2 NVRAM BootOrder ba\u015f\u0131na ta\u015f\u0131nd\u0131."}}
+pre_reboot_diag:
+=== /boot/grub2 ===
+total 32
+drwxr-xr-x. 3 root root 4096 Nov 24 23:34 .
+drwxr-xr-x. 6 root root 4096 Nov 24 23:34 ..
+-rw-r--r--. 1 root root  111 Nov 24 22:37 earlyboot.cfg
+drwx------. 2 root root 4096 Nov 24 22:37 fonts
+-rw-------. 1 root root 8864 Nov 24 23:34 grub.cfg
+-rw-r--r--. 1 root root 1024 Nov 24 23:34 grubenv
+=== /boot/loader/entries ===
+total 12
+drwx------. 2 root root 4096 Nov 24 23:34 .
+drwxr-xr-x. 3 root root 4096 Nov 24 22:37 ..
+-rw-r--r--. 1 root root  324 Nov 24 23:34 370b0f7ad1214327a8967c4c694a1737-7.2.11-300.fc45.x86_64.conf
+=== /boot/efi/EFI/fedora/grub.cfg ===
+if search --no-floppy --root-dev-only --fs-uuid --set=dev 439d107a-cd69-4173-80d7-5760598152ee; then
+    set prefix=($dev)/grub2
+    export $prefix
+    configfile $prefix/grub.cfg
+elif search --no-floppy --file --set=bere_dev /BLAZE_RECOVERY_VAULT.json; then
+    insmod gzio
+    insmod part_gpt
+    insmod ext2
+    set root=($bere_dev)
+    linux /boot/vmlinuz-bere root=live:UUID=09b526ed-b624-41ce-8f5b-ebd7c331c234 rd.live.image ro quiet systemd.unit=blaze-recovery-gui.target systemd.mask=sddm.service systemd.mask=display-manager.service
+    initrd /boot/initrd-bere.img
+    boot
+fi
+=== grubenv ===
+saved_entry=0
+boot_success=1
+boot_counter=0
+boot_indeterminate=0
+
+reboot_ok=True reboot_err=
+post_reboot_check:
+NAME="Blaze SolarEvolution"
+VERSION="5.05.1"
+ID=blazeos
+ID_LIKE=fedora
+BLAZE_BASE_ID=fedora
+BLAZE_BASE_VERSION_ID=45
+VERSION_ID=5.05.1
+VARIANT="SolarEvolution"
+VARIANT_ID=solarevolution
+PRETTY_NAME="Blaze SolarEvolution 5.05.1"
+ANSI_COLOR="0;38;2;255;102;0"
+LOGO=blazeos-logo
+CPE_NAME="cpe:/o:blazeos:solarevolution:5.05.1"
+DEFAULT_HOSTNAME="blazeos"
+HOME_URL="https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution"
+DOCUMENTATION_URL="https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution"
+SUPPORT_URL="https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution/issues"
+BUG_REPORT_URL="https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution/issues"
+REDHAT_BUGZILLA_PRODUCT="Blaze SolarEvolution"
+REDHAT_BUGZILLA_PRODUCT_VERSION="5.05.1"
+REDHAT_SUPPORT_PRODUCT="Blaze SolarEvolution"
+REDHAT_SUPPORT_PRODUCT_VERSION="5.05.1"
+SUPPORT_END=2027-06-01
+-rw-------. 1 root root 8864 Nov 24 23:34 /boot/grub2/grub.cfg
+-rw-r--r--. 1 root root  331 Nov 24 23:35 /boot/loader/entries/370b0f7ad1214327a8967c4c694a1737-7.2.11-300.fc45.x86_64.conf
+running

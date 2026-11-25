@@ -70,6 +70,17 @@ venv/
 **/target/
 target/
 Cargo.lock
+!solarui/Cargo.lock
+
+# ============================================================
+# Large evaluation raw/SBOM artifacts (kept locally & in release archive; reports/scripts/charts tracked)
+# ============================================================
+.superpowers/
+solarevolution-evaluation/raw-results/
+solarevolution-evaluation/sbom/04_sbom_*.json
+solarevolution-evaluation/sbom/04_vulnerability_report*.json
+solarevolution-evaluation/security/*.xml
+solarevolution-evaluation/security/*.html
 
 # ============================================================
 # Editor / OS / Local Assistant

@@ -155,12 +155,15 @@ excludepkgs=fedora-release*,fedora-logos*,generic-release*,generic-logos*,redhat
 blaze-tools
 blaze-house
 blaze-recovery
+blaze-oobe
+blaze-scap-compat
 solarui
+solarui-config
 NetworkManager
 " 0644
 
     write_literal_atomic "${SYSROOT}/etc/anaconda/profile.d/blazeos-solarevolution.conf" \
-"# Anaconda profile configuration for Blaze SolarEvolution 5.05
+"# Anaconda profile configuration for Blaze SolarEvolution 5.05.1
 
 [Profile]
 profile_id = blazeos-solarevolution
@@ -237,7 +240,7 @@ repair_bls_dir() {
             debug_suffix=" with debugging"
         fi
 
-        local expected_title="Blaze SolarEvolution (${clean_ver}) 5.05${debug_suffix}"
+        local expected_title="Blaze SolarEvolution (${clean_ver}) 5.05.1${debug_suffix}"
         if [ "$cur_title" = "$expected_title" ] && { [ -z "$cur_class" ] || [ "$cur_class" = "blazeos" ]; }; then
             continue
         fi

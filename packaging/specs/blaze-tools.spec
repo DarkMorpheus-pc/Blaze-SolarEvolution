@@ -3,7 +3,7 @@
 %global _build_id_links none
 # Binary repack of artefacts built from the repositories listed in SOURCES.md
 Name:           blaze-tools
-Version:        5.05
+Version:        5.05.1
 Release:        1%{?dist}
 Summary:        BlazeOS helper tools and installers
 License:        GPL-3.0-or-later
@@ -41,7 +41,19 @@ rm -f %{buildroot}/%{name}-%{version}.tar
 /usr/bin/blazeos-welcome
 /usr/bin/solar-torture
 /usr/bin/blaze-snapshot
+%attr(0755,root,root) /usr/libexec/blaze-style-center-first-run
+%attr(0755,root,root) /usr/libexec/blazeos-apply-logos
+%attr(0755,root,root) /usr/libexec/blazeos-offline-progress-filter
+%attr(0755,root,root) /usr/libexec/blazeos-offline-update
+%attr(0755,root,root) /usr/libexec/blazeos-update
+%attr(0755,root,root) /usr/libexec/blazeos-wayland-session-ready
+%attr(0755,root,root) /usr/libexec/blazeos-welcome-helper
+%attr(0755,root,root) /usr/libexec/livesys/sessions.d/livesys-solarui
+%config(noreplace) /etc/udev/rules.d/60-blaze-io-schedulers.rules
+/etc/dnf/libdnf5-plugins/actions.d/blaze-snapshot.actions
 
 %changelog
+* Tue Nov 24 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-1
+- Complete ownership of Blaze libexec helpers, livesys session hook, and udev I/O scheduler rules
 * Mon Oct 26 2026 Blaze Release <release@blazeos.com.tr> - 5.05-1
 - Initial RPM packaging of blaze-tools for the Blaze repository

@@ -1,0 +1,73 @@
+system,category,benchmark,version,metric,unit,direction,run_1,run_2,run_3,median
+blaze_solarevolution,CPU,7-Zip Compression,26.01,Test: Compression Rating,MIPS,HIB,40458.0,46856.0,47255.0,46856.0
+blaze_solarevolution,CPU,7-Zip Compression,26.01,Test: Decompression Rating,MIPS,HIB,27747.0,26131.0,26091.0,26131.0
+blaze_solarevolution,CPU,Timed Apache Compilation,2.4.68,Time To Compile,Seconds,LIB,32.753,32.779,32.621,32.753
+blaze_solarevolution,CPU,Coremark,1.0,CoreMark Size 666 - Iterations Per Second,Iterations/Sec,HIB,197987.1308,193739.7833,198626.169,197987.1308
+blaze_solarevolution,CPU,C-Ray,2.0,Resolution: 1080p - Rays Per Pixel: 16,Seconds,LIB,125.461,124.447,126.882,125.461
+blaze_solarevolution,CPU,CacheBench,,Test: Read / Modify / Write,MB/s,HIB,98041.3828,98114.3111,97250.1391,98041.3828
+blaze_solarevolution,Memory,Stream,2013-01-17,Type: Copy,MB/s,HIB,33367.4,33433.6,33348.0,33367.4
+blaze_solarevolution,Memory,Stream,2013-01-17,Type: Scale,MB/s,HIB,22512.4,22422.8,22541.9,22512.4
+blaze_solarevolution,Memory,Stream,2013-01-17,Type: Triad,MB/s,HIB,25208.5,25198.6,25176.5,25198.6
+blaze_solarevolution,Memory,Stream,2013-01-17,Type: Add,MB/s,HIB,25204.8,25134.3,25198.5,25198.5
+blaze_solarevolution,System,Timed Linux Kernel Compilation,7.0,Build: defconfig,Seconds,LIB,282.643,280.813,281.505,281.505
+blaze_solarevolution,Memory,Pointer-Chase Latency,custom-c-v1,16KiB_L1,ns,LIB,2.145,2.133,2.227,2.145
+blaze_solarevolution,Memory,Pointer-Chase Latency,custom-c-v1,256KiB_L2,ns,LIB,5.111,4.958,4.953,4.958
+blaze_solarevolution,Memory,Pointer-Chase Latency,custom-c-v1,4MiB_L3,ns,LIB,13.105,15.812,12.903,13.105
+blaze_solarevolution,Memory,Pointer-Chase Latency,custom-c-v1,64MiB_DRAM,ns,LIB,92.937,90.313,84.256,90.313
+blaze_solarevolution,Storage,fio_seq_read,fio-3.42,Bandwidth,MB/s,HIB,10138.61,9846.15,10039.21,10039.21
+blaze_solarevolution,Storage,fio_seq_read,fio-3.42,IOPS,IOPS,HIB,10138.61,9846.15,10039.22,10039.22
+blaze_solarevolution,Storage,fio_seq_read,fio-3.42,Mean Latency,ms,LIB,2.9377,2.9754,2.9476,2.9476
+blaze_solarevolution,Storage,fio_seq_read,fio-3.42,P99 Latency,ms,LIB,7.2417,6.783,5.9965,6.783
+blaze_solarevolution,Storage,fio_seq_write,fio-3.42,Bandwidth,MB/s,HIB,4320.67,2805.48,1654.28,2805.48
+blaze_solarevolution,Storage,fio_seq_write,fio-3.42,IOPS,IOPS,HIB,4320.68,2805.48,1654.28,2805.48
+blaze_solarevolution,Storage,fio_seq_write,fio-3.42,Mean Latency,ms,LIB,7.2665,11.2381,19.21,11.2381
+blaze_solarevolution,Storage,fio_seq_write,fio-3.42,P99 Latency,ms,LIB,15.6631,98.0419,316.67,98.0419
+blaze_solarevolution,Storage,fio_rand4k_read,fio-3.42,Bandwidth,MB/s,HIB,1138.61,1138.69,1136.81,1138.61
+blaze_solarevolution,Storage,fio_rand4k_read,fio-3.42,IOPS,IOPS,HIB,291484.38,291505.74,291024.36,291484.38
+blaze_solarevolution,Storage,fio_rand4k_read,fio-3.42,Mean Latency,ms,LIB,0.4365,0.4365,0.4372,0.4365
+blaze_solarevolution,Storage,fio_rand4k_read,fio-3.42,P99 Latency,ms,LIB,1.1715,1.1878,1.1878,1.1878
+blaze_solarevolution,Storage,fio_rand4k_write,fio-3.42,Bandwidth,MB/s,HIB,959.72,134.29,926.67,926.67
+blaze_solarevolution,Storage,fio_rand4k_write,fio-3.42,IOPS,IOPS,HIB,245688.97,34378.68,237228.99,237228.99
+blaze_solarevolution,Storage,fio_rand4k_write,fio-3.42,Mean Latency,ms,LIB,0.5178,3.7191,0.5363,0.5363
+blaze_solarevolution,Storage,fio_rand4k_write,fio-3.42,P99 Latency,ms,LIB,1.3517,3.2604,1.3681,1.3681
+blaze_solarevolution,System,systemd-analyze,systemd,Total Boot Time,s,LIB,5.348,5.36,5.329,5.348
+blaze_solarevolution,System,systemd-analyze,systemd,Userspace Init Time,s,LIB,3.354,3.34,3.341,3.341
+blaze_solarevolution,System,Package Operation,rpm/dnf5,rpm_qa_query_seconds,s,LIB,0.7003,0.6426,0.6292,0.6426
+blaze_solarevolution,System,Package Operation,rpm/dnf5,dnf5_installed_query_seconds,s,LIB,0.2528,0.2267,0.2407,0.2407
+blaze_solarevolution,System,Package Operation,rpm/dnf5,dnf5_makecache_refresh_seconds,s,LIB,1.7532,1.1831,1.2304,1.2304
+fedora45_reference,CPU,7-Zip Compression,26.01,Test: Compression Rating,MIPS,HIB,52453.0,52489.0,51734.0,52453.0
+fedora45_reference,CPU,7-Zip Compression,26.01,Test: Decompression Rating,MIPS,HIB,34864.0,34632.0,34597.0,34632.0
+fedora45_reference,CPU,Timed Apache Compilation,2.4.68,Time To Compile,Seconds,LIB,29.84,29.534,29.945,29.84
+fedora45_reference,CPU,Coremark,1.0,CoreMark Size 666 - Iterations Per Second,Iterations/Sec,HIB,244225.0941,244660.788,245123.0722,244660.788
+fedora45_reference,CPU,C-Ray,2.0,Resolution: 1080p - Rays Per Pixel: 16,Seconds,LIB,104.949,105.115,105.171,105.115
+fedora45_reference,CPU,CacheBench,,Test: Read / Modify / Write,MB/s,HIB,103457.7102,103379.2885,103729.8034,103457.7102
+fedora45_reference,Memory,Stream,2013-01-17,Type: Copy,MB/s,HIB,33353.5,33355.6,33484.6,33355.6
+fedora45_reference,Memory,Stream,2013-01-17,Type: Scale,MB/s,HIB,22603.3,22590.9,22595.7,22595.7
+fedora45_reference,Memory,Stream,2013-01-17,Type: Triad,MB/s,HIB,25218.0,25200.0,25191.8,25200.0
+fedora45_reference,Memory,Stream,2013-01-17,Type: Add,MB/s,HIB,25227.8,25213.2,25266.3,25227.8
+fedora45_reference,System,Timed Linux Kernel Compilation,7.0,Build: defconfig,Seconds,LIB,248.764,247.246,247.694,247.694
+fedora45_reference,Memory,Pointer-Chase Latency,custom-c-v1,16KiB_L1,ns,LIB,2.126,2.028,1.998,2.028
+fedora45_reference,Memory,Pointer-Chase Latency,custom-c-v1,256KiB_L2,ns,LIB,4.666,4.674,4.619,4.666
+fedora45_reference,Memory,Pointer-Chase Latency,custom-c-v1,4MiB_L3,ns,LIB,11.708,12.089,12.124,12.089
+fedora45_reference,Memory,Pointer-Chase Latency,custom-c-v1,64MiB_DRAM,ns,LIB,93.215,87.484,86.897,87.484
+fedora45_reference,Storage,fio_seq_read,fio-3.42,Bandwidth,MB/s,HIB,11010.75,11636.36,9846.15,11010.75
+fedora45_reference,Storage,fio_seq_read,fio-3.42,IOPS,IOPS,HIB,11010.75,11636.36,9846.15,11010.75
+fedora45_reference,Storage,fio_seq_read,fio-3.42,Mean Latency,ms,LIB,2.691,2.4957,3.0083,2.691
+fedora45_reference,Storage,fio_seq_read,fio-3.42,P99 Latency,ms,LIB,5.079,6.5864,5.9965,5.9965
+fedora45_reference,Storage,fio_seq_write,fio-3.42,Bandwidth,MB/s,HIB,4129.03,2900.85,46.42,2900.85
+fedora45_reference,Storage,fio_seq_write,fio-3.42,IOPS,IOPS,HIB,4129.03,2900.85,46.43,2900.85
+fedora45_reference,Storage,fio_seq_write,fio-3.42,Mean Latency,ms,LIB,7.6177,10.8732,689.1438,10.8732
+fedora45_reference,Storage,fio_seq_write,fio-3.42,P99 Latency,ms,LIB,16.9083,116.9162,8019.5092,116.9162
+fedora45_reference,Storage,fio_rand4k_read,fio-3.42,Bandwidth,MB/s,HIB,1173.88,1167.11,1169.64,1169.64
+fedora45_reference,Storage,fio_rand4k_read,fio-3.42,IOPS,IOPS,HIB,300512.06,298780.21,299428.62,299428.62
+fedora45_reference,Storage,fio_rand4k_read,fio-3.42,Mean Latency,ms,LIB,0.4234,0.4258,0.4249,0.4249
+fedora45_reference,Storage,fio_rand4k_read,fio-3.42,P99 Latency,ms,LIB,0.7741,0.7741,0.7741,0.7741
+fedora45_reference,Storage,fio_rand4k_write,fio-3.42,Bandwidth,MB/s,HIB,996.94,140.68,751.91,751.91
+fedora45_reference,Storage,fio_rand4k_write,fio-3.42,IOPS,IOPS,HIB,255217.99,36014.41,192488.47,192488.47
+fedora45_reference,Storage,fio_rand4k_write,fio-3.42,Mean Latency,ms,LIB,0.4984,3.5506,0.6616,0.6616
+fedora45_reference,Storage,fio_rand4k_write,fio-3.42,P99 Latency,ms,LIB,0.8561,2.6706,0.938,0.938
+fedora45_reference,System,systemd-analyze,systemd,Total Boot Time,s,LIB,5.103,5.115,5.107,5.107
+fedora45_reference,System,systemd-analyze,systemd,Userspace Init Time,s,LIB,3.1,3.113,3.123,3.113
+fedora45_reference,System,Package Operation,rpm/dnf5,rpm_qa_query_seconds,s,LIB,0.6486,0.6449,0.6374,0.6449
+fedora45_reference,System,Package Operation,rpm/dnf5,dnf5_installed_query_seconds,s,LIB,0.2455,0.2476,0.2399,0.2455
+fedora45_reference,System,Package Operation,rpm/dnf5,dnf5_makecache_refresh_seconds,s,LIB,2.1324,1.4931,1.3919,1.4931

@@ -1,0 +1,173 @@
+{
+  "collected_at_utc": "2026-11-24T23:33:06.861188+00:00",
+  "target": "fedora45",
+  "mtbf_disclaimer": "Short-duration bounded stress evaluation; formal MTBF is NOT claimed.",
+  "memory_scope_disclaimer": "Guest-level virtual memory pressure and integrity verification (4 GiB / 50% of 8 GiB guest RAM); NOT a physical host RAM diagnostic.",
+  "storage_isolation_note": "All fio stress I/O ran strictly against a dedicated disposable 6 GiB virtual disk (/dev/vdb, ext4 at /mnt/eval_stress); the OS disk (/dev/vda) was never subjected to raw block writes.",
+  "tools": {
+    "stress_ng_version": "stress-ng, version 0.22.02 (gcc 16.2.1, x86_64 Linux 7.2.11-300.fc45.x86_64)",
+    "fio_version": "fio-3.42",
+    "packages_added_for_phase05": [
+      "fio-3.42-3.fc45.x86_64",
+      "fio-engine-libaio-3.42-3.fc45.x86_64",
+      "gpg-pubkey-4f50a6114cd5c6976a7f1179655a4b02f577861e-6888bc98.(none)",
+      "Judy-1.0.5-43.fc45.x86_64",
+      "stress-ng-0.22.02-1.fc45.x86_64"
+    ]
+  },
+  "summary_metrics": {
+    "subtests_total": 5,
+    "subtests_passed": 5,
+    "test_completion_rate_pct": 100.0,
+    "fio_io_error_count": 0,
+    "unexpected_reboots": 0,
+    "unexpected_service_failures_post_stress": [],
+    "kernel_anomalies_post_stress": [
+      "Nov 24 23:25:36 [REDACTED-HOSTNAME] systemd[1]: Listening on systemd-oomd.socket - Userspace Out-Of-Memory (OOM) Killer Socket."
+    ],
+    "dmesg_error_lines_post_stress": [
+      "[    0.105795] virt/tdx: TDX not supported by the host platform"
+    ],
+    "initrd_blockdev_warnings": 0,
+    "median_boot_time_seconds": 5.124
+  },
+  "subtests": [
+    {
+      "name": "cpu_short_30s",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "name": "cpu_sustained_90s",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "name": "memory_guest_4gib_90s",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "name": "storage_mixed_randrw_90s",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "name": "storage_verify_crc32c_1gib",
+      "exit_code": 0,
+      "passed": true
+    }
+  ],
+  "cpu_stress_short_30s": {
+    "bogo_ops": 435927,
+    "real_time_s": 30.0,
+    "bogo_ops_per_s_real": 14530.78,
+    "verified_ok": true,
+    "raw_metrics_lines": [
+      "stress-ng: metrc: [2296] stressor       bogo ops real time  usr time  sys time   bogo ops/s     bogo ops/s",
+      "stress-ng: metrc: [2296]                           (secs)    (secs)    (secs)   (real time) (usr+sys time)",
+      "stress-ng: metrc: [2296] cpu              435927     30.00    237.79      0.02     14530.78        1833.06"
+    ]
+  },
+  "cpu_stress_sustained_90s": {
+    "bogo_ops": 1270194,
+    "real_time_s": 90.0,
+    "bogo_ops_per_s_real": 14113.11,
+    "verified_ok": true,
+    "raw_metrics_lines": [
+      "stress-ng: metrc: [2562] stressor       bogo ops real time  usr time  sys time   bogo ops/s     bogo ops/s",
+      "stress-ng: metrc: [2562]                           (secs)    (secs)    (secs)   (real time) (usr+sys time)",
+      "stress-ng: metrc: [2562] cpu             1270194     90.00    715.64      0.07     14113.11        1774.75"
+    ]
+  },
+  "memory_stress_4gib_90s": {
+    "bogo_ops": 32148410,
+    "real_time_s": 90.09,
+    "bogo_ops_per_s_real": 356856.04,
+    "verified_ok": true,
+    "raw_metrics_lines": [
+      "stress-ng: metrc: [3446] stressor       bogo ops real time  usr time  sys time   bogo ops/s     bogo ops/s",
+      "stress-ng: metrc: [3446]                           (secs)    (secs)    (secs)   (real time) (usr+sys time)",
+      "stress-ng: metrc: [3446] vm             32148410     90.09    358.86      0.64    356856.04       89424.54"
+    ]
+  },
+  "storage_stress_mixed_randrw_90s": {
+    "fio_version": "fio-3.42",
+    "read_mb_s": 509.57,
+    "write_mb_s": 218.33,
+    "read_iops": 130449.25,
+    "write_iops": 55891.87,
+    "read_mean_lat_ms": 0.669,
+    "write_mean_lat_ms": 0.719,
+    "read_p99_lat_ms": 0.831,
+    "write_p99_lat_ms": 0.987,
+    "error_count": 0,
+    "job_count": 1
+  },
+  "storage_stress_verify_crc32c_1gib": {
+    "fio_version": "fio-3.42",
+    "read_mb_s": 5535.13,
+    "write_mb_s": 698.98,
+    "read_iops": 44281.08,
+    "write_iops": 5591.81,
+    "read_mean_lat_ms": 0.338,
+    "write_mean_lat_ms": 2.817,
+    "read_p99_lat_ms": 0.428,
+    "write_p99_lat_ms": 0.848,
+    "error_count": 0,
+    "job_count": 1
+  },
+  "boot_reliability_cycles": [
+    {
+      "cycle": 1,
+      "wall_reboot_seconds": 15.76,
+      "systemd_analyze_time_raw": "Startup finished in 399ms (kernel) + 1.604s (initrd) + 3.114s (userspace) = 5.119s \nmulti-user.target reached after 3.114s in userspace.",
+      "parsed_seconds": {
+        "kernel": 0.399,
+        "initrd": 1.604,
+        "userspace": 3.114,
+        "total": 5.119
+      },
+      "failed_units": [],
+      "service_restarts": [
+        "systemd-journald.service NRestarts=1"
+      ],
+      "journal_error_lines": 3,
+      "kernel_error_lines": 1
+    },
+    {
+      "cycle": 2,
+      "wall_reboot_seconds": 15.77,
+      "systemd_analyze_time_raw": "Startup finished in 398ms (kernel) + 1.609s (initrd) + 3.116s (userspace) = 5.124s \nmulti-user.target reached after 3.115s in userspace.",
+      "parsed_seconds": {
+        "kernel": 0.398,
+        "initrd": 1.609,
+        "userspace": 3.116,
+        "total": 5.124
+      },
+      "failed_units": [],
+      "service_restarts": [
+        "systemd-journald.service NRestarts=1"
+      ],
+      "journal_error_lines": 3,
+      "kernel_error_lines": 1
+    },
+    {
+      "cycle": 3,
+      "wall_reboot_seconds": 15.76,
+      "systemd_analyze_time_raw": "Startup finished in 403ms (kernel) + 1.612s (initrd) + 3.142s (userspace) = 5.158s \nmulti-user.target reached after 3.141s in userspace.",
+      "parsed_seconds": {
+        "kernel": 0.403,
+        "initrd": 1.612,
+        "userspace": 3.142,
+        "total": 5.158
+      },
+      "failed_units": [],
+      "service_restarts": [
+        "systemd-journald.service NRestarts=1"
+      ],
+      "journal_error_lines": 3,
+      "kernel_error_lines": 1
+    }
+  ]
+}

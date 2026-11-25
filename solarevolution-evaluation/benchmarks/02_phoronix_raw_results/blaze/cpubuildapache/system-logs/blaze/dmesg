@@ -1,0 +1,834 @@
+Linux version 7.2.11-300.fc45.x86_64 (mockbuild@680f8def6d80423385a6408b638b994e) (gcc (GCC) 16.2.1 20260819 (Red Hat 16.2.1-2), GNU ld version 2.47.20260726) #1 SMP PREEMPT_DYNAMIC Thu Oct 15 17:29:26 UTC 2026
+x86/CPU: Model not found in latest microcode list
+BIOS-provided physical RAM map:
+BIOS-e820: [mem 0x0000000000000000-0x000000000009ffff]  System RAM
+BIOS-e820: [gap 0x00000000000a0000-0x00000000000fffff]
+BIOS-e820: [mem 0x0000000000100000-0x00000000007fffff]  System RAM
+BIOS-e820: [mem 0x0000000000800000-0x0000000000807fff]  ACPI NVS
+BIOS-e820: [mem 0x0000000000808000-0x000000000080afff]  System RAM
+BIOS-e820: [mem 0x000000000080b000-0x000000000080bfff]  ACPI NVS
+BIOS-e820: [mem 0x000000000080c000-0x0000000000811fff]  System RAM
+BIOS-e820: [mem 0x0000000000812000-0x0000000000812fff]  device reserved
+BIOS-e820: [mem 0x0000000000813000-0x0000000000813fff]  System RAM
+BIOS-e820: [mem 0x0000000000814000-0x00000000008fffff]  ACPI NVS
+BIOS-e820: [mem 0x0000000000900000-0x00000000beb3efff]  System RAM
+BIOS-e820: [mem 0x00000000beb3f000-0x00000000bebfffff]  device reserved
+BIOS-e820: [mem 0x00000000bec00000-0x00000000bfba1fff]  System RAM
+BIOS-e820: [mem 0x00000000bfba2000-0x00000000bfe21fff]  device reserved
+BIOS-e820: [mem 0x00000000bfe22000-0x00000000bfe33fff]  ACPI data
+BIOS-e820: [mem 0x00000000bfe34000-0x00000000bfeb3fff]  ACPI NVS
+BIOS-e820: [mem 0x00000000bfeb4000-0x00000000bfebbfff]  System RAM
+BIOS-e820: [mem 0x00000000bfebc000-0x00000000bff3ffff]  device reserved
+BIOS-e820: [mem 0x00000000bff40000-0x00000000bfffffff]  ACPI NVS
+BIOS-e820: [gap 0x00000000c0000000-0x00000000feffbfff]
+BIOS-e820: [mem 0x00000000feffc000-0x00000000feffffff]  device reserved
+BIOS-e820: [gap 0x00000000ff000000-0x00000000ffbfffff]
+BIOS-e820: [mem 0x00000000ffc00000-0x00000000ffffffff]  device reserved
+BIOS-e820: [mem 0x0000000100000000-0x000000023fffffff]  System RAM
+NX (Execute Disable) protection: active
+APIC: Static calls initialized
+efi: EFI v2.7 by EDK II
+efi: SMBIOS=0xbfc32000 ACPI=0xbfe33000 ACPI 2.0=0xbfe33014 MEMATTR=0xbe583018 MOKvar=0xbfc2f000 RNG=0xbfe29018 
+random: crng init done
+efi: Remove mem124: MMIO range=[0xffc00000-0xffffffff] (4MB) from e820 map
+e820: remove [mem 0xffc00000-0xffffffff] device reserved
+secureboot: Secure boot disabled
+DMI: SMBIOS 2.8 present.
+DMI: QEMU Standard PC (i440FX + PIIX, 1996), BIOS unknown 02/02/2022
+DMI: Memory slots populated: 1/1
+Hypervisor detected: KVM
+last_pfn = 0xbfebc max_arch_pfn = 0x400000000
+kvm-clock: Using msrs 4b564d01 and 4b564d00
+kvm-clock: using sched offset of 29464397626 cycles
+clocksource: kvm-clock: mask: 0xffffffffffffffff max_cycles: 0x1cd42e4dffb, max_idle_ns: 881590591483 ns
+tsc: Detected 2399.998 MHz processor
+e820: update [mem 0x00000000-0x00000fff] System RAM ==> device reserved
+e820: remove [mem 0x000a0000-0x000fffff] System RAM
+last_pfn = 0x240000 max_arch_pfn = 0x400000000
+MTRR map: 4 entries (2 fixed + 2 variable; max 18), built from 8 variable MTRRs
+x86/PAT: Configuration [0-7]: WB  WC  UC- UC  WB  WP  UC- WT  
+last_pfn = 0xbfebc max_arch_pfn = 0x400000000
+Using GB pages for direct mapping
+secureboot: Secure boot disabled
+RAMDISK: [mem 0xb890c000-0xbbefcfff]
+ACPI: Early table checksum verification disabled
+ACPI: RSDP 0x00000000BFE33014 000024 (v02 BOCHS )
+ACPI: XSDT 0x00000000BFE320E8 00004C (v01 BOCHS  BXPC     00000001      01000013)
+ACPI: FACP 0x00000000BFE2E000 000074 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+ACPI: DSDT 0x00000000BFE2F000 0023F2 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+ACPI: FACS 0x00000000BFE92000 000040
+ACPI: APIC 0x00000000BFE2D000 0000B0 (v03 BOCHS  BXPC     00000001 BXPC 00000001)
+ACPI: HPET 0x00000000BFE2C000 000038 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+ACPI: WAET 0x00000000BFE2B000 000028 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+ACPI: BGRT 0x00000000BFE2A000 000038 (v01 INTEL  EDK2     00000002      01000013)
+ACPI: Reserving FACP table memory at [mem 0xbfe2e000-0xbfe2e073]
+ACPI: Reserving DSDT table memory at [mem 0xbfe2f000-0xbfe313f1]
+ACPI: Reserving FACS table memory at [mem 0xbfe92000-0xbfe9203f]
+ACPI: Reserving APIC table memory at [mem 0xbfe2d000-0xbfe2d0af]
+ACPI: Reserving HPET table memory at [mem 0xbfe2c000-0xbfe2c037]
+ACPI: Reserving WAET table memory at [mem 0xbfe2b000-0xbfe2b027]
+ACPI: Reserving BGRT table memory at [mem 0xbfe2a000-0xbfe2a037]
+No NUMA configuration found
+Faking a node at [mem 0x0000000000000000-0x000000023fffffff]
+NODE_DATA(0) allocated [mem 0x23ffd4f80-0x23fffffff]
+ACPI: PM-Timer IO Port: 0xb008
+ACPI: LAPIC_NMI (acpi_id[0xff] dfl dfl lint[0x1])
+IOAPIC[0]: apic_id 0, version 17, address 0xfec00000, GSI 0-23
+ACPI: INT_SRC_OVR (bus 0 bus_irq 0 global_irq 2 dfl dfl)
+ACPI: INT_SRC_OVR (bus 0 bus_irq 5 global_irq 5 high level)
+ACPI: INT_SRC_OVR (bus 0 bus_irq 9 global_irq 9 high level)
+ACPI: INT_SRC_OVR (bus 0 bus_irq 10 global_irq 10 high level)
+ACPI: INT_SRC_OVR (bus 0 bus_irq 11 global_irq 11 high level)
+ACPI: Using ACPI (MADT) for SMP configuration information
+ACPI: HPET id: 0x8086a201 base: 0xfed00000
+e820: update [mem 0xbde61000-0xbde69fff] System RAM ==> device reserved
+TSC deadline timer available
+CPU topo: Max. logical packages:   1
+CPU topo: Max. logical nodes:      1
+CPU topo: Num. nodes per package:  1
+CPU topo: Max. logical dies:       1
+CPU topo: Max. dies per package:   1
+CPU topo: Max. threads per core:   1
+CPU topo: Num. cores per package:     8
+CPU topo: Num. threads per package:   8
+CPU topo: Allowing 8 present CPUs plus 0 hotplug CPUs
+kvm-guest: APIC: eoi() replaced with kvm_guest_apic_eoi_write()
+kvm-guest: KVM setup pv remote TLB flush
+kvm-guest: setup PV sched yield
+PM: hibernation: Registered nosave memory: [mem 0x00000000-0x00000fff]
+PM: hibernation: Registered nosave memory: [mem 0x000a0000-0x000fffff]
+PM: hibernation: Registered nosave memory: [mem 0x00800000-0x00807fff]
+PM: hibernation: Registered nosave memory: [mem 0x0080b000-0x0080bfff]
+PM: hibernation: Registered nosave memory: [mem 0x00812000-0x00812fff]
+PM: hibernation: Registered nosave memory: [mem 0x00814000-0x008fffff]
+PM: hibernation: Registered nosave memory: [mem 0xbde61000-0xbde69fff]
+PM: hibernation: Registered nosave memory: [mem 0xbeb3f000-0xbebfffff]
+PM: hibernation: Registered nosave memory: [mem 0xbfba2000-0xbfeb3fff]
+PM: hibernation: Registered nosave memory: [mem 0xbfebc000-0xffffffff]
+[gap 0xc0000000-0xfeffbfff] available for PCI devices
+Booting paravirtualized kernel on KVM
+clocksource: refined-jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1910969940391419 ns
+Zone ranges:
+  DMA      [mem 0x0000000000001000-0x0000000000ffffff]
+  DMA32    [mem 0x0000000001000000-0x00000000ffffffff]
+  Normal   [mem 0x0000000100000000-0x000000023fffffff]
+  Device   empty
+Movable zone start for each node
+Early memory node ranges
+  node   0: [mem 0x0000000000001000-0x000000000009ffff]
+  node   0: [mem 0x0000000000100000-0x00000000007fffff]
+  node   0: [mem 0x0000000000808000-0x000000000080afff]
+  node   0: [mem 0x000000000080c000-0x0000000000811fff]
+  node   0: [mem 0x0000000000813000-0x0000000000813fff]
+  node   0: [mem 0x0000000000900000-0x00000000beb3efff]
+  node   0: [mem 0x00000000bec00000-0x00000000bfba1fff]
+  node   0: [mem 0x00000000bfeb4000-0x00000000bfebbfff]
+  node   0: [mem 0x0000000100000000-0x000000023fffffff]
+Initmem setup node 0 [mem 0x0000000000001000-0x000000023fffffff]
+On node 0, zone DMA: 1 pages in unavailable ranges
+On node 0, zone DMA: 96 pages in unavailable ranges
+On node 0, zone DMA: 8 pages in unavailable ranges
+On node 0, zone DMA: 1 pages in unavailable ranges
+On node 0, zone DMA: 1 pages in unavailable ranges
+On node 0, zone DMA: 236 pages in unavailable ranges
+On node 0, zone DMA32: 193 pages in unavailable ranges
+On node 0, zone DMA32: 786 pages in unavailable ranges
+On node 0, zone Normal: 324 pages in unavailable ranges
+setup_percpu: NR_CPUS:8192 nr_cpumask_bits:8 nr_cpu_ids:8 nr_node_ids:1
+percpu: Embedded 85 pages/cpu s225280 r8192 d114688 u524288
+pcpu-alloc: s225280 r8192 d114688 u524288 alloc=1*2097152
+pcpu-alloc: [0] 0 1 2 3 [0] 4 5 6 7 
+kvm-guest: PV spinlocks enabled
+PV qspinlock hash table entries: 256 (order: 0, 4096 bytes, linear)
+Unknown kernel command line parameters "rhgb", will be passed to user space.
+printk: log buffer data + meta data: 262144 + 1114112 = 1376256 bytes
+Dentry cache hash table entries: 1048576 (order: 11, 8388608 bytes, linear)
+Inode-cache hash table entries: 524288 (order: 10, 4194304 bytes, linear)
+software IO TLB: area num 8.
+Fallback order for Node 0: 0 
+Built 1 zonelists, mobility grouping on.  Total pages: 2095506
+Policy zone: Normal
+mem auto-init: stack:all(zero), heap alloc:on, heap free:off
+SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=8, Nodes=1
+ftrace: allocating 64797 entries in 256 pages
+ftrace: allocated 256 pages with 1 groups
+Dynamic Preempt: lazy
+rcu: Preemptible hierarchical RCU implementation.
+rcu: 	RCU event tracing is enabled.
+rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=8.
+	Trampoline variant of Tasks RCU enabled.
+	Rude variant of Tasks RCU enabled.
+	Tracing variant of Tasks RCU enabled.
+rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=8
+RCU Tasks: Setting shift to 3 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=8.
+RCU Tasks Rude: Setting shift to 3 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=8.
+NR_IRQS: 524544, nr_irqs: 488, preallocated irqs: 16
+rcu: srcu_init: Setting srcu_struct sizes based on contention.
+clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1911260446275000 ns
+kfence: initialized - using 2097152 bytes for 255 objects at 0x(____ptrval____)-0x(____ptrval____)
+Console: colour dummy device 80x25
+printk: legacy console [tty0] enabled
+ACPI: Core revision 20260408
+clocksource: hpet: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 19112604467 ns
+APIC: Switch to symmetric I/O mode setup
+x2apic enabled
+APIC: Switched APIC routing to: physical x2apic
+kvm-guest: APIC: send_IPI_mask() replaced with kvm_send_ipi_mask()
+kvm-guest: APIC: send_IPI_mask_allbutself() replaced with kvm_send_ipi_mask_allbutself()
+kvm-guest: setup PV IPIs
+..TIMER: vector=0x30 apic1=0 pin1=2 apic2=-1 pin2=-1
+clocksource: tsc-early: mask: 0xffffffffffffffff max_cycles: 0x229835b7123, max_idle_ns: 440795242976 ns
+Calibrating delay loop (skipped) preset value.. 4799.99 BogoMIPS (lpj=2399998)
+x86/cpu: User Mode Instruction Prevention (UMIP) activated
+Last level iTLB entries: 4KB 0, 2MB 0, 4MB 0
+Last level dTLB entries: 4KB 0, 2MB 0, 4MB 0, 1GB 0
+mitigations: Enabled attack vectors: user_kernel, user_user, guest_host, guest_guest, SMT mitigations: auto
+Speculative Store Bypass: Mitigation: Speculative Store Bypass disabled via prctl
+SRBDS: Unknown: Dependent on hypervisor status
+Spectre V2 : Mitigation: Enhanced / Automatic IBRS
+RETBleed: Mitigation: Enhanced IBRS
+ITS: Mitigation: Aligned branch/return thunks
+MMIO Stale Data: Mitigation: Clear CPU buffers
+Spectre V1 : Mitigation: usercopy/swapgs barriers and __user pointer sanitization
+Spectre V2 : Spectre v2 / PBRSB-eIBRS: Retire a single CALL on VMEXIT
+Spectre V2 : Enabling IBPB for BPF
+Spectre V2 : mitigation: Enabling conditional Indirect Branch Prediction Barrier
+active return thunk: its_return_thunk
+Spectre V2 : Spectre BHI mitigation: SW BHB clearing on syscall and VM exit
+x86/fpu: Supporting XSAVE feature 0x001: 'x87 floating point registers'
+x86/fpu: Supporting XSAVE feature 0x002: 'SSE registers'
+x86/fpu: Supporting XSAVE feature 0x004: 'AVX registers'
+x86/fpu: Supporting XSAVE feature 0x008: 'MPX bounds registers'
+x86/fpu: Supporting XSAVE feature 0x010: 'MPX CSR'
+x86/fpu: Supporting XSAVE feature 0x200: 'Protection Keys User registers'
+x86/fpu: xstate_offset[2]:  576, xstate_sizes[2]:  256
+x86/fpu: xstate_offset[3]:  832, xstate_sizes[3]:   64
+x86/fpu: xstate_offset[4]:  896, xstate_sizes[4]:   64
+x86/fpu: xstate_offset[9]:  960, xstate_sizes[9]:    8
+x86/fpu: Enabled xstate features 0x21f, context size is 968 bytes, using 'compacted' format.
+pid_max: default: 32768 minimum: 301
+Yama: becoming mindful.
+SELinux:  Initializing.
+LSM support for eBPF active
+landlock: Up and running.
+Mount-cache hash table entries: 16384 (order: 5, 131072 bytes, linear)
+Mountpoint-cache hash table entries: 16384 (order: 5, 131072 bytes, linear)
+VFS: Finished mounting rootfs on nullfs
+smpboot: CPU0: Intel(R) Core(TM) i9-10885H CPU @ 2.40GHz (family: 0x6, model: 0xa5, stepping: 0x2)
+Performance Events: Skylake events, full-width counters, Intel PMU driver.
+... version:                   2
+... bit width:                 48
+... generic counters:          4
+... generic bitmap:            000000000000000f
+... fixed-purpose counters:    3
+... fixed-purpose bitmap:      0000000000000007
+... value mask:                0000ffffffffffff
+... max period:                00007fffffffffff
+... global_ctrl mask:          000000070000000f
+signal: max sigframe size: 3632
+rcu: Hierarchical SRCU implementation.
+rcu: 	Max phase no-delay instances is 400.
+Timer migration: 1 hierarchy levels; 8 children per group; 1 crossnode level
+smp: Bringing up secondary CPUs ...
+smpboot: x86: Booting SMP configuration:
+.... node  #0, CPUs:      #1 #2 #3 #4 #5 #6 #7
+smp: Brought up 1 node, 8 CPUs
+smpboot: Total of 8 processors activated (38399.96 BogoMIPS)
+Memory: 7993496K/8382024K available (24463K kernel code, 4815K rwdata, 18656K rodata, 5324K init, 4212K bss, 374204K reserved, 0K cma-reserved)
+devtmpfs: initialized
+x86/mm: Memory block size: 128MB
+ACPI: PM: Registering ACPI NVS region [mem 0x00800000-0x00807fff] (32768 bytes)
+ACPI: PM: Registering ACPI NVS region [mem 0x0080b000-0x0080bfff] (4096 bytes)
+ACPI: PM: Registering ACPI NVS region [mem 0x00814000-0x008fffff] (966656 bytes)
+ACPI: PM: Registering ACPI NVS region [mem 0xbfe34000-0xbfeb3fff] (524288 bytes)
+ACPI: PM: Registering ACPI NVS region [mem 0xbff40000-0xbfffffff] (786432 bytes)
+posixtimers hash table entries: 4096 (order: 4, 65536 bytes, linear)
+futex hash table entries: 2048 (131072 bytes on 1 NUMA nodes, total 128 KiB, linear).
+xor: automatically using best checksumming function   avx       
+PM: RTC time: 23:35:35, date: 2026-11-24
+NET: Registered PF_NETLINK/PF_ROUTE protocol family
+DMA: preallocated 1024 KiB GFP_KERNEL pool for atomic allocations
+DMA: preallocated 1024 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+DMA: preallocated 1024 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations
+audit: initializing netlink subsys (disabled)
+audit: type=2000 audit(1795563337.483:1): state=initialized audit_enabled=0 res=1
+thermal_sys: Registered thermal governor 'fair_share'
+thermal_sys: Registered thermal governor 'bang_bang'
+thermal_sys: Registered thermal governor 'step_wise'
+thermal_sys: Registered thermal governor 'user_space'
+cpuidle: using governor menu
+Freeing SMP alternatives memory: 60K
+efi: Freeing EFI boot services memory: 37452K
+acpiphp: ACPI Hot Plug PCI Controller Driver version: 0.5
+PCI: Using configuration type 1 for base access
+virt/tdx: TDX not supported by the host platform
+kprobes: kprobe jump-optimization is enabled. All kprobes are optimized if possible.
+HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+HugeTLB: 16380 KiB vmemmap can be freed for a 1.00 GiB page
+HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+HugeTLB: 28 KiB vmemmap can be freed for a 2.00 MiB page
+raid6: using avx2x2 recovery algorithm
+raid6: skipped pq benchmark and selected avx2x4
+ACPI: Added _OSI(Module Device)
+ACPI: Added _OSI(Processor Device)
+ACPI: Added _OSI(Processor Aggregator Device)
+ACPI: 1 ACPI AML tables successfully acquired and loaded
+ACPI: \_SB_: platform _OSC: OS support mask [006e7eff]
+ACPI: Interpreter enabled
+ACPI: PM: (supports S0 S3 S4 S5)
+ACPI: Using IOAPIC for interrupt routing
+PCI: Using host bridge windows from ACPI; if necessary, use "pci=nocrs" and report a bug
+PCI: Using E820 reservations for host bridge windows
+ACPI: Enabled 2 GPEs in block 00 to 0F
+ACPI: PCI Root Bridge [PCI0] (domain 0000 [bus 00-ff])
+acpi PNP0A03:00: fail to add MMCONFIG information, can't access extended configuration space under this bridge
+acpiphp: Slot [3] registered
+acpiphp: Slot [4] registered
+acpiphp: Slot [5] registered
+acpiphp: Slot [6] registered
+acpiphp: Slot [7] registered
+acpiphp: Slot [8] registered
+acpiphp: Slot [9] registered
+acpiphp: Slot [10] registered
+acpiphp: Slot [11] registered
+acpiphp: Slot [12] registered
+acpiphp: Slot [13] registered
+acpiphp: Slot [14] registered
+acpiphp: Slot [15] registered
+acpiphp: Slot [16] registered
+acpiphp: Slot [17] registered
+acpiphp: Slot [18] registered
+acpiphp: Slot [19] registered
+acpiphp: Slot [20] registered
+acpiphp: Slot [21] registered
+acpiphp: Slot [22] registered
+acpiphp: Slot [23] registered
+acpiphp: Slot [24] registered
+acpiphp: Slot [25] registered
+acpiphp: Slot [26] registered
+acpiphp: Slot [27] registered
+acpiphp: Slot [28] registered
+acpiphp: Slot [29] registered
+acpiphp: Slot [30] registered
+acpiphp: Slot [31] registered
+PCI host bridge to bus 0000:00
+pci_bus 0000:00: root bus resource [io  0x0000-0x0cf7 window]
+pci_bus 0000:00: root bus resource [io  0x0d00-0xffff window]
+pci_bus 0000:00: root bus resource [mem 0x000a0000-0x000bffff window]
+pci_bus 0000:00: root bus resource [mem 0xc0000000-0xfebfffff window]
+pci_bus 0000:00: root bus resource [mem 0x7000000000-0x707fffffff window]
+pci_bus 0000:00: root bus resource [bus 00-ff]
+pci 0000:00:00.0: [8086:1237] type 00 class 0x060000 conventional PCI endpoint
+pci 0000:00:01.0: [8086:7000] type 00 class 0x060100 conventional PCI endpoint
+pci 0000:00:01.1: [8086:7010] type 00 class 0x010180 conventional PCI endpoint
+pci 0000:00:01.1: BAR 4 [io  0xc160-0xc16f]
+pci 0000:00:01.1: BAR 0 [io  0x01f0-0x01f7]: legacy IDE quirk
+pci 0000:00:01.1: BAR 1 [io  0x03f6]: legacy IDE quirk
+pci 0000:00:01.1: BAR 2 [io  0x0170-0x0177]: legacy IDE quirk
+pci 0000:00:01.1: BAR 3 [io  0x0376]: legacy IDE quirk
+pci 0000:00:01.3: [8086:7113] type 00 class 0x068000 conventional PCI endpoint
+pci 0000:00:01.3: quirk: [io  0xb000-0xb03f] claimed by PIIX4 ACPI
+pci 0000:00:01.3: quirk: [io  0xb100-0xb10f] claimed by PIIX4 SMB
+pci 0000:00:02.0: [1af4:1050] type 00 class 0x030000 conventional PCI endpoint
+pci 0000:00:02.0: BAR 0 [mem 0xc0000000-0xc07fffff pref]
+pci 0000:00:02.0: BAR 2 [mem 0x7000000000-0x7000003fff 64bit pref]
+pci 0000:00:02.0: BAR 4 [mem 0xc0845000-0xc0845fff]
+pci 0000:00:02.0: ROM [mem 0xffff0000-0xffffffff pref]
+pci 0000:00:02.0: Video device with shadowed ROM at [mem 0x000c0000-0x000dffff]
+pci 0000:00:03.0: [1af4:1052] type 00 class 0x098000 conventional PCI endpoint
+pci 0000:00:03.0: BAR 1 [mem 0xc0844000-0xc0844fff]
+pci 0000:00:03.0: BAR 4 [mem 0x7000004000-0x7000007fff 64bit pref]
+pci 0000:00:04.0: [1af4:1003] type 00 class 0x078000 conventional PCI endpoint
+pci 0000:00:04.0: BAR 0 [io  0xc100-0xc13f]
+pci 0000:00:04.0: BAR 1 [mem 0xc0843000-0xc0843fff]
+pci 0000:00:04.0: BAR 4 [mem 0x7000008000-0x700000bfff 64bit pref]
+pci 0000:00:05.0: [1af4:1000] type 00 class 0x020000 conventional PCI endpoint
+pci 0000:00:05.0: BAR 0 [io  0xc140-0xc15f]
+pci 0000:00:05.0: BAR 1 [mem 0xc0842000-0xc0842fff]
+pci 0000:00:05.0: BAR 4 [mem 0x700000c000-0x700000ffff 64bit pref]
+pci 0000:00:05.0: ROM [mem 0xfffc0000-0xffffffff pref]
+pci 0000:00:06.0: [1af4:1001] type 00 class 0x010000 conventional PCI endpoint
+pci 0000:00:06.0: BAR 0 [io  0xc080-0xc0ff]
+pci 0000:00:06.0: BAR 1 [mem 0xc0841000-0xc0841fff]
+pci 0000:00:06.0: BAR 4 [mem 0x7000010000-0x7000013fff 64bit pref]
+pci 0000:00:07.0: [1af4:1001] type 00 class 0x010000 conventional PCI endpoint
+pci 0000:00:07.0: BAR 0 [io  0xc000-0xc07f]
+pci 0000:00:07.0: BAR 1 [mem 0xc0840000-0xc0840fff]
+pci 0000:00:07.0: BAR 4 [mem 0x7000014000-0x7000017fff 64bit pref]
+ACPI: PCI: Interrupt link LNKA configured for IRQ 10
+ACPI: PCI: Interrupt link LNKB configured for IRQ 10
+ACPI: PCI: Interrupt link LNKC configured for IRQ 11
+ACPI: PCI: Interrupt link LNKD configured for IRQ 11
+ACPI: PCI: Interrupt link LNKS configured for IRQ 9
+iommu: Default domain type: Translated
+iommu: DMA domain TLB invalidation policy: lazy mode
+SCSI subsystem initialized
+libata version 3.00 loaded.
+ACPI: bus type USB registered
+usbcore: registered new interface driver usbfs
+usbcore: registered new interface driver hub
+usbcore: registered new device driver usb
+pps_core: LinuxPPS API ver. 1 registered
+pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti 
+PTP clock support registered
+EDAC MC: Ver: 3.0.0
+efivars: Registered efivars operations
+NetLabel: Initializing
+NetLabel:  domain hash size = 128
+NetLabel:  protocols = UNLABELED CIPSOv4 CALIPSO
+NetLabel:  unlabeled traffic allowed by default
+mctp: management component transport protocol core
+NET: Registered PF_MCTP protocol family
+PCI: Using ACPI for IRQ routing
+PCI: pci_cache_line_size set to 64 bytes
+e820: register RAM buffer resource [mem 0x0080b000-0x008fffff]
+e820: register RAM buffer resource [mem 0x00812000-0x008fffff]
+e820: register RAM buffer resource [mem 0x00814000-0x008fffff]
+e820: register RAM buffer resource [mem 0xbde61000-0xbfffffff]
+e820: register RAM buffer resource [mem 0xbeb3f000-0xbfffffff]
+e820: register RAM buffer resource [mem 0xbfba2000-0xbfffffff]
+e820: register RAM buffer resource [mem 0xbfebc000-0xbfffffff]
+pci 0000:00:02.0: vgaarb: setting as boot VGA device
+pci 0000:00:02.0: vgaarb: bridge control possible
+pci 0000:00:02.0: vgaarb: VGA device added: decodes=io+mem,owns=io+mem,locks=none
+vgaarb: loaded
+hpet0: at MMIO 0xfed00000, IRQs 2, 8, 0
+hpet0: 3 comparators, 64-bit 100.000000 MHz counter
+clocksource: Switched to clocksource kvm-clock
+VFS: Disk quotas dquot_6.6.0
+VFS: Dquot-cache hash table entries: 512 (4096 bytes)
+pnp: PnP ACPI init
+pnp 00:02: [dma 2]
+ACPI: IRQ 4 override to edge(!), high(!)
+pnp: PnP ACPI: found 5 devices
+clocksource: acpi_pm: mask: 0xffffff max_cycles: 0xffffff, max_idle_ns: 2085701024 ns
+NET: Registered PF_INET protocol family
+IP idents hash table entries: 131072 (order: 8, 1048576 bytes, linear)
+tcp_listen_portaddr_hash hash table entries: 4096 (order: 4, 65536 bytes, linear)
+Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+TCP established hash table entries: 65536 (order: 7, 524288 bytes, linear)
+TCP bind hash table entries: 65536 (order: 9, 2097152 bytes, linear)
+TCP: Hash tables configured (established 65536 bind 65536)
+MPTCP token hash table entries: 8192 (order: 6, 196608 bytes, linear)
+UDP hash table entries: 4096 (order: 6, 262144 bytes, linear)
+NET: Registered PF_UNIX/PF_LOCAL protocol family
+NET: Registered PF_XDP protocol family
+pci 0000:00:05.0: ROM [mem 0xfffc0000-0xffffffff pref]: can't claim; no compatible bridge window
+pci 0000:00:05.0: ROM [mem 0xc0800000-0xc083ffff pref]: assigned
+pci_bus 0000:00: resource 4 [io  0x0000-0x0cf7 window]
+pci_bus 0000:00: resource 5 [io  0x0d00-0xffff window]
+pci_bus 0000:00: resource 6 [mem 0x000a0000-0x000bffff window]
+pci_bus 0000:00: resource 7 [mem 0xc0000000-0xfebfffff window]
+pci_bus 0000:00: resource 8 [mem 0x7000000000-0x707fffffff window]
+pci 0000:00:01.0: PIIX3: Enabling Passive Release
+pci 0000:00:00.0: Limiting direct PCI/PCI transfers
+PCI: CLS 0 bytes, default 64
+PCI-DMA: Using software bounce buffering for IO (SWIOTLB)
+software IO TLB: mapped [mem 0x00000000b490c000-0x00000000b890c000] (64MB)
+Trying to unpack rootfs image as initramfs...
+clocksource: tsc: mask: 0xffffffffffffffff max_cycles: 0x229835b7123, max_idle_ns: 440795242976 ns
+Initialise system trusted keyrings
+Key type blacklist registered
+workingset: timestamp_bits=36 (anon: 31) max_order=21 bucket_order=0 (anon: 0)
+integrity: Platform Keyring initialized
+integrity: Machine keyring initialized
+cryptd: max_cpu_qlen set to 1000
+NET: Registered PF_ALG protocol family
+Key type asymmetric registered
+Asymmetric key parser 'x509' registered
+Block layer SCSI generic (bsg) driver version 0.4 loaded (major 244)
+io scheduler mq-deadline registered
+io scheduler kyber registered
+io scheduler bfq registered
+atomic64_test: passed for x86-64 platform with CX8 and with SSE
+input: Power Button as /devices/platform/LNXPWRBN:00/input/input0
+ACPI: button: Power Button [PWRF]
+ACPI: \_SB_.LNKB: Enabled at IRQ 10
+ACPI: \_SB_.LNKC: Enabled at IRQ 11
+ACPI: \_SB_.LNKD: Enabled at IRQ 11
+ACPI: \_SB_.LNKA: Enabled at IRQ 10
+00:04: ttyS0 at I/O 0x3f8 (irq = 4, base_baud = 115200) is a 16550A
+Non-volatile memory driver v1.3
+ACPI: bus type drm_connector registered
+virtio_blk virtio4: 8/0/0 default/read/poll queues
+virtio_blk virtio4: [vda] 83886080 512-byte logical blocks (42.9 GB/40.0 GiB)
+ vda: vda1 vda2 vda3 vda4
+virtio_blk virtio5: 8/0/0 default/read/poll queues
+virtio_blk virtio5: [vdb] 12582912 512-byte logical blocks (6.44 GB/6.00 GiB)
+scsi host0: ata_piix
+scsi host1: ata_piix
+ata1: PATA max MWDMA2 cmd 0x1f0 ctl 0x3f6 bmdma 0xc160 irq 14 lpm-pol 0
+ata2: PATA max MWDMA2 cmd 0x170 ctl 0x376 bmdma 0xc168 irq 15 lpm-pol 0
+CAN device driver interface
+usbcore: registered new interface driver usbserial_generic
+i8042: PNP: PS/2 Controller [PNP0303:KBD,PNP0f13:MOU] at 0x60,0x64 irq 1,12
+serio: i8042 KBD port at 0x60,0x64 irq 1
+serio: i8042 AUX port at 0x60,0x64 irq 12
+mousedev: PS/2 mouse device common for all mice
+rtc_cmos PNP0B00:00: RTC can wake from S4
+rtc_cmos PNP0B00:00: registered as rtc0
+rtc_cmos PNP0B00:00: setting system clock to 2026-11-24T23:35:35 UTC (1795563335)
+rtc_cmos PNP0B00:00: alarms up to one day, y3k, 242 bytes nvram
+device-mapper: core: CONFIG_IMA_DISABLE_HTABLE is disabled. Duplicate IMA measurements will not be recorded in the IMA log.
+device-mapper: uevent: version 1.0.3
+device-mapper: ioctl: 4.50.0-ioctl (2025-04-28) initialised: dm-devel@lists.linux.dev
+intel_pstate: CPU model not supported
+input: AT Translated Set 2 keyboard as /devices/platform/i8042/serio0/input/input1
+simple-framebuffer simple-framebuffer.0: [drm] Registered 1 planes with drm panic
+[drm] Initialized simpledrm 1.0.0 for simple-framebuffer.0 on minor 0
+input: VirtualPS/2 VMware VMMouse as /devices/platform/i8042/serio1/input/input4
+input: VirtualPS/2 VMware VMMouse as /devices/platform/i8042/serio1/input/input3
+fbcon: Deferring console take-over
+simple-framebuffer simple-framebuffer.0: [drm] fb0: simpledrmdrmfb frame buffer device
+hid: raw HID events driver (C) Jiri Kosina
+usbcore: registered new interface driver usbhid
+usbhid: USB HID core driver
+drop_monitor: Initializing network drop monitor service
+Initializing XFRM netlink socket
+NET: Registered PF_INET6 protocol family
+Segment Routing with IPv6
+RPL Segment Routing with IPv6
+In-situ OAM (IOAM) with IPv6
+mip6: Mobile IPv6
+NET: Registered PF_PACKET protocol family
+can: controller area network core
+NET: Registered PF_CAN protocol family
+IPI shorthand broadcast: enabled
+sched_clock: Marking stable (191042117, -583697)->(195743416, -5284996)
+registered taskstats version 1
+Loading compiled-in X.509 certificates
+Loaded X.509 cert 'Fedora kernel signing key: 925079f85d8cf849b2cfc1ccc8e5eb56d336c8f3'
+Freeing initrd memory: 55236K
+Loaded X.509 cert 'Fedora IMA CA: a8a00c31663f853f9c6ff2564872e378af026b28'
+Demotion targets for Node 0: null
+page_owner is disabled
+Key type .fscrypt registered
+Key type fscrypt-provisioning registered
+Btrfs loaded, zoned=yes, fsverity=yes
+Key type big_key registered
+Key type encrypted registered
+ima: No TPM chip found, activating TPM-bypass!
+Loading compiled-in module X.509 certificates
+Loaded X.509 cert 'Fedora kernel signing key: 925079f85d8cf849b2cfc1ccc8e5eb56d336c8f3'
+ima: Allocated hash algorithm: sha256
+ima: No architecture policies found
+evm: Initialising EVM extended attributes:
+evm: security.selinux
+evm: security.SMACK64 (disabled)
+evm: security.SMACK64EXEC (disabled)
+evm: security.SMACK64TRANSMUTE (disabled)
+evm: security.SMACK64MMAP (disabled)
+evm: security.apparmor (disabled)
+evm: security.ima
+evm: security.capability
+evm: HMAC attrs: 0x1
+alg: No test for 842 (842-scomp)
+alg: No test for mldsa87 (mldsa87-lib)
+alg: No test for mldsa65 (mldsa65-lib)
+alg: No test for mldsa44 (mldsa44-lib)
+PM:   Magic number: 2:307:606
+RAS: Correctable Errors collector initialized.
+clk: Disabling unused clocks
+PM: genpd: Disabling unused power domains
+ata2: found unknown device (class 0)
+ata2.00: ATAPI: QEMU DVD-ROM, 2.5+, max UDMA/100
+scsi 1:0:0:0: CD-ROM            QEMU     QEMU DVD-ROM     2.5+ PQ: 0 ANSI: 5
+sr 1:0:0:0: [sr0] scsi3-mmc drive: 4x/4x cd/rw xa/form2 tray
+cdrom: Uniform CD-ROM driver Revision: 3.20
+sr 1:0:0:0: Attached scsi CD-ROM sr0
+sr 1:0:0:0: Attached scsi generic sg0 type 5
+Freeing unused decrypted memory: 2028K
+Freeing unused kernel image (initmem) memory: 5324K
+Write protecting the kernel read-only data: 45056k
+Freeing unused kernel image (text/rodata gap) memory: 112K
+Freeing unused kernel image (rodata/data gap) memory: 1824K
+x86/mm: Checked W+X mappings: passed, no W+X pages found.
+Run /init as init process
+  with arguments:
+    /init
+    rhgb
+  with environment:
+    HOME=/
+    TERM=linux
+fuse: init (API version 7.45)
+systemd[1]: Successfully made /usr/ read-only.
+systemd[1]: systemd 262-3.fc45 running in system mode (+PAM +AUDIT +SELINUX -APPARMOR +IMA +IPE +SMACK +SECCOMP +GNUTLS +OPENSSL +ACL +BLKID +CURL +ELFUTILS +FIDO2 +IDN2 +KMOD +LIBCRYPTSETUP +LIBCRYPTSETUP_PLUGINS +LIBFDISK +PCRE2 +PWQUALITY +P11KIT +QRENCODE +TPM2 +BZIP2 +LZ4 +XZ +ZLIB +ZSTD +BPF_FRAMEWORK +BTF +XKBCOMMON +UTMP +LIBARCHIVE)
+systemd[1]: Detected virtualization kvm.
+systemd[1]: Detected architecture x86-64.
+systemd[1]: Running in initrd.
+systemd[1]: Hostname set to .
+systemd[1]: bpf-restrict-fs: LSM BPF program attached
+systemd[1]: Queued start job for default target initrd.target.
+systemd[1]: Reached target initrd-usr-fs.target - Initrd /usr File System.
+systemd[1]: Reached target slices.target - Slice Units.
+systemd[1]: Reached target swap.target - Swaps.
+systemd[1]: Reached target timers.target - Timer Units.
+systemd[1]: Listening on systemd-journald-dev-log.socket - Journal Socket (/dev/log).
+systemd[1]: Listening on systemd-journald.socket - Journal Sockets.
+systemd[1]: Listening on systemd-udevd-kernel.socket - udev Kernel Socket.
+systemd[1]: Listening on systemd-udevd-varlink.socket - udev Varlink Socket.
+systemd[1]: Reached target sockets.target - Socket Units.
+systemd[1]: Starting kmod-static-nodes.service - Create List of Static Device Nodes...
+systemd[1]: memstrack.service - Memstrack Anylazing Service skipped, no trigger condition checks were met.
+systemd[1]: Starting systemd-journald.service - Journal Service...
+systemd[1]: Starting systemd-modules-load.service - Load Kernel Modules...
+systemd[1]: systemd-pcrphase-initrd.service - TPM PCR Barrier (initrd) skipped, unmet condition check ConditionSecurity=measured-os
+systemd[1]: Starting systemd-vconsole-setup.service - Virtual Console Setup...
+systemd[1]: Finished kmod-static-nodes.service - Create List of Static Device Nodes.
+systemd[1]: Starting systemd-tmpfiles-setup-dev-early.service - Create Static Device Nodes in /dev gracefully...
+i2c_dev: i2c /dev entries driver
+systemd[1]: Finished systemd-modules-load.service - Load Kernel Modules.
+systemd[1]: Starting systemd-sysctl.service - Apply Kernel Variables...
+systemd[1]: Finished systemd-tmpfiles-setup-dev-early.service - Create Static Device Nodes in /dev gracefully.
+systemd[1]: Starting systemd-tmpfiles-setup-dev.service - Create Static Device Nodes in /dev...
+systemd-journald[218]: Collecting audit messages is disabled.
+systemd[1]: Finished systemd-sysctl.service - Apply Kernel Variables.
+systemd[1]: Finished systemd-tmpfiles-setup-dev.service - Create Static Device Nodes in /dev.
+systemd[1]: Reached target local-fs-pre.target - Preparation for Local File Systems.
+systemd[1]: Reached target local-fs.target - Local File Systems.
+systemd[1]: Started systemd-journald.service - Journal Service.
+[drm] pci: virtio-vga detected at 0000:00:02.0
+virtio-pci 0000:00:02.0: vgaarb: deactivate vga console
+[drm] features: -virgl +edid -resource_blob -host_visible
+[drm] features: -context_init -blob_alignment
+[drm] number of scanouts: 1
+[drm] number of cap sets: 0
+virtio-pci 0000:00:02.0: [drm] Registered 1 planes with drm panic
+[drm] Initialized virtio_gpu 0.1.0 for 0000:00:02.0 on minor 1
+fbcon: virtio_gpudrmfb (fb0) is primary device
+fbcon: Deferring console take-over
+virtio-pci 0000:00:02.0: [drm] fb0: virtio_gpudrmfb frame buffer device
+BTRFS: device label bs_[REDACTED-HOSTNAME] devid 1 transid 100 /dev/vda4 (253:4) scanned by mount (394)
+BTRFS info (device vda4): first mount of filesystem c44bcc8b-bf2d-4c92-90d9-9531c86d17b7
+BTRFS info (device vda4): using crc32c checksum algorithm
+BTRFS info (device vda4): turning on async discard
+BTRFS info (device vda4): enabling free space tree
+systemd-journald[218]: Received SIGTERM from PID 1 (systemd).
+audit: type=1404 audit(1795563337.303:2): enforcing=1 old_enforcing=0 auid=4294967295 ses=4294967295 enabled=1 old-enabled=1 lsm=selinux res=1
+SELinux:  Permission firmware_load in class system not defined in policy.
+SELinux:  Permission kexec_image_load in class system not defined in policy.
+SELinux:  Permission kexec_initramfs_load in class system not defined in policy.
+SELinux:  Permission policy_load in class system not defined in policy.
+SELinux:  Permission x509_certificate_load in class system not defined in policy.
+SELinux:  Permission map_create_as in class bpf not defined in policy.
+SELinux:  Permission prog_load_as in class bpf not defined in policy.
+SELinux:  Permission allowed in class io_uring not defined in policy.
+SELinux:  Class memfd_file not defined in policy.
+SELinux: the above unknown classes and permissions will be allowed
+SELinux:  policy capability network_peer_controls=1
+SELinux:  policy capability open_perms=1
+SELinux:  policy capability extended_socket_class=1
+SELinux:  policy capability always_check_network=0
+SELinux:  policy capability cgroup_seclabel=1
+SELinux:  policy capability nnp_nosuid_transition=1
+SELinux:  policy capability genfs_seclabel_symlinks=1
+SELinux:  policy capability ioctl_skip_cloexec=0
+SELinux:  policy capability userspace_initial_context=0
+SELinux:  policy capability netlink_xperm=0
+SELinux:  policy capability netif_wildcard=0
+SELinux:  policy capability genfs_seclabel_wildcard=0
+SELinux:  policy capability functionfs_seclabel=0
+SELinux:  policy capability memfd_class=0
+SELinux:  policy capability bpf_token_perms=0
+audit: type=1403 audit(1795563337.343:3): auid=4294967295 ses=4294967295 lsm=selinux res=1
+systemd[1]: Successfully loaded SELinux policy in 41.108ms.
+NET: Registered PF_VSOCK protocol family
+systemd[1]: Relabeled /dev/, /dev/shm/, /run/ in 8.320ms.
+systemd[1]: systemd 262-3.fc45 running in system mode (+PAM +AUDIT +SELINUX -APPARMOR +IMA +IPE +SMACK +SECCOMP +GNUTLS +OPENSSL +ACL +BLKID +CURL +ELFUTILS +FIDO2 +IDN2 +KMOD +LIBCRYPTSETUP +LIBCRYPTSETUP_PLUGINS +LIBFDISK +PCRE2 +PWQUALITY +P11KIT +QRENCODE +TPM2 +BZIP2 +LZ4 +XZ +ZLIB +ZSTD +BPF_FRAMEWORK +BTF +XKBCOMMON +UTMP +LIBARCHIVE)
+systemd[1]: Detected virtualization kvm.
+systemd[1]: Detected architecture x86-64.
+systemd[1]: bpf-restrict-fs: LSM BPF program attached
+zram: Added device: zram0
+systemd[1]: multi-user.target: Wants dependency dropin /etc/systemd/system/multi-user.target.wants/display-manager.service target /usr/lib/systemd/system/sddm.service has different name
+systemd[1]: initrd-switch-root.service: Deactivated successfully.
+systemd[1]: Stopped initrd-switch-root.service - Switch Root.
+systemd[1]: systemd-journald.service: Scheduled restart job, restart counter is at 1.
+systemd[1]: Created slice system-kmsconvt.slice - Slice /system/kmsconvt.
+systemd[1]: Created slice system-systemd\x2dfsck.slice - Slice /system/systemd-fsck.
+systemd[1]: Created slice system-systemd\x2dzram\x2dsetup.slice - Slice /system/systemd-zram-setup.
+systemd[1]: Created slice user.slice - User and Session Slice.
+systemd[1]: systemd-ask-password-console.path - Dispatch Password Requests to Console Directory Watch skipped, unmet condition check ConditionPathExists=!/run/plymouth/pid
+systemd[1]: Started systemd-ask-password-wall.path - Forward Password Requests to Wall Directory Watch.
+systemd[1]: Set up automount proc-sys-fs-binfmt_misc.automount - Arbitrary Executable File Formats File System Automount Point.
+systemd[1]: Expecting device dev-zram0.device - /dev/zram0...
+systemd[1]: Reached target clonesetup.target - Local dm-clone Devices.
+systemd[1]: Reached target getty.target - Login Prompts.
+systemd[1]: Reached target imports.target - Image Downloads.
+systemd[1]: Stopped target initrd-switch-root.target - Switch Root.
+systemd[1]: Stopped target initrd-fs.target - Initrd File Systems.
+systemd[1]: Stopped target initrd-root-fs.target - Initrd Root File System.
+systemd[1]: Reached target integritysetup.target - Local Integrity Protected Volumes.
+systemd[1]: Reached target slices.target - Slice Units.
+systemd[1]: Reached target veritysetup.target - Local Verity Protected Volumes.
+systemd[1]: Listening on dm-event.socket - Device-mapper event daemon FIFOs.
+systemd[1]: Listening on lvm2-lvmpolld.socket - LVM2 poll daemon socket.
+systemd[1]: Listening on systemd-ask-password.socket - Query the User Interactively for a Password.
+systemd[1]: Listening on systemd-coredump.socket - Process Core Dump Socket.
+systemd[1]: Listening on systemd-creds.socket - Credential Encryption/Decryption.
+systemd[1]: Listening on systemd-cryptenroll.socket - Disk Encryption Enrollment Service Socket.
+systemd[1]: Listening on systemd-factory-reset.socket - Factory Reset Management.
+systemd[1]: Listening on systemd-hostnamed.socket - Hostname Service Socket.
+systemd[1]: Listening on systemd-mute-console.socket - Console Output Muting Service Socket.
+systemd[1]: Listening on systemd-oomd.socket - Userspace Out-Of-Memory (OOM) Killer Socket.
+systemd[1]: systemd-pcrextend.socket - TPM PCR Measurements skipped, unmet condition check ConditionSecurity=measured-os
+systemd[1]: systemd-pcrlock.socket - Make TPM PCR Policy skipped, unmet condition check ConditionSecurity=measured-uki
+systemd[1]: Listening on systemd-repart.socket - Disk Repartitioning Service Socket.
+systemd[1]: Listening on systemd-resolved-monitor.socket - Resolve Monitor Varlink Socket.
+systemd[1]: Listening on systemd-resolved-varlink.socket - Resolve Service Varlink Socket.
+systemd[1]: Listening on systemd-storage-block.socket - Simple Block Device Backed Storage Provider.
+systemd[1]: Listening on systemd-storage-fs.socket - Simple File System Backed Storage Provider.
+systemd[1]: Listening on systemd-sysinstall.socket - System Install Tool.
+systemd[1]: Listening on systemd-sysupdate.socket - System Updates.
+systemd[1]: Listening on systemd-udevd-varlink.socket - udev Varlink Socket.
+systemd[1]: Listening on systemd-userdbd.socket - User Database Manager Socket.
+systemd[1]: Mounting dev-hugepages.mount - Huge Pages File System...
+systemd[1]: Mounting dev-mqueue.mount - POSIX Message Queue File System...
+systemd[1]: Mounting sys-kernel-debug.mount - Kernel Debug File System...
+systemd[1]: Mounting sys-kernel-tracing.mount - Kernel Trace File System...
+systemd[1]: auth-rpcgss-module.service - Kernel Module supporting RPCSEC_GSS skipped, unmet condition check ConditionPathExists=/etc/krb5.keytab
+systemd[1]: fips-crypto-policy-overlay.service - Bind-mount FIPS crypto-policy in FIPS mode skipped, unmet condition check ConditionKernelCommandLine=fips=1
+systemd[1]: Starting kmod-static-nodes.service - Create List of Static Device Nodes...
+systemd[1]: Starting lvm2-monitor.service - Monitoring of LVM2 mirrors, snapshots etc. using dmeventd or progress polling...
+systemd[1]: modprobe@configfs.service - Load Kernel Module configfs skipped, unmet condition check ConditionKernelModuleLoaded=!configfs
+systemd[1]: modprobe@drm.service - Load Kernel Module drm skipped, unmet condition check ConditionKernelModuleLoaded=!drm
+systemd[1]: modprobe@efi_pstore.service - Load Kernel Module efi_pstore skipped, unmet condition check ConditionKernelModuleLoaded=!efi_pstore
+systemd[1]: modprobe@fuse.service - Load Kernel Module fuse skipped, unmet condition check ConditionKernelModuleLoaded=!fuse
+systemd[1]: Mounting sys-fs-fuse-connections.mount - FUSE Control File System...
+systemd[1]: plymouth-switch-root.service: Deactivated successfully.
+systemd[1]: Stopped plymouth-switch-root.service - Plymouth switch root service.
+systemd[1]: systemd-boot-clear-sysfail.service - Clear SysFail Entry If The Boot Is Successful skipped, unmet condition check ConditionPathExists=/sys/firmware/efi/efivars/LoaderEntrySysFail-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+systemd[1]: systemd-fsck-root.service: Deactivated successfully.
+systemd[1]: Stopped systemd-fsck-root.service - File System Check on Root Device.
+systemd[1]: systemd-hibernate-clear.service - Clear Stale Hibernate Storage Info skipped, unmet condition check ConditionPathExists=/sys/firmware/efi/efivars/HibernateLocation-8cf2644b-4b0b-428f-9387-6d876050dc67
+systemd[1]: Starting systemd-journald.service - Journal Service...
+systemd[1]: Starting systemd-modules-load.service - Load Kernel Modules...
+systemd[1]: Starting systemd-network-generator.service - Generate Network Units from Kernel Command Line...
+systemd[1]: systemd-pcrmachine.service - TPM PCR Machine ID Measurement skipped, unmet condition check ConditionSecurity=measured-os
+systemd[1]: systemd-pcrosseparator.service - TPM PCR OS Separator skipped, unmet condition check ConditionSecurity=measured-os
+systemd[1]: Starting systemd-remount-fs.service - Remount Root and Kernel File Systems...
+systemd[1]: systemd-tpm2-setup-early.service - Early TPM SRK Setup skipped, unmet condition check ConditionSecurity=measured-os
+systemd[1]: systemd-pcrnvdone.service - TPM PCR NvPCR Initialization Separator skipped, unmet condition check ConditionPathExists=/etc/initrd-release
+systemd[1]: Reached target cryptsetup.target - Local Encrypted Volumes.
+systemd[1]: systemd-pcrproduct.service - TPM NvPCR Product ID Measurement skipped, unmet condition check ConditionSecurity=measured-os
+systemd[1]: Starting systemd-udev-load-credentials.service - Load udev Rules from Credentials...
+systemd[1]: Starting systemd-udev-trigger.service - Coldplug All udev Devices...
+systemd[1]: Mounted dev-hugepages.mount - Huge Pages File System.
+systemd[1]: Mounted dev-mqueue.mount - POSIX Message Queue File System.
+systemd[1]: Mounted sys-kernel-debug.mount - Kernel Debug File System.
+systemd[1]: Mounted sys-kernel-tracing.mount - Kernel Trace File System.
+systemd[1]: Finished kmod-static-nodes.service - Create List of Static Device Nodes.
+systemd[1]: Mounted sys-fs-fuse-connections.mount - FUSE Control File System.
+systemd[1]: Finished systemd-modules-load.service - Load Kernel Modules.
+systemd[1]: Finished systemd-network-generator.service - Generate Network Units from Kernel Command Line.
+BTRFS info (device vda4 state M): use zstd compression, level 1
+systemd[1]: Starting systemd-sysctl.service - Apply Kernel Variables...
+systemd[1]: Starting systemd-tmpfiles-setup-dev-early.service - Create Static Device Nodes in /dev gracefully...
+systemd[1]: Finished systemd-remount-fs.service - Remount Root and Kernel File Systems.
+systemd[1]: systemd-hwdb-update.service - Rebuild Hardware Database skipped, unmet condition check ConditionNeedsUpdate=/etc
+systemd[1]: systemd-pstore.service - Platform Persistent Storage Archival skipped, unmet condition check ConditionDirectoryNotEmpty=/sys/fs/pstore
+systemd[1]: Starting systemd-random-seed.service - Load/Save OS Random Seed...
+systemd[1]: systemd-tpm2-setup.service - TPM SRK Setup skipped, unmet condition check ConditionSecurity=measured-os
+systemd[1]: Finished systemd-udev-load-credentials.service - Load udev Rules from Credentials.
+systemd-journald[505]: Collecting audit messages is disabled.
+systemd[1]: Started systemd-journald.service - Journal Service.
+systemd-journald[505]: Received client request to flush runtime journal.
+zram0: detected capacity change from 0 to 16218112
+Adding 8109052k swap on /dev/zram0.  Priority:100 extents:1 across:8109052k SSDsc
+piix4_smbus 0000:00:01.3: SMBus Host Controller at 0xb100, revision 0
+i2c i2c-0: Memory type 0x07 not supported yet, not instantiating SPD
+input: QEMU Virtio Tablet as /devices/pci0000:00/0000:00:03.0/virtio1/input/input5
+input: PC Speaker as /devices/platform/pcspkr/input/input6
+parport_pc 00:03: reported by Plug and Play ACPI
+parport0: PC-style at 0x378, irq 7 [PCSPP,TRISTATE]
+virtio_net virtio3 ens5: renamed from eth0
+RAPL PMU: API unit is 2^-32 Joules, 0 fixed counters, 10737418240 ms ovfl timer
+ppdev: user-space parallel port driver
+EXT4-fs (vda2): mounted filesystem 439d107a-cd69-4173-80d7-5760598152ee r/w with ordered data mode. Quota mode: none.
+audit: type=1107 audit(1795563339.738:4): pid=750 uid=81 auid=4294967295 ses=4294967295 subj=system_u:system_r:system_dbusd_t:s0-s0:c0.c1023 msg='avc:  denied  { send_msg } for  scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:system_r:systemd_hostnamed_t:s0 tclass=dbus permissive=1 exe="/usr/bin/dbus-broker" sauid=81 hostname=? addr=? terminal=?'
+audit: type=1400 audit(1795563339.766:5): avc:  denied  { search } for  pid=976 comm="flatpak" name=".cache" dev="vda4" ino=1714 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:cache_home_t:s0 tclass=dir permissive=1
+audit: type=1400 audit(1795563339.773:6): avc:  denied  { read } for  pid=790 comm="bash" name=".bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795563339.773:7): avc:  denied  { open } for  pid=790 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795563339.773:8): avc:  denied  { getattr } for  pid=790 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795563339.891:9): avc:  denied  { search } for  pid=1138 comm="flatpak" name=".cache" dev="vda4" ino=1714 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:cache_home_t:s0 tclass=dir permissive=1
+audit: type=1400 audit(1795563339.896:10): avc:  denied  { read } for  pid=1111 comm="bash" name=".bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+RPC: Registered named UNIX socket transport module.
+RPC: Registered udp transport module.
+RPC: Registered tcp transport module.
+RPC: Registered tcp-with-tls transport module.
+RPC: Registered tcp NFSv4.1 backchannel transport module.
+kauditd_printk_skb: 3 callbacks suppressed
+audit: type=1400 audit(1795563340.655:14): avc:  denied  { write } for  pid=1378 comm="sddm-helper" name="wayland-errors" dev="vda4" ino=174185 scontext=system_u:system_r:xdm_t:s0-s0:c0.c1023 tcontext=system_u:object_r:var_lib_t:s0 tclass=file permissive=0
+audit: type=1400 audit(1795563340.693:15): avc:  denied  { search } for  pid=1427 comm="flatpak" name=".cache" dev="vda4" ino=1714 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:cache_home_t:s0 tclass=dir permissive=1
+audit: type=1400 audit(1795563340.699:16): avc:  denied  { read } for  pid=1395 comm="bash" name=".bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795563340.699:17): avc:  denied  { open } for  pid=1395 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795563340.699:18): avc:  denied  { getattr } for  pid=1395 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1107 audit(1795563340.704:19): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=system_u:system_r:init_t:s0 msg='avc:  denied  { status } for auid=n/a uid=0 gid=0 path="/usr/lib/systemd/system/graphical.target" cmdline="" function="mac_selinux_filter" scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:systemd_unit_file_t:s0 tclass=service permissive=1 exe="/usr/lib/systemd/systemd" sauid=0 hostname=? addr=? terminal=?'
+audit: type=1107 audit(1795563341.075:20): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=system_u:system_r:init_t:s0 msg='avc:  denied  { start } for auid=n/a uid=0 gid=0 cmdline="" function="method_start_transient_unit" scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:system_r:init_t:s0 tclass=system permissive=1 exe="/usr/lib/systemd/systemd" sauid=0 hostname=? addr=? terminal=?'
+audit: type=1400 audit(1795563341.500:21): avc:  denied  { search } for  pid=1524 comm="flatpak" name=".cache" dev="vda4" ino=1714 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:cache_home_t:s0 tclass=dir permissive=1
+audit: type=1400 audit(1795563341.506:22): avc:  denied  { read } for  pid=1495 comm="bash" name=".bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795563341.506:23): avc:  denied  { open } for  pid=1495 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+kauditd_printk_skb: 1 callbacks suppressed
+audit: type=1400 audit(1795563354.397:25): avc:  denied  { search } for  pid=1693 comm="flatpak" name=".cache" dev="vda4" ino=1714 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:cache_home_t:s0 tclass=dir permissive=1
+systemd[1]: systemd 262-3.fc45 running in system mode (+PAM +AUDIT +SELINUX -APPARMOR +IMA +IPE +SMACK +SECCOMP +GNUTLS +OPENSSL +ACL +BLKID +CURL +ELFUTILS +FIDO2 +IDN2 +KMOD +LIBCRYPTSETUP +LIBCRYPTSETUP_PLUGINS +LIBFDISK +PCRE2 +PWQUALITY +P11KIT +QRENCODE +TPM2 +BZIP2 +LZ4 +XZ +ZLIB +ZSTD +BPF_FRAMEWORK +BTF +XKBCOMMON +UTMP +LIBARCHIVE)
+systemd[1]: Detected virtualization kvm.
+systemd[1]: Detected architecture x86-64.
+systemd[1]: bpf-restrict-fs: LSM BPF program attached
+systemd[1]: multi-user.target: Wants dependency dropin /etc/systemd/system/multi-user.target.wants/display-manager.service target /usr/lib/systemd/system/sddm.service has different name
+audit: type=1400 audit(1795563467.833:26): avc:  denied  { search } for  pid=2423 comm="flatpak" name=".cache" dev="vda4" ino=1714 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:cache_home_t:s0 tclass=dir permissive=1
+audit: type=1400 audit(1795563467.839:27): avc:  denied  { read } for  pid=2401 comm="bash" name=".bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795563467.839:28): avc:  denied  { open } for  pid=2401 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795563467.839:29): avc:  denied  { getattr } for  pid=2401 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795563473.243:30): avc:  denied  { read } for  pid=2439 comm="bash" name=".bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795563473.243:31): avc:  denied  { open } for  pid=2439 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795563473.243:32): avc:  denied  { getattr } for  pid=2439 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795563484.038:33): avc:  denied  { search } for  pid=2951 comm="flatpak" name=".cache" dev="vda4" ino=1714 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:cache_home_t:s0 tclass=dir permissive=1
+audit: type=1400 audit(1795563484.044:34): avc:  denied  { read } for  pid=2929 comm="bash" name=".bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795563484.044:35): avc:  denied  { open } for  pid=2929 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795563484.044:36): avc:  denied  { getattr } for  pid=2929 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795563489.444:37): avc:  denied  { open } for  pid=3009 comm="cat" path="/tmp/eval_job_p2_install_blaze.rc" dev="tmpfs" ino=48 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:initrc_tmp_t:s0 tclass=file permissive=1
+audit: type=1107 audit(1795563490.223:38): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=system_u:system_r:init_t:s0 msg='avc:  denied  { start } for auid=n/a uid=0 gid=0 cmdline="" function="method_start_transient_unit" scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:system_r:init_t:s0 tclass=system permissive=1 exe="/usr/lib/systemd/systemd" sauid=0 hostname=? addr=? terminal=?'
+audit: type=1107 audit(1795563490.225:39): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=system_u:system_r:init_t:s0 msg='avc:  denied  { status } for auid=n/a uid=0 gid=0 path="/run/systemd/transient/eval-p2_stage_a_blaze-1795563490.service" cmdline="" function="mac_selinux_filter" scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:system_r:init_t:s0 tclass=system permissive=1 exe="/usr/lib/systemd/systemd" sauid=0 hostname=? addr=? terminal=?'
+audit: type=1400 audit(1795563490.641:40): avc:  denied  { search } for  pid=3084 comm="flatpak" name=".cache" dev="vda4" ino=1714 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:cache_home_t:s0 tclass=dir permissive=1
+audit: type=1400 audit(1795563493.618:41): avc:  denied  { write } for  pid=3103 comm="dmesg" path="/root/.phoronix-test-suite/run-lock-3061" dev="vda4" ino=233894 scontext=system_u:system_r:dmesg_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=0
+audit: type=1400 audit(1795563493.648:42): avc:  denied  { write } for  pid=3108 comm="dmesg" path="/root/.phoronix-test-suite/run-lock-3061" dev="vda4" ino=233894 scontext=system_u:system_r:dmesg_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=0
+audit: type=1400 audit(1795563497.704:43): avc:  denied  { write } for  pid=3310 comm="dmesg" path="/root/.phoronix-test-suite/run-lock-3303" dev="vda4" ino=234024 scontext=system_u:system_r:dmesg_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=0
+audit: type=1400 audit(1795563501.053:44): avc:  denied  { read } for  pid=3470 comm="bash" name=".bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795563501.053:45): avc:  denied  { open } for  pid=3470 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795563501.053:46): avc:  denied  { getattr } for  pid=3470 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795563585.426:47): avc:  denied  { write } for  pid=3870 comm="dmesg" path="/root/.phoronix-test-suite/run-lock-3303" dev="vda4" ino=234024 scontext=system_u:system_r:dmesg_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=0
+audit: type=1400 audit(1795563585.998:48): avc:  denied  { write } for  pid=3896 comm="dmesg" path="/root/.phoronix-test-suite/run-lock-3889" dev="vda4" ino=234059 scontext=system_u:system_r:dmesg_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=0
+audit: type=1400 audit(1795563590.523:49): avc:  denied  { write } for  pid=4059 comm="dmesg" path="/root/.phoronix-test-suite/run-lock-4052" dev="vda4" ino=234078 scontext=system_u:system_r:dmesg_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=0
+audit: type=1400 audit(1795563688.324:50): avc:  denied  { search } for  pid=4610 comm="flatpak" name=".cache" dev="vda4" ino=1714 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:cache_home_t:s0 tclass=dir permissive=1
+audit: type=1400 audit(1795563980.702:51): avc:  denied  { write } for  pid=5472 comm="dmesg" path="/root/.phoronix-test-suite/run-lock-4052" dev="vda4" ino=234078 scontext=system_u:system_r:dmesg_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=0
+audit: type=1400 audit(1795563982.167:52): avc:  denied  { write } for  pid=5500 comm="dmesg" path="/root/.phoronix-test-suite/run-lock-5491" dev="vda4" ino=234113 scontext=system_u:system_r:dmesg_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=0
+audit: type=1400 audit(1795563990.035:53): avc:  denied  { search } for  pid=5591 comm="flatpak" name=".cache" dev="vda4" ino=1714 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:cache_home_t:s0 tclass=dir permissive=1
+audit: type=1400 audit(1795563990.042:54): avc:  denied  { read } for  pid=5569 comm="bash" name=".bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795563990.042:55): avc:  denied  { open } for  pid=5569 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795563990.042:56): avc:  denied  { getattr } for  pid=5569 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795564000.471:57): avc:  denied  { read } for  pid=6564 comm="bash" name=".bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795564000.471:58): avc:  denied  { open } for  pid=6564 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795564000.471:59): avc:  denied  { getattr } for  pid=6564 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795564006.396:60): avc:  denied  { write } for  pid=7061 comm="dmesg" path="/root/.phoronix-test-suite/run-lock-7054" dev="vda4" ino=235831 scontext=system_u:system_r:dmesg_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=0
+audit: type=1400 audit(1795564021.274:61): avc:  denied  { search } for  pid=7433 comm="flatpak" name=".cache" dev="vda4" ino=1714 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:cache_home_t:s0 tclass=dir permissive=1
+audit: type=1400 audit(1795564107.486:62): avc:  denied  { write } for  pid=7939 comm="dmesg" path="/root/.phoronix-test-suite/run-lock-7054" dev="vda4" ino=235831 scontext=system_u:system_r:dmesg_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=0
+audit: type=1400 audit(1795564108.600:63): avc:  denied  { write } for  pid=7967 comm="dmesg" path="/root/.phoronix-test-suite/run-lock-7958" dev="vda4" ino=235872 scontext=system_u:system_r:dmesg_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=0
+audit: type=1400 audit(1795564112.237:64): avc:  denied  { write } for  pid=8127 comm="dmesg" path="/root/.phoronix-test-suite/run-lock-8120" dev="vda4" ino=235889 scontext=system_u:system_r:dmesg_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=0
+audit: type=1400 audit(1795564125.339:65): avc:  denied  { read } for  pid=8416 comm="bash" name=".bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795564125.339:66): avc:  denied  { open } for  pid=8416 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795564125.339:67): avc:  denied  { getattr } for  pid=8416 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795564238.947:68): avc:  denied  { write } for  pid=8769 comm="dmesg" path="/root/.phoronix-test-suite/run-lock-8120" dev="vda4" ino=235889 scontext=system_u:system_r:dmesg_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=0
+audit: type=1400 audit(1795564239.359:69): avc:  denied  { write } for  pid=8795 comm="dmesg" path="/root/.phoronix-test-suite/run-lock-8788" dev="vda4" ino=235930 scontext=system_u:system_r:dmesg_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=0
+audit: type=1400 audit(1795564242.864:70): avc:  denied  { write } for  pid=9002 comm="dmesg" path="/root/.phoronix-test-suite/run-lock-8995" dev="vda4" ino=236042 scontext=system_u:system_r:dmesg_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=0
+audit: type=1400 audit(1795564250.147:71): avc:  denied  { search } for  pid=9278 comm="flatpak" name=".cache" dev="vda4" ino=1714 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:cache_home_t:s0 tclass=dir permissive=1
+audit: type=1400 audit(1795564270.955:72): avc:  denied  { read } for  pid=9318 comm="bash" name=".bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795564270.955:73): avc:  denied  { open } for  pid=9318 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795564270.955:74): avc:  denied  { getattr } for  pid=9318 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795564630.785:75): avc:  denied  { write } for  pid=10363 comm="dmesg" path="/root/.phoronix-test-suite/run-lock-8995" dev="vda4" ino=236042 scontext=system_u:system_r:dmesg_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=0
+audit: type=1400 audit(1795564631.695:76): avc:  denied  { write } for  pid=10392 comm="dmesg" path="/root/.phoronix-test-suite/run-lock-10382" dev="vda4" ino=236073 scontext=system_u:system_r:dmesg_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=0
+audit: type=1400 audit(1795564635.003:77): avc:  denied  { search } for  pid=10448 comm="flatpak" name=".cache" dev="vda4" ino=1714 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:cache_home_t:s0 tclass=dir permissive=1
+audit: type=1400 audit(1795564640.213:78): avc:  denied  { write } for  pid=10590 comm="dmesg" path="/root/.phoronix-test-suite/run-lock-10583" dev="vda4" ino=236092 scontext=system_u:system_r:dmesg_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=0
+audit: type=1400 audit(1795564645.410:79): avc:  denied  { read } for  pid=12067 comm="bash" name=".bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795564645.410:80): avc:  denied  { open } for  pid=12067 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795564645.410:81): avc:  denied  { getattr } for  pid=12067 comm="bash" path="/root/.bash_profile" dev="vda4" ino=174077 scontext=system_u:system_r:virt_qemu_ga_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=1
+audit: type=1400 audit(1795564769.560:82): avc:  denied  { write } for  pid=78969 comm="dmesg" path="/root/.phoronix-test-suite/run-lock-10583" dev="vda4" ino=236092 scontext=system_u:system_r:dmesg_t:s0 tcontext=system_u:object_r:admin_home_t:s0 tclass=file permissive=0

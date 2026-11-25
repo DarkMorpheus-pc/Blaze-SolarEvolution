@@ -1,0 +1,90 @@
+=== systemd-analyze time ===
+Startup finished in 398ms (kernel) + 1.601s (initrd) + 3.326s (userspace) = 5.327s 
+graphical.target reached after 3.132s in userspace.
+
+=== systemd-analyze critical-chain ===
+The time when unit became active or started is printed after the "@" character.
+The time the unit took to start is printed after the "+" character.
+
+graphical.target @3.132s
+└─multi-user.target @3.101s
+  └─sddm.service @3.101s
+    └─plymouth-quit.service @3.074s +25ms
+      └─systemd-user-sessions.service @3.057s +14ms
+        └─remote-fs.target @3.056s
+          └─remote-fs-pre.target @3.055s
+            └─nfs-client.target @3.055s
+              └─gssproxy.service @2.465s +241ms
+                └─network.target @2.456s
+                  └─NetworkManager.service @2.136s +319ms
+                    └─network-pre.target @2.135s
+                      └─firewalld.service @2.134s
+                        └─basic.target @2.118s
+                          └─dbus-broker.service @2.100s +17ms
+                            └─dbus.socket @2.093s +403us
+                              └─sysinit.target @2.091s
+                                └─systemd-update-utmp.service @2.077s +14ms
+                                  └─systemd-tmpfiles-setup.service @2.037s +38ms
+                                    └─local-fs.target @2.020s
+                                      └─run-user-961.mount @3.199s
+                                        └─swap.target @1.262s
+                                          └─dev-zram0.swap @1.201s +60ms
+                                            └─systemd-zram-setup@zram0.service @1.186s +13ms
+                                              └─dev-zram0.device @1.184s
+
+=== systemd-analyze blame (top 50) ===
+2.145s dev-vport2p1.device
+2.145s sys-devices-pci0000:00-0000:00:04.0-virtio2-virtio\x2dports-vport2p1.device
+2.145s dev-virtio\x2dports-org.qemu.guest_agent.0.device
+2.108s dev-ttyS0.device
+2.108s sys-devices-pnp0-00:04-00:04:0-00:04:0.0-tty-ttyS0.device
+2.100s dev-vda3.device
+2.100s dev-disk-by\x2dpartuuid-2454c216\x2d2fd7\x2d4a28\x2dbf48\x2d8957a97802ca.device
+2.100s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart-by\x2dlabel-BLAZE_REC.device
+2.100s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart-by\x2duuid-09b526ed\x2db624\x2d41ce\x2d8f5b\x2debd7c331c234.device
+2.100s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart3.device
+2.100s dev-disk-by\x2dpath-virtio\x2dpci\x2d0000:00:06.0\x2dpart3.device
+2.100s dev-disk-by\x2duuid-09b526ed\x2db624\x2d41ce\x2d8f5b\x2debd7c331c234.device
+2.100s sys-devices-pci0000:00-0000:00:06.0-virtio4-block-vda-vda3.device
+2.100s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart-by\x2dpartnum-3.device
+2.100s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart-by\x2dpartuuid-2454c216\x2d2fd7\x2d4a28\x2dbf48\x2d8957a97802ca.device
+2.100s dev-disk-by\x2dlabel-BLAZE_REC.device
+2.100s dev-disk-by\x2ddiskseq-1\x2dpart3.device
+2.096s dev-ttyS1.device
+2.096s sys-devices-platform-serial8250-serial8250:0-serial8250:0.1-tty-ttyS1.device
+2.095s sys-devices-platform-serial8250-serial8250:0-serial8250:0.2-tty-ttyS2.device
+2.095s dev-ttyS2.device
+2.093s dev-ttyS3.device
+2.093s sys-devices-platform-serial8250-serial8250:0-serial8250:0.3-tty-ttyS3.device
+2.093s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart4.device
+2.092s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart-by\x2duuid-c44bcc8b\x2dbf2d\x2d4c92\x2d90d9\x2d9531c86d17b7.device
+2.092s dev-disk-by\x2duuid-c44bcc8b\x2dbf2d\x2d4c92\x2d90d9\x2d9531c86d17b7.device
+2.092s dev-disk-by\x2dlabel-bs_solarevolution\x2deval.device
+2.092s dev-disk-by\x2dpath-virtio\x2dpci\x2d0000:00:06.0\x2dpart4.device
+2.092s dev-vda4.device
+2.092s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart-by\x2dpartuuid-333e7a40\x2d4b37\x2d4719\x2d9ad0\x2dbedaeb8f3c9c.device
+2.092s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart-by\x2dpartnum-4.device
+2.092s dev-disk-by\x2dpartuuid-333e7a40\x2d4b37\x2d4719\x2d9ad0\x2dbedaeb8f3c9c.device
+2.092s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart-by\x2dpartnum-1.device
+2.092s dev-disk-by\x2ddiskseq-1\x2dpart1.device
+2.092s dev-disk-by\x2dpartuuid-f1a61286\x2da796\x2d469e\x2da67d\x2d09eb98966b0a.device
+2.092s dev-disk-by\x2duuid-1A07\x2d0B5B.device
+2.092s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart-by\x2dpartlabel-EFI\x5cx20System\x5cx20Partition.device
+2.092s sys-devices-pci0000:00-0000:00:06.0-virtio4-block-vda-vda4.device
+2.092s dev-vda1.device
+2.092s sys-devices-pci0000:00-0000:00:06.0-virtio4-block-vda-vda1.device
+2.092s dev-disk-by\x2ddiskseq-1\x2dpart4.device
+2.092s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart-by\x2dpartuuid-f1a61286\x2da796\x2d469e\x2da67d\x2d09eb98966b0a.device
+2.092s dev-disk-by\x2dpartlabel-EFI\x5cx20System\x5cx20Partition.device
+2.092s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart1.device
+2.092s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart-by\x2dlabel-bs_solarevolution\x2deval.device
+2.092s dev-disk-by\x2dpath-pci\x2d0000:00:06.0\x2dpart-by\x2duuid-1A07\x2d0B5B.device
+2.092s dev-disk-by\x2ddesignator-esp.device
+2.092s dev-disk-by\x2dpath-virtio\x2dpci\x2d0000:00:06.0\x2dpart1.device
+2.091s dev-disk-by\x2ddiskseq-1.device
+2.091s dev-disk-by\x2dpath-pci\x2d0000:00:06.0.device
+
+=== systemctl --failed ===
+  UNIT LOAD ACTIVE SUB DESCRIPTION
+
+0 loaded units listed.

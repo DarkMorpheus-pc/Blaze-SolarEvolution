@@ -1,0 +1,2384 @@
+{
+  "collected_at_utc": "2026-11-24T23:19:04.461579+00:00",
+  "target": "fedora45",
+  "remediation_applied": false,
+  "certification_disclaimer": "Automated configuration assessment only; NOT an official CIS, NIST, or third-party certification.",
+  "cpe_interoperability_note": "Upstream Fedora 45 matches native 'cpe:/o:fedoraproject:fedora:45' directly in ssg-fedora-ds.xml.",
+  "tools": {
+    "oscap_version": "OpenSCAP command line tool (oscap) 1.4.6",
+    "lynis_version": "3.1.7",
+    "installed_tool_rpms": [
+      "openscap-scanner-1.4.6-1.fc45.x86_64",
+      "scap-security-guide-0.1.82-1.fc45.noarch",
+      "lynis-3.1.7-2.fc45.noarch"
+    ],
+    "all_packages_added_for_phase03": [
+      "apt-libs-3.3.7-1.fc45.x86_64",
+      "gpg-pubkey-4f50a6114cd5c6976a7f1179655a4b02f577861e-6888bc98.(none)",
+      "lynis-3.1.7-2.fc45.noarch",
+      "opendbx-1.4.6-44.fc45.x86_64",
+      "openscap-1.4.6-1.fc45.x86_64",
+      "openscap-scanner-1.4.6-1.fc45.x86_64",
+      "scap-security-guide-0.1.82-1.fc45.noarch"
+    ]
+  },
+  "scap_content": {
+    "scap_source": "upstream-ssg-fedora",
+    "selected_datastream": "/usr/share/xml/scap/ssg/content/ssg-fedora-ds.xml",
+    "evaluated_datastream": "/usr/share/xml/scap/ssg/content/ssg-fedora-ds.xml",
+    "available_profiles": [
+      "xccdf_org.ssgproject.content_profile_cis",
+      "xccdf_org.ssgproject.content_profile_cis_server_l1",
+      "xccdf_org.ssgproject.content_profile_cis_workstation_l1",
+      "xccdf_org.ssgproject.content_profile_cis_workstation_l2",
+      "xccdf_org.ssgproject.content_profile_cusp_fedora",
+      "xccdf_org.ssgproject.content_profile_ospp",
+      "xccdf_org.ssgproject.content_profile_pci-dss",
+      "xccdf_org.ssgproject.content_profile_standard"
+    ],
+    "primary_profile": "xccdf_org.ssgproject.content_profile_cis_workstation_l1",
+    "secondary_profile": "xccdf_org.ssgproject.content_profile_standard"
+  },
+  "openscap_unmodified_cpe": null,
+  "openscap_primary": {
+    "namespace": "http://checklists.nist.gov/xccdf/1.2",
+    "profile_id": "xccdf_org.ssgproject.content_profile_cis_workstation_l1",
+    "start_time": "2026-11-24T23:15:03+00:00",
+    "end_time": "2026-11-24T23:15:48+00:00",
+    "total_applicable_checks": 303,
+    "passed_checks": 167,
+    "failed_checks": 136,
+    "not_applicable_checks": 13,
+    "not_selected_checks": 789,
+    "not_checked_checks": 0,
+    "informational_checks": 0,
+    "assessment_errors": 0,
+    "pass_percentage": 55.12,
+    "scoring_formula": "Passed / (Passed + Failed) * 100",
+    "failed_by_severity": {
+      "medium": 112,
+      "low": 12,
+      "high": 5,
+      "unknown": 7
+    },
+    "failed_rules": [
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_package_aide_installed",
+        "short_id": "package_aide_installed",
+        "title": "Install AIDE",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_aide_build_database",
+        "short_id": "aide_build_database",
+        "title": "Build and Test AIDE Database",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_aide_check_audit_tools",
+        "short_id": "aide_check_audit_tools",
+        "title": "Configure AIDE to Verify the Audit Tools",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_aide_periodic_cron_checking",
+        "short_id": "aide_periodic_cron_checking",
+        "title": "Configure Periodic Execution of AIDE",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_configure_custom_crypto_policy_cis",
+        "short_id": "configure_custom_crypto_policy_cis",
+        "title": "Implement Custom Crypto Policy Modules for CIS Benchmark",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_dconf_gnome_disable_user_list",
+        "short_id": "dconf_gnome_disable_user_list",
+        "title": "Disable the GNOME3 Login User List",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_dconf_gnome_disable_autorun",
+        "short_id": "dconf_gnome_disable_autorun",
+        "title": "Disable GNOME3 Automount running",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_dconf_gnome_screensaver_idle_delay",
+        "short_id": "dconf_gnome_screensaver_idle_delay",
+        "title": "Set GNOME3 Screensaver Inactivity Timeout",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_dconf_gnome_screensaver_lock_delay",
+        "short_id": "dconf_gnome_screensaver_lock_delay",
+        "title": "Set GNOME3 Screensaver Lock Delay After Activation Period",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_dconf_gnome_screensaver_user_locks",
+        "short_id": "dconf_gnome_screensaver_user_locks",
+        "title": "Ensure Users Cannot Change GNOME3 Screensaver Settings",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_dconf_gnome_session_idle_user_locks",
+        "short_id": "dconf_gnome_session_idle_user_locks",
+        "title": "Ensure Users Cannot Change GNOME3 Session Idle Settings",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sudo_add_use_pty",
+        "short_id": "sudo_add_use_pty",
+        "title": "Ensure Only Users Logged In To Real tty Can Execute Sudo - sudo use_pty",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sudo_custom_logfile",
+        "short_id": "sudo_custom_logfile",
+        "title": "Ensure Sudo Logfile Exists - sudo logfile",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sudo_require_reauthentication",
+        "short_id": "sudo_require_reauthentication",
+        "title": "Require Re-Authentication When Using the sudo Command",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_ensure_fedora_gpgkey_installed",
+        "short_id": "ensure_fedora_gpgkey_installed",
+        "title": "Ensure Fedora GPG Key Installed",
+        "severity": "high",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_ensure_gpgcheck_globally_activated",
+        "short_id": "ensure_gpgcheck_globally_activated",
+        "title": "Ensure gpgcheck Enabled In Main dnf Configuration",
+        "severity": "high",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_banner_etc_issue_cis",
+        "short_id": "banner_etc_issue_cis",
+        "title": "Ensure Local Login Warning Banner Is Configured Properly",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_banner_etc_issue_net_cis",
+        "short_id": "banner_etc_issue_net_cis",
+        "title": "Ensure Remote Login Warning Banner Is Configured Properly",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_dconf_gnome_banner_enabled",
+        "short_id": "dconf_gnome_banner_enabled",
+        "title": "Enable GNOME3 Login Warning Banner",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_dconf_gnome_login_banner_text",
+        "short_id": "dconf_gnome_login_banner_text",
+        "title": "Set the GNOME3 Login Warning Banner Text",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_password_pam_modules_in_authselect_profile",
+        "short_id": "accounts_password_pam_modules_in_authselect_profile",
+        "title": "Ensure Active Authselect Profile Includes PAM Modules",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_account_password_pam_faillock_password_auth",
+        "short_id": "account_password_pam_faillock_password_auth",
+        "title": "Configure the Use of the pam_faillock.so Module in the /etc/pam.d/password-auth File.",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_account_password_pam_faillock_system_auth",
+        "short_id": "account_password_pam_faillock_system_auth",
+        "title": "Configure the Use of the pam_faillock.so Module in the /etc/pam.d/system-auth File.",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_password_pam_pwhistory_remember_password_auth",
+        "short_id": "accounts_password_pam_pwhistory_remember_password_auth",
+        "title": "Limit Password Reuse: password-auth",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_password_pam_pwhistory_remember_system_auth",
+        "short_id": "accounts_password_pam_pwhistory_remember_system_auth",
+        "title": "Limit Password Reuse: system-auth",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_password_pam_pwhistory_use_authtok",
+        "short_id": "accounts_password_pam_pwhistory_use_authtok",
+        "title": "Enforce Password History with use_authtok",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_password_pam_unix_authtok",
+        "short_id": "accounts_password_pam_unix_authtok",
+        "title": "Require use_authtok for pam_unix.so",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_passwords_pam_faillock_deny",
+        "short_id": "accounts_passwords_pam_faillock_deny",
+        "title": "Lock Accounts After Failed Password Attempts",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_passwords_pam_faillock_unlock_time",
+        "short_id": "accounts_passwords_pam_faillock_unlock_time",
+        "title": "Set Lockout Time for Failed Password Attempts",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_password_pam_dictcheck",
+        "short_id": "accounts_password_pam_dictcheck",
+        "title": "Ensure PAM Enforces Password Requirements - Prevent the Use of Dictionary Words",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_password_pam_difok",
+        "short_id": "accounts_password_pam_difok",
+        "title": "Ensure PAM Enforces Password Requirements - Minimum Different Characters",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_password_pam_enforce_root",
+        "short_id": "accounts_password_pam_enforce_root",
+        "title": "Ensure PAM Enforces Password Requirements - Enforce for root User",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_password_pam_maxrepeat",
+        "short_id": "accounts_password_pam_maxrepeat",
+        "title": "Set Password Maximum Consecutive Repeating Characters",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_password_pam_maxsequence",
+        "short_id": "accounts_password_pam_maxsequence",
+        "title": "Limit the maximum number of sequential characters in passwords",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_password_pam_minclass",
+        "short_id": "accounts_password_pam_minclass",
+        "title": "Ensure PAM Enforces Password Requirements - Minimum Different Categories",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_password_pam_minlen",
+        "short_id": "accounts_password_pam_minlen",
+        "title": "Ensure PAM Enforces Password Requirements - Minimum Length",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_account_disable_post_pw_expiration",
+        "short_id": "account_disable_post_pw_expiration",
+        "title": "Set Account Expiration Following Inactivity",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_maximum_age_login_defs",
+        "short_id": "accounts_maximum_age_login_defs",
+        "title": "Set Password Maximum Age",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_password_set_max_life_existing",
+        "short_id": "accounts_password_set_max_life_existing",
+        "title": "Set Existing Passwords Maximum Age",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_password_last_change_is_in_past",
+        "short_id": "accounts_password_last_change_is_in_past",
+        "title": "Ensure all users last password change date is in the past",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_no_empty_passwords",
+        "short_id": "no_empty_passwords",
+        "title": "Prevent Login to Accounts With Empty Password",
+        "severity": "high",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_ensure_pam_wheel_group_empty",
+        "short_id": "ensure_pam_wheel_group_empty",
+        "title": "Ensure the Group Used by pam_wheel.so Module Exists on System and is Empty",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_use_pam_wheel_group_for_su",
+        "short_id": "use_pam_wheel_group_for_su",
+        "title": "Enforce Usage of pam_wheel with Group Parameter for su Authentication",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_tmout",
+        "short_id": "accounts_tmout",
+        "title": "Set Interactive Session Timeout",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_file_permission_user_init_files",
+        "short_id": "file_permission_user_init_files",
+        "title": "Ensure All User Initialization Files Have Mode 0740 Or Less Permissive",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_umask_etc_bashrc",
+        "short_id": "accounts_umask_etc_bashrc",
+        "title": "Ensure the Default Bash Umask is Set Correctly",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_umask_etc_login_defs",
+        "short_id": "accounts_umask_etc_login_defs",
+        "title": "Ensure the Default Umask is Set Correctly in login.defs",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_umask_etc_profile",
+        "short_id": "accounts_umask_etc_profile",
+        "title": "Ensure the Default Umask is Set Correctly in /etc/profile",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_file_permissions_boot_grub2",
+        "short_id": "file_permissions_boot_grub2",
+        "title": "All GRUB configuration files must have mode 0600 or more restrictive",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_grub2_password",
+        "short_id": "grub2_password",
+        "title": "Set Boot Loader Password in grub2",
+        "severity": "high",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_ensure_journald_and_rsyslog_not_active_together",
+        "short_id": "ensure_journald_and_rsyslog_not_active_together",
+        "title": "Ensure journald and rsyslog Are Not Active Together",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_package_systemd-journal-remote_installed",
+        "short_id": "package_systemd-journal-remote_installed",
+        "title": "Install systemd-journal-remote Package",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_journald_compress",
+        "short_id": "journald_compress",
+        "title": "Ensure journald is configured to compress large log files",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_journald_disable_forward_to_syslog",
+        "short_id": "journald_disable_forward_to_syslog",
+        "title": "Ensure journald ForwardToSyslog is disabled",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_journald_storage",
+        "short_id": "journald_storage",
+        "title": "Ensure journald is configured to write log files to persistent disk",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_firewalld_loopback_traffic_restricted",
+        "short_id": "firewalld_loopback_traffic_restricted",
+        "title": "Configure Firewalld to Restrict Loopback Traffic",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_firewalld_loopback_traffic_trusted",
+        "short_id": "firewalld_loopback_traffic_trusted",
+        "title": "Configure Firewalld to Trust Loopback Traffic",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv6_conf_all_accept_ra",
+        "short_id": "sysctl_net_ipv6_conf_all_accept_ra",
+        "title": "Configure Accepting Router Advertisements on All IPv6 Interfaces",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv6_conf_all_accept_source_route",
+        "short_id": "sysctl_net_ipv6_conf_all_accept_source_route",
+        "title": "Disable Kernel Parameter for Accepting Source-Routed Packets on all IPv6 Interfaces",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv6_conf_all_forwarding",
+        "short_id": "sysctl_net_ipv6_conf_all_forwarding",
+        "title": "Disable Kernel Parameter for IPv6 Forwarding",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv6_conf_default_accept_ra",
+        "short_id": "sysctl_net_ipv6_conf_default_accept_ra",
+        "title": "Disable Accepting Router Advertisements on all IPv6 Interfaces by Default",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv6_conf_default_accept_source_route",
+        "short_id": "sysctl_net_ipv6_conf_default_accept_source_route",
+        "title": "Disable Kernel Parameter for Accepting Source-Routed Packets on IPv6 Interfaces by Default",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv6_conf_default_forwarding",
+        "short_id": "sysctl_net_ipv6_conf_default_forwarding",
+        "title": "Disable Kernel Parameter for IPv6 Forwarding by default",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_conf_all_accept_source_route",
+        "short_id": "sysctl_net_ipv4_conf_all_accept_source_route",
+        "title": "Disable Kernel Parameter for Accepting Source-Routed Packets on all IPv4 Interfaces",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_conf_all_forwarding",
+        "short_id": "sysctl_net_ipv4_conf_all_forwarding",
+        "title": "Disable Kernel Parameter for IPv4 Forwarding on all IPv4 Interfaces",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_conf_all_log_martians",
+        "short_id": "sysctl_net_ipv4_conf_all_log_martians",
+        "title": "Enable Kernel Parameter to Log Martian Packets on all IPv4 Interfaces",
+        "severity": "unknown",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_conf_all_rp_filter",
+        "short_id": "sysctl_net_ipv4_conf_all_rp_filter",
+        "title": "Enable Kernel Parameter to Use Reverse Path Filtering on all IPv4 Interfaces",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_conf_all_secure_redirects",
+        "short_id": "sysctl_net_ipv4_conf_all_secure_redirects",
+        "title": "Disable Kernel Parameter for Accepting Secure ICMP Redirects on all IPv4 Interfaces",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_conf_default_forwarding",
+        "short_id": "sysctl_net_ipv4_conf_default_forwarding",
+        "title": "Disable Kernel Parameter for IPv4 Forwarding By Default",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_conf_default_log_martians",
+        "short_id": "sysctl_net_ipv4_conf_default_log_martians",
+        "title": "Enable Kernel Parameter to Log Martian Packets on all IPv4 Interfaces by Default",
+        "severity": "unknown",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_conf_default_rp_filter",
+        "short_id": "sysctl_net_ipv4_conf_default_rp_filter",
+        "title": "Enable Kernel Parameter to Use Reverse Path Filtering on all IPv4 Interfaces by Default",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_conf_default_secure_redirects",
+        "short_id": "sysctl_net_ipv4_conf_default_secure_redirects",
+        "title": "Configure Kernel Parameter for Accepting Secure Redirects By Default",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_icmp_echo_ignore_broadcasts",
+        "short_id": "sysctl_net_ipv4_icmp_echo_ignore_broadcasts",
+        "title": "Enable Kernel Parameter to Ignore ICMP Broadcast Echo Requests on IPv4 Interfaces",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_icmp_ignore_bogus_error_responses",
+        "short_id": "sysctl_net_ipv4_icmp_ignore_bogus_error_responses",
+        "title": "Enable Kernel Parameter to Ignore Bogus ICMP Error Responses on IPv4 Interfaces",
+        "severity": "unknown",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_tcp_syncookies",
+        "short_id": "sysctl_net_ipv4_tcp_syncookies",
+        "title": "Enable Kernel Parameter to Use TCP Syncookies on Network Interfaces",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_ip_forward",
+        "short_id": "sysctl_net_ipv4_ip_forward",
+        "title": "Disable Kernel Parameter for IP Forwarding on IPv4 Interfaces",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_service_nftables_disabled",
+        "short_id": "service_nftables_disabled",
+        "title": "Verify nftables Service is Disabled",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_kernel_module_atm_disabled",
+        "short_id": "kernel_module_atm_disabled",
+        "title": "Disable ATM Support",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_kernel_module_can_disabled",
+        "short_id": "kernel_module_can_disabled",
+        "title": "Disable CAN Support",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_kernel_module_dccp_disabled",
+        "short_id": "kernel_module_dccp_disabled",
+        "title": "Disable DCCP Support",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_kernel_module_rds_disabled",
+        "short_id": "kernel_module_rds_disabled",
+        "title": "Disable RDS Support",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_kernel_module_tipc_disabled",
+        "short_id": "kernel_module_tipc_disabled",
+        "title": "Disable TIPC Support",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_kernel_module_cramfs_disabled",
+        "short_id": "kernel_module_cramfs_disabled",
+        "title": "Disable Mounting of cramfs",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_kernel_module_freevxfs_disabled",
+        "short_id": "kernel_module_freevxfs_disabled",
+        "title": "Disable Mounting of freevxfs",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_kernel_module_hfs_disabled",
+        "short_id": "kernel_module_hfs_disabled",
+        "title": "Disable Mounting of hfs",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_kernel_module_hfsplus_disabled",
+        "short_id": "kernel_module_hfsplus_disabled",
+        "title": "Disable Mounting of hfsplus",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_kernel_module_jffs2_disabled",
+        "short_id": "kernel_module_jffs2_disabled",
+        "title": "Disable Mounting of jffs2",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_mount_option_dev_shm_nodev",
+        "short_id": "mount_option_dev_shm_nodev",
+        "title": "Add nodev Option to /dev/shm",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_mount_option_dev_shm_noexec",
+        "short_id": "mount_option_dev_shm_noexec",
+        "title": "Add noexec Option to /dev/shm",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_mount_option_dev_shm_nosuid",
+        "short_id": "mount_option_dev_shm_nosuid",
+        "title": "Add nosuid Option to /dev/shm",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_mount_option_home_nodev",
+        "short_id": "mount_option_home_nodev",
+        "title": "Add nodev Option to /home",
+        "severity": "unknown",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_mount_option_home_nosuid",
+        "short_id": "mount_option_home_nosuid",
+        "title": "Add nosuid Option to /home",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_mount_option_tmp_noexec",
+        "short_id": "mount_option_tmp_noexec",
+        "title": "Add noexec Option to /tmp",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_kernel_dmesg_restrict",
+        "short_id": "sysctl_kernel_dmesg_restrict",
+        "title": "Restrict Access to Kernel Message Buffer",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_kernel_yama_ptrace_scope",
+        "short_id": "sysctl_kernel_yama_ptrace_scope",
+        "title": "Restrict usage of ptrace to descendant processes",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_coredump_disable_backtraces",
+        "short_id": "coredump_disable_backtraces",
+        "title": "Disable core dump backtraces",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_coredump_disable_storage",
+        "short_id": "coredump_disable_storage",
+        "title": "Disable storing core dump",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_disable_users_coredumps",
+        "short_id": "disable_users_coredumps",
+        "title": "Disable Core Dumps for All Users",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_fs_suid_dumpable",
+        "short_id": "sysctl_fs_suid_dumpable",
+        "title": "Disable Core Dumps for SUID programs",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_kernel_kptr_restrict",
+        "short_id": "sysctl_kernel_kptr_restrict",
+        "title": "Restrict Exposed Kernel Pointer Addresses Access",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_kernel_randomize_va_space",
+        "short_id": "sysctl_kernel_randomize_va_space",
+        "title": "Enable Randomized Layout of Virtual Address Space",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_package_cron_installed",
+        "short_id": "package_cron_installed",
+        "title": "Install the cron service",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_file_permissions_cron_d",
+        "short_id": "file_permissions_cron_d",
+        "title": "Verify Permissions on cron.d",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_file_permissions_cron_daily",
+        "short_id": "file_permissions_cron_daily",
+        "title": "Verify Permissions on cron.daily",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_file_permissions_cron_hourly",
+        "short_id": "file_permissions_cron_hourly",
+        "title": "Verify Permissions on cron.hourly",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_file_permissions_cron_monthly",
+        "short_id": "file_permissions_cron_monthly",
+        "title": "Verify Permissions on cron.monthly",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_file_permissions_cron_weekly",
+        "short_id": "file_permissions_cron_weekly",
+        "title": "Verify Permissions on cron.weekly",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_file_permissions_crontab",
+        "short_id": "file_permissions_crontab",
+        "title": "Verify Permissions on crontab",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_file_at_allow_exists",
+        "short_id": "file_at_allow_exists",
+        "title": "Ensure that /etc/at.allow exists",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_file_at_deny_not_exist",
+        "short_id": "file_at_deny_not_exist",
+        "title": "Ensure that /etc/at.deny does not exist",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_file_cron_allow_exists",
+        "short_id": "file_cron_allow_exists",
+        "title": "Ensure that /etc/cron.allow exists",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_file_cron_deny_not_exist",
+        "short_id": "file_cron_deny_not_exist",
+        "title": "Ensure that /etc/cron.deny does not exist",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_package_dnsmasq_removed",
+        "short_id": "package_dnsmasq_removed",
+        "title": "Uninstall dnsmasq Package",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_package_httpd_removed",
+        "short_id": "package_httpd_removed",
+        "title": "Uninstall httpd Package",
+        "severity": "unknown",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_service_rpcbind_disabled",
+        "short_id": "service_rpcbind_disabled",
+        "title": "Disable rpcbind Service",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_service_nfs_disabled",
+        "short_id": "service_nfs_disabled",
+        "title": "Disable Network File System (nfs)",
+        "severity": "unknown",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_package_rsync_removed",
+        "short_id": "package_rsync_removed",
+        "title": "Uninstall rsync Package",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_directory_permissions_sshd_config_d",
+        "short_id": "directory_permissions_sshd_config_d",
+        "title": "Verify Permissions on SSH Server Config File",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_file_groupownership_sshd_private_key",
+        "short_id": "file_groupownership_sshd_private_key",
+        "title": "Verify Group Ownership on SSH Server Private *_key Key Files",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_file_permissions_sshd_drop_in_config",
+        "short_id": "file_permissions_sshd_drop_in_config",
+        "title": "Verify Permissions on SSH Server Config File",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_set_keepalive",
+        "short_id": "sshd_set_keepalive",
+        "title": "Set SSH Client Alive Count Max",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_set_idle_timeout",
+        "short_id": "sshd_set_idle_timeout",
+        "title": "Set SSH Client Alive Interval",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_disable_host_auth",
+        "short_id": "disable_host_auth",
+        "title": "Disable Host-Based Authentication",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_disable_empty_passwords",
+        "short_id": "sshd_disable_empty_passwords",
+        "title": "Disable SSH Access via Empty Passwords",
+        "severity": "high",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_disable_forwarding",
+        "short_id": "sshd_disable_forwarding",
+        "title": "Disable SSH Forwarding",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_disable_gssapi_auth",
+        "short_id": "sshd_disable_gssapi_auth",
+        "title": "Disable GSSAPI Authentication",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_disable_rhosts",
+        "short_id": "sshd_disable_rhosts",
+        "title": "Disable SSH Support for .rhosts Files",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_disable_root_login",
+        "short_id": "sshd_disable_root_login",
+        "title": "Disable SSH Root Login",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_do_not_permit_user_env",
+        "short_id": "sshd_do_not_permit_user_env",
+        "title": "Do Not Allow SSH Environment Options",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_enable_warning_banner_net",
+        "short_id": "sshd_enable_warning_banner_net",
+        "title": "Enable SSH Warning Banner",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_limit_user_access",
+        "short_id": "sshd_limit_user_access",
+        "title": "Limit Users' SSH Access",
+        "severity": "unknown",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_set_login_grace_time",
+        "short_id": "sshd_set_login_grace_time",
+        "title": "Ensure SSH LoginGraceTime is configured",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_set_loglevel_verbose",
+        "short_id": "sshd_set_loglevel_verbose",
+        "title": "Set SSH Daemon LogLevel to VERBOSE",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_set_max_auth_tries",
+        "short_id": "sshd_set_max_auth_tries",
+        "title": "Set SSH authentication attempt limit",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_set_max_sessions",
+        "short_id": "sshd_set_max_sessions",
+        "title": "Set SSH MaxSessions limit",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_set_maxstartups",
+        "short_id": "sshd_set_maxstartups",
+        "title": "Ensure SSH MaxStartups is configured",
+        "severity": "medium",
+        "result": "fail"
+      }
+    ],
+    "error_rules": [],
+    "passed_rule_count_verified": 167
+  },
+  "openscap_secondary": {
+    "namespace": "http://checklists.nist.gov/xccdf/1.2",
+    "profile_id": "xccdf_org.ssgproject.content_profile_standard",
+    "start_time": "2026-11-24T23:15:54+00:00",
+    "end_time": "2026-11-24T23:17:28+00:00",
+    "total_applicable_checks": 74,
+    "passed_checks": 28,
+    "failed_checks": 46,
+    "not_applicable_checks": 1,
+    "not_selected_checks": 1030,
+    "not_checked_checks": 0,
+    "informational_checks": 0,
+    "assessment_errors": 0,
+    "pass_percentage": 37.84,
+    "scoring_formula": "Passed / (Passed + Failed) * 100",
+    "failed_by_severity": {
+      "high": 4,
+      "medium": 39,
+      "low": 2,
+      "unknown": 1
+    },
+    "failed_rules": [
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_rpm_verify_permissions",
+        "short_id": "rpm_verify_permissions",
+        "title": "Verify and Correct File Permissions with RPM",
+        "severity": "high",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_aide_build_database",
+        "short_id": "aide_build_database",
+        "title": "Build and Test AIDE Database",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_ensure_gpgcheck_globally_activated",
+        "short_id": "ensure_gpgcheck_globally_activated",
+        "title": "Ensure gpgcheck Enabled In Main dnf Configuration",
+        "severity": "high",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_display_login_attempts",
+        "short_id": "display_login_attempts",
+        "title": "Ensure PAM Displays Last Logon/Access Notification",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_maximum_age_login_defs",
+        "short_id": "accounts_maximum_age_login_defs",
+        "title": "Set Password Maximum Age",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_minimum_age_login_defs",
+        "short_id": "accounts_minimum_age_login_defs",
+        "title": "Set Password Minimum Age",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_no_empty_passwords",
+        "short_id": "no_empty_passwords",
+        "title": "Prevent Login to Accounts With Empty Password",
+        "severity": "high",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_no_direct_root_logins",
+        "short_id": "no_direct_root_logins",
+        "title": "Direct root Logins Not Allowed",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_set_firewalld_default_zone",
+        "short_id": "set_firewalld_default_zone",
+        "title": "Set Default firewalld Zone for Incoming Packets",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_grub2_nousb_argument",
+        "short_id": "grub2_nousb_argument",
+        "title": "Disable Kernel Support for USB via Bootloader Configuration",
+        "severity": "unknown",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_disable_empty_passwords",
+        "short_id": "sshd_disable_empty_passwords",
+        "title": "Disable SSH Access via Empty Passwords",
+        "severity": "high",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_disable_root_login",
+        "short_id": "sshd_disable_root_login",
+        "title": "Disable SSH Root Login",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_grub2_audit_argument",
+        "short_id": "grub2_audit_argument",
+        "title": "Enable Auditing for Processes Which Start Prior to the Audit Daemon",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_immutable",
+        "short_id": "audit_rules_immutable",
+        "title": "Make the auditd Configuration Immutable",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_mac_modification",
+        "short_id": "audit_rules_mac_modification",
+        "title": "Record Events that Modify the System's Mandatory Access Controls",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_media_export",
+        "short_id": "audit_rules_media_export",
+        "title": "Ensure auditd Collects Information on Exporting to Media (successful)",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_networkconfig_modification",
+        "short_id": "audit_rules_networkconfig_modification",
+        "title": "Record Events that Modify the System's Network Environment",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_session_events",
+        "short_id": "audit_rules_session_events",
+        "title": "Record Attempts to Alter Process and Session Initiation Information",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_sysadmin_actions",
+        "short_id": "audit_rules_sysadmin_actions",
+        "title": "Ensure auditd Collects System Administrator Actions",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_usergroup_modification",
+        "short_id": "audit_rules_usergroup_modification",
+        "title": "Record Events that Modify User/Group Information",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_chmod",
+        "short_id": "audit_rules_dac_modification_chmod",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - chmod",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_chown",
+        "short_id": "audit_rules_dac_modification_chown",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - chown",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_fchmod",
+        "short_id": "audit_rules_dac_modification_fchmod",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - fchmod",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_fchmodat",
+        "short_id": "audit_rules_dac_modification_fchmodat",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - fchmodat",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_fchown",
+        "short_id": "audit_rules_dac_modification_fchown",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - fchown",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_fchownat",
+        "short_id": "audit_rules_dac_modification_fchownat",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - fchownat",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_fremovexattr",
+        "short_id": "audit_rules_dac_modification_fremovexattr",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - fremovexattr",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_fsetxattr",
+        "short_id": "audit_rules_dac_modification_fsetxattr",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - fsetxattr",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_lchown",
+        "short_id": "audit_rules_dac_modification_lchown",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - lchown",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_lremovexattr",
+        "short_id": "audit_rules_dac_modification_lremovexattr",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - lremovexattr",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_lsetxattr",
+        "short_id": "audit_rules_dac_modification_lsetxattr",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - lsetxattr",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_removexattr",
+        "short_id": "audit_rules_dac_modification_removexattr",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - removexattr",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_setxattr",
+        "short_id": "audit_rules_dac_modification_setxattr",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - setxattr",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_file_deletion_events",
+        "short_id": "audit_rules_file_deletion_events",
+        "title": "Ensure auditd Collects File Deletion Events by User",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_unsuccessful_file_modification",
+        "short_id": "audit_rules_unsuccessful_file_modification",
+        "title": "Ensure auditd Collects Unauthorized Access Attempts to Files (unsuccessful)",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_kernel_module_loading",
+        "short_id": "audit_rules_kernel_module_loading",
+        "title": "Ensure auditd Collects Information on Kernel Module Loading and Unloading",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_login_events",
+        "short_id": "audit_rules_login_events",
+        "title": "Record Attempts to Alter Logon and Logout Events",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_privileged_commands",
+        "short_id": "audit_rules_privileged_commands",
+        "title": "Ensure auditd Collects Information on the Use of Privileged Commands",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_time_adjtimex",
+        "short_id": "audit_rules_time_adjtimex",
+        "title": "Record attempts to alter time through adjtimex",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_time_clock_settime",
+        "short_id": "audit_rules_time_clock_settime",
+        "title": "Record Attempts to Alter Time Through clock_settime",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_time_settimeofday",
+        "short_id": "audit_rules_time_settimeofday",
+        "title": "Record attempts to alter time through settimeofday",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_time_stime",
+        "short_id": "audit_rules_time_stime",
+        "title": "Record Attempts to Alter Time Through stime",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_time_watch_localtime",
+        "short_id": "audit_rules_time_watch_localtime",
+        "title": "Record Attempts to Alter the localtime File",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_auditd_audispd_syslog_plugin_activated",
+        "short_id": "auditd_audispd_syslog_plugin_activated",
+        "title": "Configure auditd to use audispd's syslog plugin",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_auditd_data_retention_admin_space_left_action",
+        "short_id": "auditd_data_retention_admin_space_left_action",
+        "title": "Configure auditd admin_space_left Action on Low Disk Space",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_auditd_data_retention_space_left_action",
+        "short_id": "auditd_data_retention_space_left_action",
+        "title": "Configure auditd space_left Action on Low Disk Space",
+        "severity": "medium",
+        "result": "fail"
+      }
+    ],
+    "error_rules": [],
+    "passed_rule_count_verified": 28
+  },
+  "openscap_cusp_fedora": {
+    "namespace": "http://checklists.nist.gov/xccdf/1.2",
+    "profile_id": "xccdf_org.ssgproject.content_profile_cusp_fedora",
+    "start_time": "2026-11-24T23:17:34+00:00",
+    "end_time": "2026-11-24T23:18:27+00:00",
+    "total_applicable_checks": 271,
+    "passed_checks": 137,
+    "failed_checks": 134,
+    "not_applicable_checks": 1,
+    "not_selected_checks": 833,
+    "not_checked_checks": 0,
+    "informational_checks": 0,
+    "assessment_errors": 0,
+    "pass_percentage": 50.55,
+    "scoring_formula": "Passed / (Passed + Failed) * 100",
+    "failed_by_severity": {
+      "high": 6,
+      "medium": 111,
+      "low": 11,
+      "unknown": 6
+    },
+    "failed_rules": [
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_gnome_gdm_disable_automatic_login",
+        "short_id": "gnome_gdm_disable_automatic_login",
+        "title": "Disable GDM Automatic Login",
+        "severity": "high",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_gnome_gdm_disable_xdmcp",
+        "short_id": "gnome_gdm_disable_xdmcp",
+        "title": "Disable XDMCP in GDM",
+        "severity": "high",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sudo_add_use_pty",
+        "short_id": "sudo_add_use_pty",
+        "title": "Ensure Only Users Logged In To Real tty Can Execute Sudo - sudo use_pty",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sudo_custom_logfile",
+        "short_id": "sudo_custom_logfile",
+        "title": "Ensure Sudo Logfile Exists - sudo logfile",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sudo_require_reauthentication",
+        "short_id": "sudo_require_reauthentication",
+        "title": "Require Re-Authentication When Using the sudo Command",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_password_pam_difok",
+        "short_id": "accounts_password_pam_difok",
+        "title": "Ensure PAM Enforces Password Requirements - Minimum Different Characters",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_password_pam_maxrepeat",
+        "short_id": "accounts_password_pam_maxrepeat",
+        "title": "Set Password Maximum Consecutive Repeating Characters",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_password_pam_minclass",
+        "short_id": "accounts_password_pam_minclass",
+        "title": "Ensure PAM Enforces Password Requirements - Minimum Different Categories",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_password_pam_minlen",
+        "short_id": "accounts_password_pam_minlen",
+        "title": "Ensure PAM Enforces Password Requirements - Minimum Length",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_password_pam_retry",
+        "short_id": "accounts_password_pam_retry",
+        "title": "Ensure PAM Enforces Password Requirements - Authentication Retry Prompts Permitted Per-Session",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_set_password_hashing_algorithm_logindefs",
+        "short_id": "set_password_hashing_algorithm_logindefs",
+        "title": "Set Password Hashing Algorithm in /etc/login.defs",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_set_password_hashing_algorithm_passwordauth",
+        "short_id": "set_password_hashing_algorithm_passwordauth",
+        "title": "Set PAM Password Hashing Algorithm - password-auth",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_set_password_hashing_algorithm_systemauth",
+        "short_id": "set_password_hashing_algorithm_systemauth",
+        "title": "Set PAM Password Hashing Algorithm - system-auth",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_no_empty_passwords",
+        "short_id": "no_empty_passwords",
+        "title": "Prevent Login to Accounts With Empty Password",
+        "severity": "high",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_use_pam_wheel_for_su",
+        "short_id": "use_pam_wheel_for_su",
+        "title": "Enforce usage of pam_wheel for su authentication",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_tmout",
+        "short_id": "accounts_tmout",
+        "title": "Set Interactive Session Timeout",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_umask_etc_bashrc",
+        "short_id": "accounts_umask_etc_bashrc",
+        "title": "Ensure the Default Bash Umask is Set Correctly",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_umask_etc_login_defs",
+        "short_id": "accounts_umask_etc_login_defs",
+        "title": "Ensure the Default Umask is Set Correctly in login.defs",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_accounts_umask_etc_profile",
+        "short_id": "accounts_umask_etc_profile",
+        "title": "Ensure the Default Umask is Set Correctly in /etc/profile",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_grub2_password",
+        "short_id": "grub2_password",
+        "title": "Set Boot Loader Password in grub2",
+        "severity": "high",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_grub2_uefi_password",
+        "short_id": "grub2_uefi_password",
+        "title": "Set the UEFI Boot Loader Password",
+        "severity": "high",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_journald_compress",
+        "short_id": "journald_compress",
+        "title": "Ensure journald is configured to compress large log files",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_journald_storage",
+        "short_id": "journald_storage",
+        "title": "Ensure journald is configured to write log files to persistent disk",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv6_conf_all_accept_source_route",
+        "short_id": "sysctl_net_ipv6_conf_all_accept_source_route",
+        "title": "Disable Kernel Parameter for Accepting Source-Routed Packets on all IPv6 Interfaces",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv6_conf_default_accept_source_route",
+        "short_id": "sysctl_net_ipv6_conf_default_accept_source_route",
+        "title": "Disable Kernel Parameter for Accepting Source-Routed Packets on IPv6 Interfaces by Default",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_conf_all_accept_source_route",
+        "short_id": "sysctl_net_ipv4_conf_all_accept_source_route",
+        "title": "Disable Kernel Parameter for Accepting Source-Routed Packets on all IPv4 Interfaces",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_conf_all_log_martians",
+        "short_id": "sysctl_net_ipv4_conf_all_log_martians",
+        "title": "Enable Kernel Parameter to Log Martian Packets on all IPv4 Interfaces",
+        "severity": "unknown",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_conf_all_rp_filter",
+        "short_id": "sysctl_net_ipv4_conf_all_rp_filter",
+        "title": "Enable Kernel Parameter to Use Reverse Path Filtering on all IPv4 Interfaces",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_conf_all_secure_redirects",
+        "short_id": "sysctl_net_ipv4_conf_all_secure_redirects",
+        "title": "Disable Kernel Parameter for Accepting Secure ICMP Redirects on all IPv4 Interfaces",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_conf_default_log_martians",
+        "short_id": "sysctl_net_ipv4_conf_default_log_martians",
+        "title": "Enable Kernel Parameter to Log Martian Packets on all IPv4 Interfaces by Default",
+        "severity": "unknown",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_conf_default_rp_filter",
+        "short_id": "sysctl_net_ipv4_conf_default_rp_filter",
+        "title": "Enable Kernel Parameter to Use Reverse Path Filtering on all IPv4 Interfaces by Default",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_conf_default_secure_redirects",
+        "short_id": "sysctl_net_ipv4_conf_default_secure_redirects",
+        "title": "Configure Kernel Parameter for Accepting Secure Redirects By Default",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_icmp_echo_ignore_broadcasts",
+        "short_id": "sysctl_net_ipv4_icmp_echo_ignore_broadcasts",
+        "title": "Enable Kernel Parameter to Ignore ICMP Broadcast Echo Requests on IPv4 Interfaces",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_icmp_ignore_bogus_error_responses",
+        "short_id": "sysctl_net_ipv4_icmp_ignore_bogus_error_responses",
+        "title": "Enable Kernel Parameter to Ignore Bogus ICMP Error Responses on IPv4 Interfaces",
+        "severity": "unknown",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_net_ipv4_tcp_syncookies",
+        "short_id": "sysctl_net_ipv4_tcp_syncookies",
+        "title": "Enable Kernel Parameter to Use TCP Syncookies on Network Interfaces",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_service_nftables_disabled",
+        "short_id": "service_nftables_disabled",
+        "title": "Verify nftables Service is Disabled",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_kernel_module_dccp_disabled",
+        "short_id": "kernel_module_dccp_disabled",
+        "title": "Disable DCCP Support",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_kernel_module_sctp_disabled",
+        "short_id": "kernel_module_sctp_disabled",
+        "title": "Disable SCTP Support",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_kernel_module_cramfs_disabled",
+        "short_id": "kernel_module_cramfs_disabled",
+        "title": "Disable Mounting of cramfs",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_kernel_module_squashfs_disabled",
+        "short_id": "kernel_module_squashfs_disabled",
+        "title": "Disable Mounting of squashfs",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_kernel_module_udf_disabled",
+        "short_id": "kernel_module_udf_disabled",
+        "title": "Disable Mounting of udf",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_mount_option_home_nodev",
+        "short_id": "mount_option_home_nodev",
+        "title": "Add nodev Option to /home",
+        "severity": "unknown",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_mount_option_home_nosuid",
+        "short_id": "mount_option_home_nosuid",
+        "title": "Add nosuid Option to /home",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_kernel_kptr_restrict",
+        "short_id": "sysctl_kernel_kptr_restrict",
+        "title": "Restrict Exposed Kernel Pointer Addresses Access",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sysctl_kernel_randomize_va_space",
+        "short_id": "sysctl_kernel_randomize_va_space",
+        "title": "Enable Randomized Layout of Virtual Address Space",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_file_permissions_cron_d",
+        "short_id": "file_permissions_cron_d",
+        "title": "Verify Permissions on cron.d",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_file_permissions_cron_daily",
+        "short_id": "file_permissions_cron_daily",
+        "title": "Verify Permissions on cron.daily",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_file_permissions_cron_hourly",
+        "short_id": "file_permissions_cron_hourly",
+        "title": "Verify Permissions on cron.hourly",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_file_permissions_cron_monthly",
+        "short_id": "file_permissions_cron_monthly",
+        "title": "Verify Permissions on cron.monthly",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_file_permissions_cron_weekly",
+        "short_id": "file_permissions_cron_weekly",
+        "title": "Verify Permissions on cron.weekly",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_file_permissions_crontab",
+        "short_id": "file_permissions_crontab",
+        "title": "Verify Permissions on crontab",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_package_httpd_removed",
+        "short_id": "package_httpd_removed",
+        "title": "Uninstall httpd Package",
+        "severity": "unknown",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_service_rpcbind_disabled",
+        "short_id": "service_rpcbind_disabled",
+        "title": "Disable rpcbind Service",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_service_nfs_disabled",
+        "short_id": "service_nfs_disabled",
+        "title": "Disable Network File System (nfs)",
+        "severity": "unknown",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_chronyd_client_only",
+        "short_id": "chronyd_client_only",
+        "title": "Disable chrony daemon from acting as server",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_chronyd_configure_local_socket",
+        "short_id": "chronyd_configure_local_socket",
+        "title": "Configure chrony-wait.service to use Unix socket",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_chronyd_no_chronyc_network",
+        "short_id": "chronyd_no_chronyc_network",
+        "title": "Disable network management of chrony daemon",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_chronyd_or_ntpd_set_maxpoll",
+        "short_id": "chronyd_or_ntpd_set_maxpoll",
+        "title": "Configure Time Service Maxpoll Interval",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_package_rsync_removed",
+        "short_id": "package_rsync_removed",
+        "title": "Uninstall rsync Package",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_set_keepalive_0",
+        "short_id": "sshd_set_keepalive_0",
+        "title": "Set SSH Client Alive Count Max to zero",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_set_keepalive",
+        "short_id": "sshd_set_keepalive",
+        "title": "Set SSH Client Alive Count Max",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_set_idle_timeout",
+        "short_id": "sshd_set_idle_timeout",
+        "title": "Set SSH Client Alive Interval",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_disable_host_auth",
+        "short_id": "disable_host_auth",
+        "title": "Disable Host-Based Authentication",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_disable_empty_passwords",
+        "short_id": "sshd_disable_empty_passwords",
+        "title": "Disable SSH Access via Empty Passwords",
+        "severity": "high",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_disable_gssapi_auth",
+        "short_id": "sshd_disable_gssapi_auth",
+        "title": "Disable GSSAPI Authentication",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_disable_kerb_auth",
+        "short_id": "sshd_disable_kerb_auth",
+        "title": "Disable Kerberos Authentication",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_disable_rhosts",
+        "short_id": "sshd_disable_rhosts",
+        "title": "Disable SSH Support for .rhosts Files",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_disable_root_login",
+        "short_id": "sshd_disable_root_login",
+        "title": "Disable SSH Root Login",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_disable_tcp_forwarding",
+        "short_id": "sshd_disable_tcp_forwarding",
+        "title": "Disable SSH TCP Forwarding",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_disable_x11_forwarding",
+        "short_id": "sshd_disable_x11_forwarding",
+        "title": "Disable X11 Forwarding",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_do_not_permit_user_env",
+        "short_id": "sshd_do_not_permit_user_env",
+        "title": "Do Not Allow SSH Environment Options",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_enable_strictmodes",
+        "short_id": "sshd_enable_strictmodes",
+        "title": "Enable Use of Strict Mode Checking",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_rekey_limit",
+        "short_id": "sshd_rekey_limit",
+        "title": "Force frequent session key renegotiation",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_set_login_grace_time",
+        "short_id": "sshd_set_login_grace_time",
+        "title": "Ensure SSH LoginGraceTime is configured",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_set_loglevel_verbose",
+        "short_id": "sshd_set_loglevel_verbose",
+        "title": "Set SSH Daemon LogLevel to VERBOSE",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_set_max_auth_tries",
+        "short_id": "sshd_set_max_auth_tries",
+        "title": "Set SSH authentication attempt limit",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_set_max_sessions",
+        "short_id": "sshd_set_max_sessions",
+        "title": "Set SSH MaxSessions limit",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_set_maxstartups",
+        "short_id": "sshd_set_maxstartups",
+        "title": "Ensure SSH MaxStartups is configured",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_use_strong_rng",
+        "short_id": "sshd_use_strong_rng",
+        "title": "SSH server uses strong entropy to seed",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_sshd_x11_use_localhost",
+        "short_id": "sshd_x11_use_localhost",
+        "title": "Prevent remote hosts from connecting to the proxy display",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_grub2_audit_argument",
+        "short_id": "grub2_audit_argument",
+        "title": "Enable Auditing for Processes Which Start Prior to the Audit Daemon",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_grub2_audit_backlog_limit_argument",
+        "short_id": "grub2_audit_backlog_limit_argument",
+        "title": "Extend Audit Backlog Limit for the Audit Daemon",
+        "severity": "low",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_immutable",
+        "short_id": "audit_rules_immutable",
+        "title": "Make the auditd Configuration Immutable",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_mac_modification",
+        "short_id": "audit_rules_mac_modification",
+        "title": "Record Events that Modify the System's Mandatory Access Controls",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_mac_modification_usr_share",
+        "short_id": "audit_rules_mac_modification_usr_share",
+        "title": "Record Events that Modify the System's Mandatory Access Controls in usr/share",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_media_export",
+        "short_id": "audit_rules_media_export",
+        "title": "Ensure auditd Collects Information on Exporting to Media (successful)",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_networkconfig_modification",
+        "short_id": "audit_rules_networkconfig_modification",
+        "title": "Record Events that Modify the System's Network Environment",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_session_events",
+        "short_id": "audit_rules_session_events",
+        "title": "Record Attempts to Alter Process and Session Initiation Information",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_sudoers",
+        "short_id": "audit_rules_sudoers",
+        "title": "Ensure auditd Collects System Administrator Actions - /etc/sudoers",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_sudoers_d",
+        "short_id": "audit_rules_sudoers_d",
+        "title": "Ensure auditd Collects System Administrator Actions - /etc/sudoers.d/",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_suid_privilege_function",
+        "short_id": "audit_rules_suid_privilege_function",
+        "title": "Record Events When Privileged Executables Are Run",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_sysadmin_actions",
+        "short_id": "audit_rules_sysadmin_actions",
+        "title": "Ensure auditd Collects System Administrator Actions",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_usergroup_modification_group",
+        "short_id": "audit_rules_usergroup_modification_group",
+        "title": "Record Events that Modify User/Group Information - /etc/group",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_usergroup_modification_gshadow",
+        "short_id": "audit_rules_usergroup_modification_gshadow",
+        "title": "Record Events that Modify User/Group Information - /etc/gshadow",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_usergroup_modification_opasswd",
+        "short_id": "audit_rules_usergroup_modification_opasswd",
+        "title": "Record Events that Modify User/Group Information - /etc/security/opasswd",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_usergroup_modification_passwd",
+        "short_id": "audit_rules_usergroup_modification_passwd",
+        "title": "Record Events that Modify User/Group Information - /etc/passwd",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_usergroup_modification_shadow",
+        "short_id": "audit_rules_usergroup_modification_shadow",
+        "title": "Record Events that Modify User/Group Information - /etc/shadow",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_sudo_log_events",
+        "short_id": "audit_sudo_log_events",
+        "title": "Record Attempts to perform maintenance activities",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_chmod",
+        "short_id": "audit_rules_dac_modification_chmod",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - chmod",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_chown",
+        "short_id": "audit_rules_dac_modification_chown",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - chown",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_fchmod",
+        "short_id": "audit_rules_dac_modification_fchmod",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - fchmod",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_fchmodat",
+        "short_id": "audit_rules_dac_modification_fchmodat",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - fchmodat",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_fchown",
+        "short_id": "audit_rules_dac_modification_fchown",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - fchown",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_fchownat",
+        "short_id": "audit_rules_dac_modification_fchownat",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - fchownat",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_fremovexattr",
+        "short_id": "audit_rules_dac_modification_fremovexattr",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - fremovexattr",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_fsetxattr",
+        "short_id": "audit_rules_dac_modification_fsetxattr",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - fsetxattr",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_lchown",
+        "short_id": "audit_rules_dac_modification_lchown",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - lchown",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_lremovexattr",
+        "short_id": "audit_rules_dac_modification_lremovexattr",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - lremovexattr",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_lsetxattr",
+        "short_id": "audit_rules_dac_modification_lsetxattr",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - lsetxattr",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_removexattr",
+        "short_id": "audit_rules_dac_modification_removexattr",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - removexattr",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_dac_modification_setxattr",
+        "short_id": "audit_rules_dac_modification_setxattr",
+        "title": "Record Events that Modify the System's Discretionary Access Controls - setxattr",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_execution_chacl",
+        "short_id": "audit_rules_execution_chacl",
+        "title": "Record Any Attempts to Run chacl",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_execution_setfacl",
+        "short_id": "audit_rules_execution_setfacl",
+        "title": "Record Any Attempts to Run setfacl",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_execution_chcon",
+        "short_id": "audit_rules_execution_chcon",
+        "title": "Record Any Attempts to Run chcon",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_file_deletion_events_rename",
+        "short_id": "audit_rules_file_deletion_events_rename",
+        "title": "Ensure auditd Collects File Deletion Events by User - rename",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_file_deletion_events_renameat",
+        "short_id": "audit_rules_file_deletion_events_renameat",
+        "title": "Ensure auditd Collects File Deletion Events by User - renameat",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_file_deletion_events_unlink",
+        "short_id": "audit_rules_file_deletion_events_unlink",
+        "title": "Ensure auditd Collects File Deletion Events by User - unlink",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_file_deletion_events_unlinkat",
+        "short_id": "audit_rules_file_deletion_events_unlinkat",
+        "title": "Ensure auditd Collects File Deletion Events by User - unlinkat",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_unsuccessful_file_modification_creat",
+        "short_id": "audit_rules_unsuccessful_file_modification_creat",
+        "title": "Record Unsuccessful Access Attempts to Files - creat",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_unsuccessful_file_modification_ftruncate",
+        "short_id": "audit_rules_unsuccessful_file_modification_ftruncate",
+        "title": "Record Unsuccessful Access Attempts to Files - ftruncate",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_unsuccessful_file_modification_open",
+        "short_id": "audit_rules_unsuccessful_file_modification_open",
+        "title": "Record Unsuccessful Access Attempts to Files - open",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_unsuccessful_file_modification_openat",
+        "short_id": "audit_rules_unsuccessful_file_modification_openat",
+        "title": "Record Unsuccessful Access Attempts to Files - openat",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_unsuccessful_file_modification_truncate",
+        "short_id": "audit_rules_unsuccessful_file_modification_truncate",
+        "title": "Record Unsuccessful Access Attempts to Files - truncate",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_kernel_module_loading_delete",
+        "short_id": "audit_rules_kernel_module_loading_delete",
+        "title": "Ensure auditd Collects Information on Kernel Module Unloading - delete_module",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_kernel_module_loading_init",
+        "short_id": "audit_rules_kernel_module_loading_init",
+        "title": "Ensure auditd Collects Information on Kernel Module Loading - init_module",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_login_events_faillock",
+        "short_id": "audit_rules_login_events_faillock",
+        "title": "Record Attempts to Alter Logon and Logout Events - faillock",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_login_events_lastlog",
+        "short_id": "audit_rules_login_events_lastlog",
+        "title": "Record Attempts to Alter Logon and Logout Events - lastlog",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_privileged_commands",
+        "short_id": "audit_rules_privileged_commands",
+        "title": "Ensure auditd Collects Information on the Use of Privileged Commands",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_privileged_commands_usermod",
+        "short_id": "audit_rules_privileged_commands_usermod",
+        "title": "Ensure auditd Collects Information on the Use of Privileged Commands - usermod",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_time_adjtimex",
+        "short_id": "audit_rules_time_adjtimex",
+        "title": "Record attempts to alter time through adjtimex",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_time_clock_settime",
+        "short_id": "audit_rules_time_clock_settime",
+        "title": "Record Attempts to Alter Time Through clock_settime",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_time_settimeofday",
+        "short_id": "audit_rules_time_settimeofday",
+        "title": "Record attempts to alter time through settimeofday",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_time_stime",
+        "short_id": "audit_rules_time_stime",
+        "title": "Record Attempts to Alter Time Through stime",
+        "severity": "medium",
+        "result": "fail"
+      },
+      {
+        "rule_id": "xccdf_org.ssgproject.content_rule_audit_rules_time_watch_localtime",
+        "short_id": "audit_rules_time_watch_localtime",
+        "title": "Record Attempts to Alter the localtime File",
+        "severity": "medium",
+        "result": "fail"
+      }
+    ],
+    "error_rules": [],
+    "passed_rule_count_verified": 137
+  },
+  "lynis": {
+    "hardening_index": 71,
+    "tests_performed": 260,
+    "warnings": [],
+    "suggestions": [
+      "BOOT-5264|Consider hardening system services|Run '/usr/bin/systemd-analyze security SERVICE' for each service|-|",
+      "KRNL-5820|If not required, consider explicit disabling of core dump in /etc/security/limits.conf file|-|-|",
+      "AUTH-9230|Configure password hashing rounds in /etc/login.defs|-|-|",
+      "AUTH-9286|Configure minimum password age in /etc/login.defs|-|-|",
+      "AUTH-9286|Configure maximum password age in /etc/login.defs|-|-|",
+      "AUTH-9328|Default umask in /etc/login.defs could be more strict like 027|-|-|",
+      "FILE-6310|To decrease the impact of a full /var file system, place /var on a separate partition|-|-|",
+      "FILE-6410|The database required for 'locate' could not be found. Run 'updatedb' or 'locate.updatedb' to create this file.|-|-|",
+      "USB-1000|Disable drivers like USB storage when not used, to prevent unauthorized storage or data theft|-|-|",
+      "STRG-1846|Disable drivers like firewire storage when not used, to prevent unauthorized storage or data theft|-|-|",
+      "NAME-4028|Check DNS configuration for the dns domain name|-|-|",
+      "NAME-4404|Add the IP name and FQDN to /etc/hosts for proper name resolving|-|-|",
+      "PKGS-7420|Consider using a tool to automatically apply upgrades|-|-|",
+      "NETW-3200|Determine if protocol 'dccp' is really needed on this system|-|-|",
+      "NETW-3200|Determine if protocol 'sctp' is really needed on this system|-|-|",
+      "NETW-3200|Determine if protocol 'rds' is really needed on this system|-|-|",
+      "NETW-3200|Determine if protocol 'tipc' is really needed on this system|-|-|",
+      "HTTP-6640|Install Apache mod_evasive to guard webserver against DoS/brute force attempts|-|-|",
+      "HTTP-6643|Install Apache modsecurity to guard webserver against web application attacks|-|-|",
+      "LOGG-2154|Enable logging to an external logging host for archiving purposes and additional protection|-|-|",
+      "LOGG-2190|Check what deleted files are still in use and why.|-|-|",
+      "BANN-7126|Add a legal banner to /etc/issue, to warn unauthorized users|-|-|",
+      "BANN-7130|Add legal banner to /etc/issue.net, to warn unauthorized users|-|-|",
+      "ACCT-9626|Enable sysstat to collect accounting (no results)|-|-|",
+      "FINT-4350|Install a file integrity tool to monitor changes to critical and sensitive files|-|-|",
+      "TOOL-5002|Determine if automation tools are present for system management|-|-|",
+      "FILE-7524|Consider restricting file permissions|See screen output or log file|text:Use chmod to change file permissions|",
+      "KRNL-6000|One or more sysctl values differ from the scan profile and could be tweaked||Change sysctl value or disable test (skip-test=KRNL-6000:<sysctl-key>)|",
+      "HRDN-7222|Harden compilers like restricting access to root user only|-|-|",
+      "HRDN-7230|Harden the system by installing at least one malware scanner, to perform periodic file system scans|-|Install a tool like rkhunter, chkrootkit, OSSEC, Wazuh|"
+    ],
+    "installed_security_controls": [],
+    "raw_kv_highlights": {
+      "lynis_version": "3.1.7",
+      "firewall_software": [
+        "nftables"
+      ],
+      "audit_daemon_running": "1",
+      "selinux_status": "1",
+      "selinux_mode": "enforcing",
+      "malware_scanner_installed": "0",
+      "compiler_installed": "1",
+      "firewall_active": "1"
+    }
+  },
+  "direct_posture_sanitized": "=== SELINUX ===\nSELinux status:                 enabled\nSELinuxfs mount:                /sys/fs/selinux\nSELinux root directory:         /etc/selinux\nLoaded policy name:             targeted\nCurrent mode:                   enforcing\nMode from config file:          enforcing\nPolicy MLS status:              enabled\nPolicy deny_unknown status:     allowed\nMemory protection checking:     actual (secure)\nMax kernel policy version:      35\n=== FIREWALLD ===\nrunning\nFedoraWorkstation (default, active)\n  target: default\n  ingress-priority: 0\n  egress-priority: 0\n  icmp-block-inversion: no\n  interfaces: ens5\n  sources: \n  services: dhcpv6-client samba-client ssh\n  ports: 1025-65535/udp 1025-65535/tcp\n  protocols: \n  forward: yes\n  masquerade: no\n  forward-ports: \n  source-ports: \n  icmp-blocks: \n  rich rules: \n=== LISTENING SOCKETS (ss -tulnp) ===\nNetid State  Recv-Q Send-Q Local Address:Port Peer Address:PortProcess\nudp   UNCONN 0      0         127.0.0.54:53        0.0.0.0:*    users:((\"systemd-resolve\",pid=548,fd=20))\nudp   UNCONN 0      0      127.0.0.53%lo:53        0.0.0.0:*    users:((\"systemd-resolve\",pid=548,fd=18))\nudp   UNCONN 0      0          127.0.0.1:323       0.0.0.0:*    users:((\"chronyd\",pid=688,fd=4))\nudp   UNCONN 0      0            0.0.0.0:5353      0.0.0.0:*    users:((\"avahi-daemon\",pid=683,fd=12))\nudp   UNCONN 0      0            0.0.0.0:5355      0.0.0.0:*    users:((\"systemd-resolve\",pid=548,fd=12))\nudp   UNCONN 0      0              [::1]:323          [::]:*    users:((\"chronyd\",pid=688,fd=5))\nudp   UNCONN 0      0               [::]:5353         [::]:*    users:((\"avahi-daemon\",pid=683,fd=13))\nudp   UNCONN 0      0               [::]:5355         [::]:*    users:((\"systemd-resolve\",pid=548,fd=14))\ntcp   LISTEN 0      4096   127.0.0.53%lo:53        0.0.0.0:*    users:((\"systemd-resolve\",pid=548,fd=19))\ntcp   LISTEN 0      128          0.0.0.0:22        0.0.0.0:*    users:((\"sshd\",pid=763,fd=6))\ntcp   LISTEN 0      4096      127.0.0.54:53        0.0.0.0:*    users:((\"systemd-resolve\",pid=548,fd=21))\ntcp   LISTEN 0      4096         0.0.0.0:5355      0.0.0.0:*    users:((\"systemd-resolve\",pid=548,fd=13))\ntcp   LISTEN 0      128             [::]:22           [::]:*    users:((\"sshd\",pid=763,fd=7))\ntcp   LISTEN 0      4096            [::]:5355         [::]:*    users:((\"systemd-resolve\",pid=548,fd=15))\n=== SSHD STATUS & CONFIG ===\nenabled\nactive\nMaxAuthTries 6\nPermitRootLogin prohibit-password\nPubkeyAuthentication yes\nPasswordAuthentication yes\nX11Forwarding yes\nAllowTcpForwarding yes\n=== AUDITD ===\nenabled\nactive\nenabled 1\nfailure 1\npid 654\nrate_limit 0\nbacklog_limit 64\nlost 0\nbacklog 0\nbacklog_wait_time 60000\nbacklog_wait_time_actual 0\nloginuid_immutable 0 unlocked\n=== PASSWORD & AUTH POLICIES ===\nUMASK\t\t022\nPASS_MAX_DAYS\t99999\nPASS_MIN_DAYS\t0\nPASS_MIN_LEN\t8\nPASS_WARN_AGE\t7\nENCRYPT_METHOD YESCRYPT\n=== PAM SDDM-AUTOLOGIN & SYSTEM-AUTH ===\n=== CRITICAL FILE PERMISSIONS ===\n644 root:root /etc/passwd\n0 root:root /etc/shadow\n644 root:root /etc/group\n0 root:root /etc/gshadow\n440 root:root /etc/sudoers\n600 root:root /boot/grub2/grub.cfg\n=== KERNEL SECURITY SYSCTLS ===\nkernel.kptr_restrict = 0\nkernel.dmesg_restrict = 1\nkernel.randomize_va_space = 2\nkernel.yama.ptrace_scope = 1\nkernel.unprivileged_bpf_disabled = 2\nkernel.sysrq = 16\nfs.suid_dumpable = 2\nfs.protected_hardlinks = 1\nfs.protected_symlinks = 1\nnet.ipv4.ip_forward = 0\nnet.ipv4.conf.all.accept_redirects = 0\nnet.ipv4.conf.all.send_redirects = 0\nnet.ipv4.conf.all.rp_filter = 0\nnet.ipv4.tcp_syncookies = 1\nnet.ipv6.conf.all.accept_redirects = 0\n=== GROUP & PASSWORDLESS ACCOUNT READ-ONLY CHECK ===\n=== BLAZE-SETUP ACCOUNT STATUS ===\nblaze-setup_not_present\n=== LOGGING ===\nactive\nactive\nArchived and active journals take up 8M in the file system.\n=== BLAZE SENTINEL ===\n=== AKREP SECURITY CENTER ===\nakrepd_not_installed\n"
+}

@@ -616,11 +616,11 @@ def prepare_oobe_reset(target_root="/"):
             for ln in sh_lines:
                 if ln.startswith("blaze-setup:"):
                     found_bs = True
-                    new_sh.append("blaze-setup::20726::::::\n")
+                    new_sh.append("blaze-setup:!*:20726::::::\n")
                 else:
                     new_sh.append(ln)
             if not found_bs:
-                new_sh.append("blaze-setup::20726::::::\n")
+                new_sh.append("blaze-setup:!*:20726::::::\n")
             with open(shadow_p, "w", encoding="utf-8") as f:
                 f.writelines(new_sh)
             os.chmod(shadow_p, orig_m)
@@ -628,20 +628,47 @@ def prepare_oobe_reset(target_root="/"):
             pass
 
     group_p = target_join(target_root, "/etc/group")
+    gshadow_p = target_join(target_root, "/etc/gshadow")
     if os.path.isfile(group_p):
         try:
+            target_groups = ("wheel", "video", "audio", "input", "render")
             gr_lines = []
+            group_members = {}
             for ln in open(group_p, encoding="utf-8"):
                 cols = ln.rstrip("\n").split(":")
-                if len(cols) == 4 and cols[0] in ("wheel", "video", "audio", "input", "render"):
-                    mems = [m for m in cols[3].split(",") if m]
-                    if "blaze-setup" not in mems:
-                        mems.append("blaze-setup")
-                    cols[3] = ",".join(mems)
-                    ln = ":".join(cols) + "\n"
+                if len(cols) == 4:
+                    if cols[0] in target_groups:
+                        mems = [m for m in cols[3].split(",") if m]
+                        if "blaze-setup" not in mems:
+                            mems.append("blaze-setup")
+                        cols[3] = ",".join(mems)
+                        ln = ":".join(cols) + "\n"
+                    group_members[cols[0]] = cols[3]
                 gr_lines.append(ln)
             with open(group_p, "w", encoding="utf-8") as f:
                 f.writelines(gr_lines)
+            if os.path.isfile(gshadow_p):
+                orig_gmode = os.stat(gshadow_p).st_mode & 0o7777
+                try:
+                    os.chmod(gshadow_p, 0o600)
+                    gs_lines = []
+                    seen = set()
+                    with open(gshadow_p, "r", encoding="utf-8") as gsf:
+                        for ln in gsf:
+                            cols = ln.rstrip("\n").split(":")
+                            if len(cols) == 4:
+                                seen.add(cols[0])
+                                if cols[0] in group_members:
+                                    cols[3] = group_members[cols[0]]
+                                    ln = ":".join(cols) + "\n"
+                            gs_lines.append(ln)
+                    for gname, mem_str in group_members.items():
+                        if gname not in seen:
+                            gs_lines.append(f"{gname}:!::{mem_str}\n")
+                    with open(gshadow_p, "w", encoding="utf-8") as gsf:
+                        gsf.writelines(gs_lines)
+                finally:
+                    os.chmod(gshadow_p, orig_gmode)
         except Exception:
             pass
 
@@ -1009,6 +1036,447 @@ def run_in_target(target_root, cmd):
     finally:
         for dst in reversed(mounted):
             subprocess.run(["umount", "-l", dst], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _fsync_path(path):
+    """Best-effort fsync on a file or directory descriptor."""
+    try:
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+
+
+def is_same_target_file(src, dst):
+    """Return True when `src` and `dst` resolve to the exact same path or underlying inode."""
+    if not src or not dst:
+        return False
+    if os.path.realpath(src) == os.path.realpath(dst):
+        return True
+    if os.path.exists(src) and os.path.exists(dst):
+        try:
+            return os.path.samefile(src, dst)
+        except OSError:
+            return False
+    return False
+
+
+class FileRepairTransaction:
+    """Per-file atomic staging (with fsync + same-FS replace) and multi-file rollback."""
+
+    def __init__(self, backup_roots=None):
+        self._backup_dirs = []
+        self._root_map = {}
+        self._records = []  # list of (dst_path, existed, backup_file_or_None, orig_mode)
+        self._recorded_dsts = set()
+        self._temp_files = []
+        self._stage_dirs = []
+        for root in backup_roots or []:
+            if root and os.path.isdir(root):
+                try:
+                    bdir = tempfile.mkdtemp(prefix=".bere-tx-bak-", dir=root)
+                    os.chmod(bdir, 0o700)
+                    self._backup_dirs.append(bdir)
+                    self._root_map[os.path.realpath(root)] = bdir
+                except OSError:
+                    pass
+
+    def _backup_dir_for(self, dst):
+        real_parent = os.path.realpath(os.path.dirname(dst))
+        # Prefer backup dir on the same mount/prefix so backups share filesystem semantics
+        best_dir = None
+        best_len = -1
+        for root_real, bdir in self._root_map.items():
+            if (real_parent == root_real or real_parent.startswith(root_real.rstrip("/") + "/")) and len(root_real) > best_len:
+                best_dir = bdir
+                best_len = len(root_real)
+        if best_dir:
+            return best_dir
+        if not self._backup_dirs:
+            bdir = tempfile.mkdtemp(prefix="bere-tx-bak-")
+            os.chmod(bdir, 0o700)
+            self._backup_dirs.append(bdir)
+        return self._backup_dirs[0]
+
+    def record_original(self, dst):
+        real_dst = os.path.realpath(dst)
+        if real_dst in self._recorded_dsts:
+            return
+        self._recorded_dsts.add(real_dst)
+        if os.path.lexists(dst):
+            st = os.stat(dst, follow_symlinks=False)
+            bdir = self._backup_dir_for(dst)
+            bak_path = os.path.join(bdir, f"bak_{len(self._records)}_{os.path.basename(dst)}")
+            if os.path.islink(dst):
+                os.symlink(os.readlink(dst), bak_path)
+            else:
+                with open(dst, "rb") as rf, open(bak_path, "wb") as wf:
+                    shutil.copyfileobj(rf, wf)
+                    wf.flush()
+                    os.fsync(wf.fileno())
+            self._records.append((dst, True, bak_path, st.st_mode & 0o7777))
+        else:
+            self._records.append((dst, False, None, None))
+
+    def _stage_and_replace_bytes(self, dst, payload_bytes, mode=None):
+        parent = os.path.dirname(dst)
+        os.makedirs(parent, exist_ok=True)
+        self.record_original(dst)
+        fd, tmp_path = tempfile.mkstemp(prefix=".bere-stage-", dir=parent)
+        self._temp_files.append(tmp_path)
+        try:
+            with os.fdopen(fd, "wb") as wf:
+                wf.write(payload_bytes)
+                wf.flush()
+                os.fsync(wf.fileno())
+            if mode is not None:
+                os.chmod(tmp_path, mode)
+            os.replace(tmp_path, dst)
+            _fsync_path(parent)
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
+    def copy_file(self, src, dst):
+        """Copy `src` to `dst` atomically via same-FS staging + fsync; skip cleanly on samefile."""
+        if not src or not os.path.isfile(src):
+            return "missing"
+        if is_same_target_file(src, dst):
+            return "skipped_samefile"
+        with open(src, "rb") as rf:
+            data = rf.read()
+        src_mode = os.stat(src).st_mode & 0o7777
+        self._stage_and_replace_bytes(dst, data, mode=src_mode)
+        return "copied"
+
+    def write_text(self, dst, text, mode=0o644):
+        """Atomically write UTF-8 text to `dst` on the same filesystem with fsync + backup."""
+        self._stage_and_replace_bytes(dst, text.encode("utf-8"), mode=mode)
+
+    def delete_file(self, path):
+        """Back up `path` before deleting so rollback can restore deleted files."""
+        if os.path.lexists(path):
+            self.record_original(path)
+            os.unlink(path)
+            _fsync_path(os.path.dirname(path))
+
+    def allocate_stage_path(self, dst):
+        """Return a temporary staging path in the same directory as `dst` (for external tools)."""
+        parent = os.path.dirname(dst)
+        os.makedirs(parent, exist_ok=True)
+        self.record_original(dst)
+        fd, tmp_path = tempfile.mkstemp(prefix=".bere-stage-", dir=parent)
+        os.close(fd)
+        self._temp_files.append(tmp_path)
+        return tmp_path
+
+    def commit_stage_path(self, staged_path, dst, mode=None):
+        """Fsync and atomically move `staged_path` into `dst`."""
+        _fsync_path(staged_path)
+        if mode is not None:
+            os.chmod(staged_path, mode)
+        os.replace(staged_path, dst)
+        _fsync_path(os.path.dirname(dst))
+
+    def rollback(self):
+        """Restore every tracked file to its exact pre-transaction state."""
+        errors = []
+        for dst, existed, bak_path, orig_mode in reversed(self._records):
+            try:
+                if existed and bak_path and (os.path.isfile(bak_path) or os.path.islink(bak_path)):
+                    parent = os.path.dirname(dst)
+                    os.makedirs(parent, exist_ok=True)
+                    if os.path.islink(bak_path):
+                        if os.path.lexists(dst):
+                            os.unlink(dst)
+                        os.symlink(os.readlink(bak_path), dst)
+                    else:
+                        with open(bak_path, "rb") as rf:
+                            data = rf.read()
+                        fd, tmp_path = tempfile.mkstemp(prefix=".bere-rb-", dir=parent)
+                        try:
+                            with os.fdopen(fd, "wb") as wf:
+                                wf.write(data)
+                                wf.flush()
+                                os.fsync(wf.fileno())
+                            if orig_mode is not None:
+                                os.chmod(tmp_path, orig_mode)
+                            os.replace(tmp_path, dst)
+                            _fsync_path(parent)
+                        finally:
+                            if os.path.exists(tmp_path):
+                                try:
+                                    os.unlink(tmp_path)
+                                except OSError:
+                                    pass
+                elif not existed and os.path.lexists(dst):
+                    os.unlink(dst)
+                    _fsync_path(os.path.dirname(dst))
+            except Exception as rb_err:
+                errors.append(f"{dst}: {rb_err}")
+        self.cleanup()
+        return errors
+
+    def cleanup(self):
+        for tmp_path in self._temp_files:
+            if os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+        for bdir in self._backup_dirs:
+            shutil.rmtree(bdir, ignore_errors=True)
+        self._backup_dirs.clear()
+
+
+def _resolve_efi_source(candidates):
+    for cand in candidates:
+        if cand and os.path.isfile(cand):
+            return cand
+    return None
+
+
+def _repair_efi_binaries(tx, esp_mp):
+    """Stage 1: Repair missing or backup-restorable EFI binaries atomically via `tx`."""
+    efi_fedora = os.path.join(esp_mp, "EFI/fedora")
+    efi_boot = os.path.join(esp_mp, "EFI/BOOT")
+    os.makedirs(efi_fedora, exist_ok=True)
+    os.makedirs(efi_boot, exist_ok=True)
+    logs = []
+
+    def _find_live_or_esp(rel_subpath):
+        return _resolve_efi_source([
+            f"/boot/efi/{rel_subpath}",
+            f"/run/initramfs/live/{rel_subpath}",
+        ])
+
+    for fn in ("shimx64.efi", "grubx64.efi", "mmx64.efi", "BOOTX64.CSV"):
+        dst_f = os.path.join(efi_fedora, fn)
+        if not os.path.isfile(dst_f):
+            src_f = _find_live_or_esp(f"EFI/fedora/{fn}")
+            if src_f:
+                st = tx.copy_file(src_f, dst_f)
+                logs.append(f"[EFI] {fn}: {st}")
+
+    for fn in ("fbx64.efi",):
+        dst_f = os.path.join(efi_boot, fn)
+        if not os.path.isfile(dst_f):
+            src_f = _find_live_or_esp(f"EFI/BOOT/{fn}")
+            if src_f:
+                st = tx.copy_file(src_f, dst_f)
+                logs.append(f"[EFI] {fn}: {st}")
+
+    fb_efi = os.path.join(efi_boot, "BOOTX64.EFI")
+    fb_backup = os.path.join(efi_boot, "BOOTX64.EFI.grub-backup")
+    if os.path.isfile(fb_backup):
+        st = tx.copy_file(fb_backup, fb_efi)
+        logs.append(f"[EFI] BOOTX64.EFI (grub-backup): {st}")
+    else:
+        live_fb = _find_live_or_esp("EFI/BOOT/BOOTX64.EFI")
+        if live_fb and not is_same_target_file(live_fb, fb_efi):
+            st = tx.copy_file(live_fb, fb_efi)
+            logs.append(f"[EFI] BOOTX64.EFI (live/host): {st}")
+        elif not os.path.isfile(fb_efi):
+            cand = _resolve_efi_source([
+                os.path.join(efi_fedora, "shimx64.efi"),
+                os.path.join(efi_fedora, "grubx64.efi"),
+                "/boot/efi/EFI/fedora/shimx64.efi",
+                "/boot/efi/EFI/fedora/grubx64.efi",
+            ])
+            if cand:
+                st = tx.copy_file(cand, fb_efi)
+                logs.append(f"[EFI] BOOTX64.EFI (fallback {os.path.basename(cand)}): {st}")
+        else:
+            logs.append("[EFI] BOOTX64.EFI: skipped_samefile (already valid on ESP)")
+    return "\n".join(logs)
+
+
+def _repair_bls_stage(tx, target_root, is_btrfs, root_dev, active_fsroot):
+    """Stage 2: Atomically rebuild BootLoaderSpec entries and grubenv inside `/boot`."""
+    boot_dir = target_join(target_root, "/boot")
+    bls_dir = os.path.join(boot_dir, "loader/entries")
+    os.makedirs(bls_dir, exist_ok=True)
+    os.makedirs(target_join(target_root, "/boot/grub2"), exist_ok=True)
+
+    root_uuid = ""
+    if root_dev:
+        root_uuid = subprocess.check_output(
+            ["blkid", "-s", "UUID", "-o", "value", root_dev], text=True, stderr=subprocess.DEVNULL
+        ).strip()
+    if not root_uuid:
+        raise RuntimeError(f"Root UUID çözümlenemedi ({root_dev}); BLS girişleri oluşturulamıyor.")
+
+    boot_separate = os.path.ismount(boot_dir)
+    if boot_separate:
+        bls_prefix = ""
+    elif is_btrfs and active_fsroot.strip("/"):
+        bls_prefix = f"/{active_fsroot.strip('/')}/boot"
+    else:
+        bls_prefix = "/boot"
+    subvol_opt = f"rootflags=subvol={active_fsroot.strip('/')} " if (is_btrfs and active_fsroot.strip("/")) else ""
+    mid_path = target_join(target_root, "/etc/machine-id")
+    machine_id = "blazeos"
+    if os.path.isfile(mid_path):
+        m_val = open(mid_path, encoding="utf-8").read().strip()
+        if m_val:
+            machine_id = m_val
+
+    for cf in glob.glob(os.path.join(bls_dir, "*.conf")):
+        try:
+            ctxt = open(cf, encoding="utf-8", errors="replace").read()
+            if "/var/lib/mock/" in ctxt or "f45-kiwi-build" in ctxt or "0-rescue" in os.path.basename(cf):
+                tx.delete_file(cf)
+        except Exception:
+            pass
+
+    valid_kvers = sorted(
+        os.path.basename(k)[len("vmlinuz-"):]
+        for k in glob.glob(os.path.join(boot_dir, "vmlinuz-*"))
+        if "0-rescue" not in os.path.basename(k)
+        and os.path.isfile(os.path.join(boot_dir, f"initramfs-{os.path.basename(k)[len('vmlinuz-'):]}.img"))
+    )
+    if not valid_kvers:
+        raise RuntimeError("/boot altında geçerli vmlinuz + initramfs çifti bulunamadı.")
+
+    for kv in valid_kvers:
+        bls_file = os.path.join(bls_dir, f"{machine_id}-{kv}.conf")
+        bls_body = (
+            f"title Blaze SolarEvolution ({kv})\n"
+            f"version {kv}\n"
+            f"linux {bls_prefix}/vmlinuz-{kv}\n"
+            f"initrd {bls_prefix}/initramfs-{kv}.img\n"
+            f"options root=UUID={root_uuid} {subvol_opt}ro quiet rhgb splash\n"
+            f"grub_users $grub_users\n"
+            f"grub_arg --unrestricted\n"
+            f"grub_class blazeos\n"
+        )
+        tx.write_text(bls_file, bls_body, mode=0o644)
+
+    genv_p = os.path.join(boot_dir, "grub2/grubenv")
+    if shutil.which("grub2-editenv"):
+        tx.record_original(genv_p)
+        if not os.path.exists(genv_p):
+            subprocess.run(["grub2-editenv", genv_p, "create"], check=True, stderr=subprocess.DEVNULL)
+        subprocess.run(["grub2-editenv", genv_p, "set", "saved_entry=0"], check=True, stderr=subprocess.DEVNULL)
+    return f"[BLS] {len(valid_kvers)} çekirdek girişi atomik olarak yenilendi."
+
+
+def _repair_grub_cfg_stage(tx, target_root, esp_mp):
+    """Stage 3: Generate GRUB2 config via staging file, validate, commit, and refresh EFI stub."""
+    logs = []
+    fb_cnt_hook = target_join(target_root, "/etc/grub.d/08_fallback_counting")
+    if os.path.isfile(fb_cnt_hook):
+        try:
+            os.chmod(fb_cnt_hook, 0o644)
+        except OSError:
+            pass
+
+    grub_cfg_host = target_join(target_root, "/boot/grub2/grub.cfg")
+    staged_host = tx.allocate_stage_path(grub_cfg_host)
+    staged_in_target = "/boot/grub2/" + os.path.basename(staged_host)
+    mk_res = run_in_target(target_root, ["env", "GRUB_DISABLE_OS_PROBER=true", "grub2-mkconfig", "-o", staged_in_target])
+    if mk_res.stdout:
+        logs.append(mk_res.stdout.strip())
+    if mk_res.returncode != 0 or not os.path.isfile(staged_host) or os.path.getsize(staged_host) < 200:
+        raise RuntimeError(f"grub2-mkconfig başarısız (kod={mk_res.returncode}): {mk_res.stdout}")
+    cfg_preview = open(staged_host, encoding="utf-8", errors="replace").read()
+    if "menuentry" not in cfg_preview and "blscfg" not in cfg_preview:
+        raise RuntimeError("Üretilen GRUB yapılandırması geçerli menuentry/blscfg içermiyor.")
+    tx.commit_stage_path(staged_host, grub_cfg_host, mode=0o600)
+
+    efi_fedora = target_join(target_root, "/boot/efi/EFI/fedora")
+    if os.path.isdir(efi_fedora):
+        efi_stub = os.path.join(efi_fedora, "grub.cfg")
+        tx.record_original(efi_stub)
+        if os.path.isfile(target_join(target_root, "/usr/bin/gen_grub_cfgstub")):
+            stub_p = run_in_target(target_root, ["gen_grub_cfgstub", "/boot/grub2", "/boot/efi/EFI/fedora"])
+            if stub_p.returncode != 0:
+                raise RuntimeError(f"gen_grub_cfgstub başarısız (kod={stub_p.returncode}): {stub_p.stdout}")
+            if stub_p.stdout:
+                logs.append(stub_p.stdout.strip())
+        elif shutil.which("gen_grub_cfgstub"):
+            stub_p = subprocess.run(
+                ["gen_grub_cfgstub", target_join(target_root, "/boot/grub2"), efi_fedora],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            )
+            if stub_p.returncode != 0:
+                raise RuntimeError(f"gen_grub_cfgstub başarısız (kod={stub_p.returncode}): {stub_p.stdout}")
+            if stub_p.stdout:
+                logs.append(stub_p.stdout.strip())
+
+    tx.write_text(target_join(target_root, "/etc/blazeos-bootloader-choice"), "grub2\n", mode=0o644)
+
+    if os.path.exists("/sys/firmware/efi") and shutil.which("efibootmgr") and os.path.isdir(esp_mp):
+        try:
+            esp_src = strip_btrfs_source(
+                subprocess.check_output(["findmnt", "-n", "-o", "SOURCE", esp_mp], text=True, stderr=subprocess.DEVNULL).strip()
+            )
+            pk = subprocess.check_output(["lsblk", "-no", "PKNAME", esp_src], text=True, stderr=subprocess.DEVNULL).splitlines()[0].strip()
+            pn = subprocess.check_output(["lsblk", "-no", "PARTN", esp_src], text=True, stderr=subprocess.DEVNULL).splitlines()[0].strip()
+            if pk and pn:
+                cur_efi = subprocess.check_output(["efibootmgr"], text=True, stderr=subprocess.DEVNULL)
+                for ln in cur_efi.splitlines():
+                    m_b = re.match(r"^Boot([0-9A-Fa-f]{4})\*?\s+BlazeOS(?:\s|\t|$)", ln)
+                    if m_b:
+                        subprocess.run(["efibootmgr", "-b", m_b.group(1), "-B"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                ldr = r"\EFI\fedora\shimx64.efi" if os.path.isfile(os.path.join(esp_mp, "EFI/fedora/shimx64.efi")) else r"\EFI\fedora\grubx64.efi"
+                ep = subprocess.run(
+                    ["efibootmgr", "--create", "--disk", f"/dev/{pk}", "--part", pn, "--label", "BlazeOS", "--loader", ldr, "--unicode"],
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                )
+                if ep.returncode == 0:
+                    logs.append("[UEFI] BlazeOS GRUB2 NVRAM BootOrder başına taşındı.")
+        except Exception as efi_warn:
+            logs.append(f"[UEFI UYARI] NVRAM güncellemesi atlandı: {efi_warn}")
+    return "\n".join(x for x in logs if x)
+
+
+def repair_grub_transactional(target_root, is_btrfs, root_dev, active_fsroot):
+    """Execute staged EFI + BLS + GRUB2 repair with automatic rollback on any failure."""
+    esp_mp = target_join(target_root, "/boot/efi")
+    boot_mp = target_join(target_root, "/boot")
+    tx = FileRepairTransaction(backup_roots=[esp_mp, boot_mp, target_join(target_root, "/etc")])
+    stage_logs = []
+    try:
+        # Stage 1: UEFI ESP or Legacy BIOS bootloader stage1/2
+        if os.path.exists("/sys/firmware/efi") and os.path.isdir(esp_mp):
+            efi_log = _repair_efi_binaries(tx, esp_mp)
+            if efi_log:
+                stage_logs.append(efi_log)
+        else:
+            boot_src = ""
+            try:
+                boot_src = strip_btrfs_source(
+                    subprocess.check_output(["findmnt", "-n", "-o", "SOURCE", boot_mp], text=True, stderr=subprocess.DEVNULL).strip()
+                )
+            except Exception:
+                boot_src = root_dev
+            if boot_src:
+                pk = subprocess.check_output(["lsblk", "-no", "PKNAME", boot_src], text=True, stderr=subprocess.DEVNULL).splitlines()[0].strip()
+                if pk and os.path.exists(f"/dev/{pk}"):
+                    gi_p = run_in_target(target_root, ["grub2-install", "--target=i386-pc", f"/dev/{pk}"])
+                    stage_logs.append(gi_p.stdout.strip())
+                    if gi_p.returncode != 0:
+                        raise RuntimeError(f"grub2-install başarısız (kod={gi_p.returncode}): {gi_p.stdout}")
+
+        # Stage 2: BootLoaderSpec entries & grubenv
+        stage_logs.append(_repair_bls_stage(tx, target_root, is_btrfs, root_dev, active_fsroot))
+
+        # Stage 3: GRUB2 configuration, EFI stub & NVRAM
+        stage_logs.append(_repair_grub_cfg_stage(tx, target_root, esp_mp))
+
+        tx.cleanup()
+        return "\n".join(x for x in stage_logs if x)
+    except Exception as exc:
+        rb_errs = tx.rollback()
+        rb_note = f" (rollback uyarıları: {'; '.join(rb_errs)})" if rb_errs else " (tüm dosyalar önceki durumuna geri alındı)"
+        raise RuntimeError(f"{exc}{rb_note}") from exc
 
 
 def remount_filesystems_rw():
@@ -1384,6 +1852,163 @@ def _require_action_password(data):
     return True, None
 
 
+from datetime import datetime, timezone
+import re as _re
+import syslog as _syslog
+
+_AUDIT_LOG_LOCK = threading.Lock()
+_SENSITIVE_AUDIT_KEYS = frozenset({
+    "password", "passwd", "pass", "pw", "old_password", "new_password",
+    "confirm_password", "token", "secret", "api_key", "auth_token", "shadow", "hash",
+})
+AUDITED_ENDPOINTS = frozenset({
+    "auth_unlock",
+    "create_snapshot",
+    "restore_snapshot",
+    "delete_snapshot",
+    "wipe",
+    "boot_repair",
+    "iso_pull",
+    "iso_pull_cancel",
+    "iso_delete",
+    "vault_verify_and_boot",
+    "mount_toggle",
+    "disk_mklabel",
+    "part_create",
+    "part_format",
+    "part_delete",
+    "part_fsck",
+    "exec",
+    "reboot",
+})
+
+
+def _redact_audit_value(val, key_hint=""):
+    kl = str(key_hint or "").lower()
+    if kl in _SENSITIVE_AUDIT_KEYS or any(tok in kl for tok in ("password", "passwd", "secret", "token")):
+        return "[REDACTED]" if val not in (None, "") else ""
+    if isinstance(val, dict):
+        return {str(k): _redact_audit_value(v, str(k)) for k, v in list(val.items())[:32]}
+    if isinstance(val, (list, tuple)):
+        return [_redact_audit_value(x) for x in list(val)[:32]]
+    if isinstance(val, str):
+        scrubbed = _re.sub(
+            r"(?i)(--?(?:password|passwd|token|secret)\s*[=\s]\s*)(\S+)",
+            r"\1[REDACTED]",
+            val,
+        )
+        scrubbed = _re.sub(
+            r"(?i)\b(password|passwd|pass|token|secret)=([^\s&;]+)",
+            r"\1=[REDACTED]",
+            scrubbed,
+        )
+        return scrubbed[:512]
+    if isinstance(val, (int, float, bool)) or val is None:
+        return val
+    return str(val)[:256]
+
+
+def _extract_audit_target(endpoint, data):
+    if isinstance(data, dict):
+        for key in ("target", "device", "disk", "partition", "snapshot", "name", "id", "subvolume", "mountpoint", "path", "url"):
+            v = data.get(key)
+            if v:
+                return str(_redact_audit_value(v, key))[:160]
+    if endpoint == "auth_unlock":
+        return "session"
+    return ""
+
+
+def _audit_log_paths(target_root=None):
+    runtime_log = os.environ.get("BLAZE_BERE_AUDIT_LOG", "/var/log/bere-recovery.log")
+    paths = [runtime_log]
+    t_root = target_root
+    if t_root is None:
+        env_troot = os.environ.get("BLAZE_BERE_TARGET_ROOT", "").strip()
+        if env_troot:
+            t_root = env_troot
+        elif os.path.ismount("/mnt/bere_target"):
+            t_root = "/mnt/bere_target"
+    if t_root and os.path.isdir(t_root) and os.path.realpath(t_root) != "/":
+        mirror = os.path.join(t_root, "var/log/bere-recovery.log")
+        if os.path.realpath(mirror) != os.path.realpath(runtime_log):
+            paths.append(mirror)
+    return paths
+
+
+def _append_json_line_0600(path, json_line):
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        os.write(fd, (json_line + "\n").encode("utf-8"))
+        try:
+            os.fsync(fd)
+        except OSError:
+            pass
+    finally:
+        os.close(fd)
+
+
+def append_recovery_audit_event(action, outcome, target="", details="", actor="", client_ip="", target_root=None):
+    resolved_actor = actor
+    if not resolved_actor:
+        with _AUTH_LOCK:
+            resolved_actor = str(_AUTH_STATE.get("unlocked_user") or "")
+    entry = {
+        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "action": str(action),
+        "outcome": str(outcome),
+        "actor": resolved_actor or "unauthenticated",
+        "client_ip": str(client_ip or "local"),
+        "target": str(_redact_audit_value(target or "")),
+        "details": _redact_audit_value(details),
+    }
+    json_line = json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
+    with _AUDIT_LOG_LOCK:
+        for path in _audit_log_paths(target_root=target_root):
+            try:
+                _append_json_line_0600(path, json_line)
+            except OSError:
+                pass
+    try:
+        _syslog.openlog("blaze-bere", _syslog.LOG_PID, _syslog.LOG_AUTHPRIV)
+        _syslog.syslog(_syslog.LOG_INFO, f"BERE_AUDIT {json_line}")
+    except Exception:
+        pass
+    return entry
+
+
+def read_recovery_audit_events(limit=100, target_root=None):
+    try:
+        cap = max(1, min(int(limit), 500))
+    except Exception:
+        cap = 100
+    seen_lines = set()
+    events = []
+    paths = _audit_log_paths(target_root=target_root)
+    for path in paths:
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                for raw in f:
+                    ln = raw.strip()
+                    if not ln or ln in seen_lines:
+                        continue
+                    seen_lines.add(ln)
+                    try:
+                        events.append(json.loads(ln))
+                    except Exception:
+                        continue
+        except OSError:
+            continue
+    events.sort(key=lambda e: str(e.get("ts", "")))
+    return events[-cap:], paths
+
+
 class ReusableHTTPServer(HTTPServer):
     allow_reuse_address = True
 
@@ -1448,6 +2073,60 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
             super().do_GET()
 
     def handle_api(self, endpoint, data):
+        audit_target = _extract_audit_target(endpoint, data)
+        client_ip = (
+            self.client_address[0]
+            if isinstance(getattr(self, "client_address", None), tuple) and self.client_address
+            else "local"
+        )
+        should_audit = endpoint in AUDITED_ENDPOINTS
+        try:
+            res = self._dispatch_api(endpoint, data)
+        except Exception as exc:
+            if should_audit:
+                append_recovery_audit_event(
+                    action=endpoint,
+                    outcome="error",
+                    target=audit_target,
+                    details={"error": str(exc), "request": data},
+                    client_ip=client_ip,
+                )
+            raise
+
+        status_val = res.get("status") if isinstance(res, dict) else "unknown"
+        if not should_audit and status_val == "locked":
+            should_audit = True
+        if should_audit:
+            if status_val == "ok":
+                outcome = "ok"
+            elif status_val == "locked":
+                outcome = "locked"
+            elif isinstance(res, dict) and res.get("_http_status") == 403:
+                outcome = "denied"
+            else:
+                outcome = "error"
+            actor = ""
+            if isinstance(res, dict) and res.get("unlocked_user"):
+                actor = str(res["unlocked_user"])
+            details = {"request": data if isinstance(data, dict) else {}}
+            if isinstance(res, dict):
+                if res.get("message"):
+                    details["message"] = str(res["message"])[:240]
+                if res.get("output"):
+                    details["output"] = str(res["output"])[:240]
+                if res.get("error"):
+                    details["error"] = str(res["error"])[:240]
+            append_recovery_audit_event(
+                action=endpoint,
+                outcome=outcome,
+                target=audit_target,
+                details=details,
+                actor=actor,
+                client_ip=client_ip,
+            )
+        return res
+
+    def _dispatch_api(self, endpoint, data):
         if endpoint == "auth_status":
             _, required, admin_users = get_target_admin_hashes(auto_mount=True)
             with _AUTH_LOCK:
@@ -3286,161 +3965,8 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                     return {"status": "ok", "output": ansi_re.sub("", st_p.stdout).strip() + extra}
 
                 elif target == "grub":
-                    esp_mp = target_join(target_root, "/boot/efi")
-                    if os.path.exists("/sys/firmware/efi") and os.path.isdir(esp_mp):
-                        efi_fedora = os.path.join(esp_mp, "EFI/fedora")
-                        efi_boot = os.path.join(esp_mp, "EFI/BOOT")
-                        os.makedirs(efi_fedora, exist_ok=True)
-                        os.makedirs(efi_boot, exist_ok=True)
-                        # Restore missing shimx64.efi / grubx64.efi from Live or target /boot/efi
-                        for fn in ("shimx64.efi", "grubx64.efi", "mmx64.efi", "BOOTX64.CSV"):
-                            dst_f = os.path.join(efi_fedora, fn)
-                            if not os.path.isfile(dst_f) and os.path.isfile(f"/boot/efi/EFI/fedora/{fn}"):
-                                shutil.copy2(f"/boot/efi/EFI/fedora/{fn}", dst_f)
-                        for fn in ("fbx64.efi",):
-                            dst_f = os.path.join(efi_boot, fn)
-                            if not os.path.isfile(dst_f) and os.path.isfile(f"/boot/efi/EFI/BOOT/{fn}"):
-                                shutil.copy2(f"/boot/efi/EFI/BOOT/{fn}", dst_f)
-                        fb_efi = os.path.join(efi_boot, "BOOTX64.EFI")
-                        if os.path.isfile(os.path.join(efi_boot, "BOOTX64.EFI.grub-backup")):
-                            shutil.copy2(os.path.join(efi_boot, "BOOTX64.EFI.grub-backup"), fb_efi)
-                        elif os.path.isfile("/boot/efi/EFI/BOOT/BOOTX64.EFI"):
-                            shutil.copy2("/boot/efi/EFI/BOOT/BOOTX64.EFI", fb_efi)
-                        elif not os.path.isfile(fb_efi):
-                            for cand_src in (os.path.join(efi_fedora, "shimx64.efi"), os.path.join(efi_fedora, "grubx64.efi"), "/boot/efi/EFI/fedora/grubx64.efi"):
-                                if os.path.isfile(cand_src):
-                                    shutil.copy2(cand_src, fb_efi)
-                                    break
-                    else:
-                        # Legacy BIOS MBR stage1/stage2 installation
-                        boot_src = ""
-                        try:
-                            boot_src = strip_btrfs_source(
-                                subprocess.check_output(["findmnt", "-n", "-o", "SOURCE", target_join(target_root, "/boot")], text=True, stderr=subprocess.DEVNULL).strip()
-                            )
-                        except Exception:
-                            boot_src = root_dev
-                        if boot_src:
-                            pk = subprocess.check_output(["lsblk", "-no", "PKNAME", boot_src], text=True, stderr=subprocess.DEVNULL).splitlines()[0].strip()
-                            if pk and os.path.exists(f"/dev/{pk}"):
-                                gi_p = run_in_target(target_root, ["grub2-install", "--target=i386-pc", f"/dev/{pk}"])
-                                out_msg += gi_p.stdout + "\n"
-
-                    # Repair / regenerate BootLoaderSpec (/boot/loader/entries/*.conf) entries
-                    boot_dir = target_join(target_root, "/boot")
-                    bls_dir = os.path.join(boot_dir, "loader/entries")
-                    os.makedirs(bls_dir, exist_ok=True)
-                    os.makedirs(target_join(target_root, "/boot/grub2"), exist_ok=True)
-                    try:
-                        root_uuid = ""
-                        if root_dev:
-                            root_uuid = subprocess.check_output(
-                                ["blkid", "-s", "UUID", "-o", "value", root_dev], text=True, stderr=subprocess.DEVNULL
-                            ).strip()
-                        boot_separate = os.path.ismount(boot_dir)
-                        if boot_separate:
-                            bls_prefix = ""
-                        elif is_btrfs and active_fsroot.strip("/"):
-                            bls_prefix = f"/{active_fsroot.strip('/')}/boot"
-                        else:
-                            bls_prefix = "/boot"
-                        subvol_opt = f"rootflags=subvol={active_fsroot.strip('/')} " if (is_btrfs and active_fsroot.strip("/")) else ""
-                        mid_path = target_join(target_root, "/etc/machine-id")
-                        machine_id = "blazeos"
-                        if os.path.isfile(mid_path):
-                            m_val = open(mid_path, encoding="utf-8").read().strip()
-                            if m_val:
-                                machine_id = m_val
-
-                        # Purge broken mock/kiwi or orphaned BLS entries
-                        for cf in glob.glob(os.path.join(bls_dir, "*.conf")):
-                            try:
-                                ctxt = open(cf, encoding="utf-8", errors="replace").read()
-                                if "/var/lib/mock/" in ctxt or "f45-kiwi-build" in ctxt or "0-rescue" in os.path.basename(cf):
-                                    os.unlink(cf)
-                            except Exception:
-                                pass
-
-                        valid_kvers = sorted(
-                            os.path.basename(k)[len("vmlinuz-"):]
-                            for k in glob.glob(os.path.join(boot_dir, "vmlinuz-*"))
-                            if "0-rescue" not in os.path.basename(k)
-                            and os.path.isfile(os.path.join(boot_dir, f"initramfs-{os.path.basename(k)[len('vmlinuz-'):]}.img"))
-                        )
-                        if root_uuid and valid_kvers:
-                            for kv in valid_kvers:
-                                bls_file = os.path.join(bls_dir, f"{machine_id}-{kv}.conf")
-                                bls_body = (
-                                    f"title Blaze SolarEvolution ({kv})\n"
-                                    f"version {kv}\n"
-                                    f"linux {bls_prefix}/vmlinuz-{kv}\n"
-                                    f"initrd {bls_prefix}/initramfs-{kv}.img\n"
-                                    f"options root=UUID={root_uuid} {subvol_opt}ro quiet rhgb splash\n"
-                                    f"grub_users $grub_users\n"
-                                    f"grub_arg --unrestricted\n"
-                                    f"grub_class blazeos\n"
-                                )
-                                with open(bls_file, "w", encoding="utf-8") as bf:
-                                    bf.write(bls_body)
-                            genv_p = os.path.join(boot_dir, "grub2/grubenv")
-                            if shutil.which("grub2-editenv"):
-                                if not os.path.exists(genv_p):
-                                    subprocess.run(["grub2-editenv", genv_p, "create"], stderr=subprocess.DEVNULL)
-                                subprocess.run(
-                                    ["grub2-editenv", genv_p, "set", "saved_entry=0"],
-                                    stderr=subprocess.DEVNULL,
-                                )
-                    except Exception as bls_err:
-                        out_msg += f"[BLS UYARI] {bls_err}\n"
-
-                    fb_cnt_hook = target_join(target_root, "/etc/grub.d/08_fallback_counting")
-                    if os.path.isfile(fb_cnt_hook):
-                        try:
-                            os.chmod(fb_cnt_hook, 0o644)
-                        except Exception:
-                            pass
-                    mk_cmd = ["env", "GRUB_DISABLE_OS_PROBER=true", "grub2-mkconfig", "-o", "/boot/grub2/grub.cfg"]
-                    p = run_in_target(target_root, mk_cmd)
-                    out_msg += p.stdout
-                    efi_fedora = target_join(target_root, "/boot/efi/EFI/fedora")
-                    if os.path.isdir(efi_fedora):
-                        if os.path.isfile(target_join(target_root, "/usr/bin/gen_grub_cfgstub")):
-                            stub_p = run_in_target(target_root, ["gen_grub_cfgstub", "/boot/grub2", "/boot/efi/EFI/fedora"])
-                            out_msg += "\n" + stub_p.stdout
-                        elif shutil.which("gen_grub_cfgstub"):
-                            stub_p = subprocess.run(
-                                ["gen_grub_cfgstub", target_join(target_root, "/boot/grub2"), efi_fedora],
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                            )
-                            out_msg += "\n" + stub_p.stdout
-                    try:
-                        os.makedirs(target_join(target_root, "/etc"), exist_ok=True)
-                        with open(target_join(target_root, "/etc/blazeos-bootloader-choice"), "w", encoding="utf-8") as f:
-                            f.write("grub2\n")
-                    except Exception:
-                        pass
-                    if os.path.exists("/sys/firmware/efi") and shutil.which("efibootmgr") and os.path.isdir(esp_mp):
-                        try:
-                            esp_src = strip_btrfs_source(
-                                subprocess.check_output(["findmnt", "-n", "-o", "SOURCE", esp_mp], text=True, stderr=subprocess.DEVNULL).strip()
-                            )
-                            pk = subprocess.check_output(["lsblk", "-no", "PKNAME", esp_src], text=True, stderr=subprocess.DEVNULL).splitlines()[0].strip()
-                            pn = subprocess.check_output(["lsblk", "-no", "PARTN", esp_src], text=True, stderr=subprocess.DEVNULL).splitlines()[0].strip()
-                            if pk and pn:
-                                cur_efi = subprocess.check_output(["efibootmgr"], text=True, stderr=subprocess.DEVNULL)
-                                for ln in cur_efi.splitlines():
-                                    m_b = re.match(r"^Boot([0-9A-Fa-f]{4})\*?\s+BlazeOS(?:\s|\t|$)", ln)
-                                    if m_b:
-                                        subprocess.run(["efibootmgr", "-b", m_b.group(1), "-B"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                                ldr = r"\EFI\fedora\shimx64.efi" if os.path.isfile(os.path.join(esp_mp, "EFI/fedora/shimx64.efi")) else r"\EFI\fedora\grubx64.efi"
-                                ep = subprocess.run(
-                                    ["efibootmgr", "--create", "--disk", f"/dev/{pk}", "--part", pn, "--label", "BlazeOS", "--loader", ldr, "--unicode"],
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                )
-                                if ep.returncode == 0:
-                                    out_msg += "\n[UEFI] BlazeOS GRUB2 NVRAM BootOrder başına taşındı."
-                        except Exception:
-                            pass
+                    out_msg = repair_grub_transactional(target_root, is_btrfs, root_dev, active_fsroot)
+                    p = subprocess.CompletedProcess(args=["boot_repair", "grub"], returncode=0, stdout=out_msg)
 
                 elif target == "limine":
                     bl_tool = "/usr/bin/blaze-bootloader"
@@ -3612,6 +4138,12 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
 
             threading.Thread(target=do_reboot, daemon=True).start()
             return {"status": "ok"}
+
+        elif endpoint == "audit_log":
+            limit = data.get("limit", 100) if isinstance(data, dict) else 100
+            target_root = resolve_target_context(auto_mount=False)[0]
+            events, paths = read_recovery_audit_events(limit=limit, target_root=target_root)
+            return {"status": "ok", "events": events, "count": len(events), "paths": paths}
 
         return {"status": "unknown_endpoint", "_http_status": 404}
 

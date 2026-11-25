@@ -1,0 +1,10 @@
+snap_path=/.blaze-snapshots/20261124T233344Z
+restore_resp={"http_status": 200, "response": {"status": "ok", "message": "20261124T233344Z ba\u015far\u0131yla geri y\u00fcklendi. Sistem yeniden ba\u015flat\u0131l\u0131yor..."}}
+expected_pre_sha=0e6ca5b39d2afe2114ffe9cb703865b32e39ec71ece64230ccb618654f0391a0
+expected_post_sha=ad821fbaa2618e7009c782ea5bd22e3d5151239c6ca6ab3be6bb5384310055ff
+=== CONFIG_CONTENT ===
+EVAL_CONFIG_STATE=HEALTHY_BASELINE_V1
+=== PRE_SHA ===
+0e6ca5b39d2afe2114ffe9cb703865b32e39ec71ece64230ccb618654f0391a0
+=== POST_SHA ===
+ad821fbaa2618e7009c782ea5bd22e3d5151239c6ca6ab3be6bb5384310055ff

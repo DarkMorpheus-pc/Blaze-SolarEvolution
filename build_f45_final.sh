@@ -1,9 +1,11 @@
 #!/bin/bash
 set -euo pipefail
+export LC_ALL=C.UTF-8 LANG=C.UTF-8
 export PATH="${HOME}/bin:${HOME}/.local/bin:/usr/local/bin:/usr/local/sbin:$PATH"
 
 BASE_ISO="${BLAZEOS_ROOT:-$(pwd)}/f45_base/Fedora-Workstation-Live-45-1.4.x86_64.iso"
-OUT_ISO="${BLAZEOS_ROOT:-$(pwd)}/Blaze-SolarEvolution-5-x86_64.iso"
+OUT_ISO="${BLAZEOS_ROOT:-$(pwd)}/Blaze-SolarEvolution-5.05.1-RC-x86_64.iso"
+CANONICAL_ISO_LINK="${BLAZEOS_ROOT:-$(pwd)}/Blaze-SolarEvolution-5-x86_64.iso"
 WORK="${BLAZEOS_ROOT:-$(pwd)}/work_f45_stable"
 ROOTFS_SRC="$WORK/rootfs"
 NEW_SQUASHFS="$WORK/LiveOS/squashfs.img"
@@ -18,13 +20,15 @@ if (( $(stat -c %s "$PATCHED_INITRD") % 4 != 0 )); then
     echo "Refusing to build: patched_initrd size is not 4-byte aligned for trailing cpio archives" >&2
     exit 1
 fi
-RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=${HOME}=/build" cargo build --manifest-path "$SOLARUI_SRC/Cargo.toml" --release -p solar-shell -p solar-session -p solar-core -p blaze-recovery
+RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=${HOME}=/build" cargo build --manifest-path "$SOLARUI_SRC/Cargo.toml" --locked --release -p solar-shell -p solar-session -p solar-core -p blaze-recovery -p blaze-akrep-daemon -p blaze-akrep-ui
 install -m 0755 "$SOLARUI_SRC/target/release/solar-shell" "$OVERLAY/usr/bin/solar-shell"
 install -m 0755 "$SOLARUI_SRC/target/release/solar-shell" "$OVERLAY/usr/bin/solar-settings"
 install -m 0755 "$SOLARUI_SRC/target/release/solar-session" "$OVERLAY/usr/bin/solar-session"
 install -m 0755 "$SOLARUI_SRC/target/release/solar-core" "$OVERLAY/usr/bin/solar-core"
 install -m 0755 "$SOLARUI_SRC/target/release/blaze-recovery" "$OVERLAY/usr/bin/blaze-recovery"
 install -m 0755 "$SOLARUI_SRC/target/release/blaze-sentinel" "$OVERLAY/usr/bin/blaze-sentinel"
+install -m 0755 "$SOLARUI_SRC/target/release/akrepd" "$OVERLAY/usr/bin/akrepd"
+install -m 0755 "$SOLARUI_SRC/target/release/akrep-ui" "$OVERLAY/usr/bin/akrep-ui"
 SOLAR_SHELL_PROBE="$($OVERLAY/usr/bin/solar-shell switch __blazeos_build_probe__ 2>&1 || true)"
 if ! grep -q 'end4-pc' <<<"$SOLAR_SHELL_PROBE"; then
     echo "Refusing to build: solar-shell does not contain the End4 switch implementation" >&2
@@ -38,15 +42,24 @@ test -f "$SOLARUI_SRC/vendor/we10x-shell/shell.qml"
 mkdir -p "$OVERLAY/usr/share/quickshell"
 rm -rf "$OVERLAY/usr/share/quickshell/we10x"
 cp -a "$SOLARUI_SRC/vendor/we10x-shell" "$OVERLAY/usr/share/quickshell/we10x"
-grep -qx 'VERSION="5.05"' "$OVERLAY/etc/os-release"
-grep -qx 'VERSION_ID=5.05' "$OVERLAY/etc/os-release"
-grep -qx 'PRETTY_NAME="Blaze SolarEvolution 5.05"' "$OVERLAY/etc/os-release"
-grep -qx 'Blaze SolarEvolution release 5.05 (SolarEvolution)' "$OVERLAY/usr/share/blazeos/identity/fedora-release"
+find "$OVERLAY/usr/share/quickshell/we10x" -type d -exec chmod 755 {} +
+find "$OVERLAY/usr/share/quickshell/we10x" -type f -exec chmod 644 {} +
+grep -qx 'VERSION="5.05.1"' "$OVERLAY/etc/os-release"
+grep -qx 'VERSION_ID=5.05.1' "$OVERLAY/etc/os-release"
+grep -qx 'BLAZE_BASE_ID=fedora' "$OVERLAY/etc/os-release"
+grep -qx 'BLAZE_BASE_VERSION_ID=45' "$OVERLAY/etc/os-release"
+grep -qx 'PRETTY_NAME="Blaze SolarEvolution 5.05.1"' "$OVERLAY/etc/os-release"
+! grep -q '^PLATFORM_ID=' "$OVERLAY/etc/os-release"
+grep -qx 'Blaze SolarEvolution release 5.05.1 (SolarEvolution)' "$OVERLAY/usr/share/blazeos/identity/fedora-release"
 grep -qx 'Product=Blaze SolarEvolution' "$OVERLAY/.buildstamp"
 grep -qx 'GRUB_DISTRIBUTOR="Blaze SolarEvolution"' "$OVERLAY/etc/default/grub"
 grep -qx '45' "$OVERLAY/etc/dnf/vars/releasever"
 grep -q 'excludepkgs=fedora-release\*' "$OVERLAY/etc/dnf/libdnf5.conf.d/10-blaze-identity.conf"
-BLAZE_RELEASE_RPM="${BLAZEOS_ROOT:-$(pwd)}/packaging/out/repo/blaze-release-5.05-3.blaze.noarch.rpm"
+python3 "${BLAZEOS_ROOT:-$(pwd)}/packaging/check_ownership.py"
+if [ "${SKIP_RPM_BUILD:-0}" != "1" ]; then
+    "${BLAZEOS_ROOT:-$(pwd)}/packaging/build-rpms.sh"
+fi
+BLAZE_RELEASE_RPM="${BLAZEOS_ROOT:-$(pwd)}/packaging/out/repo/blaze-release-5.05.1-1.blaze.noarch.rpm"
 test -f "$BLAZE_RELEASE_RPM"
 bash -n \
     "$OVERLAY/usr/bin/blazeos-sync-identity" \
@@ -123,9 +136,9 @@ if grep -Eq '^\s*enabled\s*=\s*1' "$ROOTFS_SRC"/usr/share/dnf5/repos.d/*testing*
 fi
 
 echo "=== [1/5] Building Squashfs with full SELinux labels in tmpfs ==="
-UNSHARE_FLAGS="-rm --map-auto"
+UNSHARE_FLAGS="-rm --map-auto -p -f"
 if [ "$(id -u)" -eq 0 ]; then
-    UNSHARE_FLAGS="-m"
+    UNSHARE_FLAGS="-m -p -f"
 fi
 unshare $UNSHARE_FLAGS bash -c '
 set -euo pipefail
@@ -143,16 +156,47 @@ rm -rf "$ROOTFS/home/"*
 echo "  -> Ensuring root:root ownership..."
 chown -R 0:0 "$ROOTFS"
 
-echo "  -> Applying tracked BlazeOS overlay..."
+echo "  -> Applying tracked BlazeOS overlay (configs & third-party vendor assets)..."
 rm -f "$ROOTFS/usr/bin/solar-settings"
 cp -a --no-preserve=ownership "'"${BLAZEOS_ROOT:-$(pwd)}"'/blazeos_custom_apps/." "$ROOTFS/"
-BLAZE_RELEASE_RPM="'"${BLAZEOS_ROOT:-$(pwd)}"'/packaging/out/repo/blaze-release-5.05-3.blaze.noarch.rpm"
-rpm --root "$ROOTFS" --import "'"${BLAZEOS_ROOT:-$(pwd)}"'/blazeos_custom_apps/etc/pki/rpm-gpg/RPM-GPG-KEY-blaze" 2>/dev/null || true
-rpm --root "$ROOTFS" -K "$BLAZE_RELEASE_RPM"
-rpm --root "$ROOTFS" -Uvh --replacepkgs --replacefiles --noscripts "$BLAZE_RELEASE_RPM"
+rm -rf "$ROOTFS/usr/bin/__pycache__" "$ROOTFS/etc/skel/.config/quickshell/caelestia/.github" "$ROOTFS/etc/skel/.config/quickshell/caelestia/.gitignore"
+if [ -f "$ROOTFS/transparent_boot_logo.png" ]; then
+    install -D -m 0644 "$ROOTFS/transparent_boot_logo.png" \
+        "$ROOTFS/usr/share/plymouth/themes/blazeos/logo.png"
+    install -D -m 0644 "$ROOTFS/transparent_boot_logo.png" \
+        "$ROOTFS/usr/share/plymouth/themes/blazeos/logo-glow.png"
+    rm -f "$ROOTFS/transparent_boot_logo.png"
+fi
+
+echo "  -> Verifying GPG signatures & installing signed first-party Blaze RPMs via DNF5..."
+BLAZE_REPO_DIR="'"${BLAZEOS_ROOT:-$(pwd)}"'/packaging/out/repo"
+mapfile -t BLAZE_PKG_NAMES < <(python3 -c '\''import json,sys; print("\n".join(p["name"] for p in json.load(open(sys.argv[1]))))'\'' "'"${BLAZEOS_ROOT:-$(pwd)}"'/packaging/packages.json")
+mkdir -p "$ROOTFS/tmp/blaze-build-repo" "$ROOTFS/proc"
+cp -a "$BLAZE_REPO_DIR/." "$ROOTFS/tmp/blaze-build-repo/"
+touch "$ROOTFS/dev/null" "$ROOTFS/dev/urandom" "$ROOTFS/dev/zero"
+mount --bind /dev/null "$ROOTFS/dev/null"
+mount --bind /dev/urandom "$ROOTFS/dev/urandom"
+mount --bind /dev/zero "$ROOTFS/dev/zero"
+mount -t proc proc "$ROOTFS/proc"
+chroot "$ROOTFS" rpm --import /tmp/blaze-build-repo/RPM-GPG-KEY-blaze
+for blaze_rpm in "$ROOTFS/tmp/blaze-build-repo"/*.rpm; do
+    chroot "$ROOTFS" rpm -K "/tmp/blaze-build-repo/$(basename "$blaze_rpm")" | grep -q "digests signatures OK"
+    sig="$(chroot "$ROOTFS" rpm -qp --qf "%{OPENPGP:pgpsig}|%{SIGPGP:pgpsig}|%{RSAHEADER:pgpsig}|%{DSAHEADER:pgpsig}" "/tmp/blaze-build-repo/$(basename "$blaze_rpm")")"
+    if [ "$sig" = "(none)|(none)|(none)|(none)" ]; then
+        echo "FATAL: unsigned Blaze RPM: $blaze_rpm" >&2
+        exit 1
+    fi
+done
+chroot "$ROOTFS" dnf5 -y --disablerepo="*" \
+    --repofrompath="blaze-local,/tmp/blaze-build-repo" \
+    --setopt=blaze-local.gpgcheck=1 \
+    --setopt=blaze-local.repo_gpgcheck=1 \
+    --setopt=blaze-local.gpgkey="file:///tmp/blaze-build-repo/RPM-GPG-KEY-blaze" \
+    --setopt=install_weak_deps=False \
+    install "${BLAZE_PKG_NAMES[@]}"
+umount "$ROOTFS/proc" "$ROOTFS/dev/zero" "$ROOTFS/dev/urandom" "$ROOTFS/dev/null"
+rm -rf "$ROOTFS/tmp/blaze-build-repo" "$ROOTFS/var/cache/libdnf5/"*
 rm -f "$ROOTFS/etc/dnf/protected.d/fedora-workstation.conf"
-install -m 0755 "'"${BLAZEOS_ROOT:-$(pwd)}"'/blazeos_custom_apps/usr/bin/solar-shell" "$ROOTFS/usr/bin/solar-shell"
-ln -sf solar-shell "$ROOTFS/usr/bin/solar-settings"
 head -c 4 "$ROOTFS/usr/bin/solar-shell" | grep -q "ELF"
 rm -f "$ROOTFS_WORK/etc/grub.d/11_berp" "$ROOTFS/etc/grub.d/08_fallback_counting"
 rm -f "$ROOTFS/boot/loader/entries/"*rescue*.conf
@@ -162,15 +206,6 @@ for bls_f in "$ROOTFS/boot/loader/entries/"*.conf; do
         rm -f "$bls_f"
     fi
 done
-# Keep display branding and boot branding separate.  The transparent asset is
-# reserved for the Plymouth normal/update splash; the GDM/taskbar icon remains
-# the square application logo under /usr/share/blazeos/gdm.
-if [ -f "$ROOTFS/transparent_boot_logo.png" ]; then
-    install -D -m 0644 "$ROOTFS/transparent_boot_logo.png" \
-        "$ROOTFS/usr/share/plymouth/themes/blazeos/logo.png"
-    install -D -m 0644 "$ROOTFS/transparent_boot_logo.png" \
-        "$ROOTFS/usr/share/plymouth/themes/blazeos/logo-glow.png"
-fi
 
 echo "  -> Installing pinned end4-pC shell source..."
 rm -rf "$ROOTFS/usr/share/quickshell/end4-pC"
@@ -184,11 +219,7 @@ cp "$ROOTFS/usr/share/quickshell/end4-pC/UPSTREAM.md" "$ROOTFS/usr/share/doc/sol
 cp "$ROOTFS/usr/share/quickshell/end4-pC/BLAZEOS-CHANGES.md" "$ROOTFS/usr/share/doc/solarui/end4-pC-BLAZEOS-CHANGES"
 cp "$ROOTFS/usr/share/quickshell/end4-pC/LICENSE" "$ROOTFS/usr/share/licenses/solarui/end4-pC/LICENSE"
 
-echo "  -> Installing pinned We10X (Tanıdık Klasik Düzen) shell source & icon cache..."
-rm -rf "$ROOTFS/usr/share/quickshell/we10x"
-cp -a --no-preserve=ownership "'"${BLAZEOS_ROOT:-$(pwd)}"'/solarui/vendor/we10x-shell" "$ROOTFS/usr/share/quickshell/we10x"
-find "$ROOTFS/usr/share/quickshell/we10x" -type d -exec chmod 755 {} +
-find "$ROOTFS/usr/share/quickshell/we10x" -type f -exec chmod 644 {} +
+echo "  -> Recording We10X (Tanıdık Klasik Düzen) docs, licenses & icon cache (preserving solarui RPM files)..."
 mkdir -p "$ROOTFS/usr/share/doc/solarui" "$ROOTFS/usr/share/licenses/solarui/we10x"
 cp "$ROOTFS/usr/share/quickshell/we10x/UPSTREAM.md" "$ROOTFS/usr/share/doc/solarui/we10x-UPSTREAM"
 cp "$ROOTFS/usr/share/quickshell/we10x/BLAZEOS-CHANGES.md" "$ROOTFS/usr/share/doc/solarui/we10x-BLAZEOS-CHANGES"
@@ -365,6 +396,7 @@ systemctl --root="$ROOTFS" --global mask uresourced.service 2>/dev/null || {
 systemctl --root="$ROOTFS" preset \
     sddm.service \
     blaze-sentinel.service \
+    akrepd.service \
     blaze-boot-success.service \
     blazeos-postinstall.service \
     blazeos-apply-install-choices.service \
@@ -376,7 +408,7 @@ systemctl --root="$ROOTFS" preset \
     blazeos-identity-guard.service \
     polkit.service
 ln -sf /usr/lib/systemd/system/NetworkManager.service "$ROOTFS/etc/systemd/system/dbus-org.freedesktop.NetworkManager.service"
-CORE_PACKAGE_COUNT=$(rpm --root "$ROOTFS" -qa | wc -l)
+CORE_PACKAGE_COUNT=$(chroot "$ROOTFS" rpm -qa | wc -l)
 echo "  -> SolarUI core package count after trim: $CORE_PACKAGE_COUNT"
 test "$CORE_PACKAGE_COUNT" -lt 1950
 
@@ -435,9 +467,9 @@ grep -q "^blaze-setup:" "$ROOTFS/etc/group" || echo "blaze-setup:x:961:" >> "$RO
 chmod 0600 "$ROOTFS/etc/shadow" "$ROOTFS/etc/gshadow"
 grep -q "^sddm:" "$ROOTFS/etc/shadow" || echo "sddm:!*:20726::::::" >> "$ROOTFS/etc/shadow"
 if grep -q "^blaze-setup:" "$ROOTFS/etc/shadow"; then
-    sed -i "s/^blaze-setup:[^:]*:/blaze-setup::/" "$ROOTFS/etc/shadow"
+    sed -i "s/^blaze-setup:[^:]*:/blaze-setup:!*:/" "$ROOTFS/etc/shadow"
 else
-    echo "blaze-setup::20726::::::" >> "$ROOTFS/etc/shadow"
+    echo "blaze-setup:!*:20726::::::" >> "$ROOTFS/etc/shadow"
 fi
 grep -q "^sddm:" "$ROOTFS/etc/gshadow" || echo "sddm:!*::" >> "$ROOTFS/etc/gshadow"
 grep -q "^blaze-setup:" "$ROOTFS/etc/gshadow" || echo "blaze-setup:!::" >> "$ROOTFS/etc/gshadow"
@@ -458,7 +490,13 @@ for path in sys.argv[1:]:
 PYGRP
 chmod 0000 "$ROOTFS/etc/shadow" "$ROOTFS/etc/gshadow"
 chmod 0600 "$ROOTFS/etc/shadow"
-grep -q "^blaze-setup::" "$ROOTFS/etc/shadow"
+grep -q "^blaze-setup:!\*:" "$ROOTFS/etc/shadow"
+if awk -F: '\''($2 == "" || $2 == "::") { print $1; exit 1 }'\'' "$ROOTFS/etc/shadow"; then
+    echo "Verified: zero empty password fields in /etc/shadow"
+else
+    echo "FATAL: Empty password hash detected in $ROOTFS/etc/shadow"
+    exit 1
+fi
 grep -q "^sddm:" "$ROOTFS/etc/shadow"
 chmod 0000 "$ROOTFS/etc/shadow"
 grep -q "^wheel:.*blaze-setup" "$ROOTFS/etc/group"
@@ -481,6 +519,8 @@ chmod 755 "$ROOTFS/usr/bin/firehub" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/blaze-house" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/blaze-recovery" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/blaze-sentinel" 2>/dev/null || true
+chmod 755 "$ROOTFS/usr/bin/akrepd" 2>/dev/null || true
+chmod 755 "$ROOTFS/usr/bin/akrep-ui" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/solar-shell" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/blaze-gamezone" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/solar-omnibar" 2>/dev/null || true
@@ -509,6 +549,8 @@ chmod 0755 "$ROOTFS/usr/bin/blaze-recovery" \
     "$ROOTFS/usr/bin/blaze-recovery-gui-launcher" \
     "$ROOTFS/usr/bin/blaze-death-screen" \
     "$ROOTFS/usr/bin/blaze-sentinel" \
+    "$ROOTFS/usr/bin/akrepd" \
+    "$ROOTFS/usr/bin/akrep-ui" \
     "$ROOTFS/usr/bin/blaze-continuum" \
     "$ROOTFS/usr/bin/blaze-ghost-overlay" \
     "$ROOTFS/usr/bin/blaze-system-monitor" \
@@ -597,6 +639,14 @@ setfattr -n security.selinux -v "system_u:object_r:systemd_unit_file_t:s0" "$ROO
 setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/solar-core" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/blaze-recovery" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/blaze-sentinel" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/akrepd" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/akrep-ui" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:systemd_unit_file_t:s0" "$ROOTFS/usr/lib/systemd/system/akrepd.service" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" "$ROOTFS/usr/lib/systemd/system-preset/90-blaze-akrep.preset" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" "$ROOTFS/usr/lib/sysusers.d/blaze-akrep.conf" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" "$ROOTFS/usr/share/dbus-1/system.d/tr.com.blazeos.Akrep1.conf" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" "$ROOTFS/usr/share/polkit-1/actions/tr.com.blazeos.Akrep1.policy" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" "$ROOTFS/usr/share/applications/tr.com.blazeos.Akrep.desktop" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:systemd_unit_file_t:s0" "$ROOTFS/etc/systemd/system/blaze-recovery.target" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:systemd_unit_file_t:s0" "$ROOTFS/etc/systemd/system/blaze-recovery.service" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:systemd_unit_file_t:s0" "$ROOTFS/etc/systemd/system/blaze-recovery-gui.target" 2>/dev/null || true
@@ -632,6 +682,8 @@ for bin_path in \
     "$ROOTFS/usr/bin/blaze-recovery-gui-launcher" \
     "$ROOTFS/usr/bin/blaze-death-screen" \
     "$ROOTFS/usr/bin/blaze-sentinel" \
+    "$ROOTFS/usr/bin/akrepd" \
+    "$ROOTFS/usr/bin/akrep-ui" \
     "$ROOTFS/usr/bin/blaze-continuum" \
     "$ROOTFS/usr/bin/blaze-ghost-overlay" \
     "$ROOTFS/usr/bin/blaze-system-monitor" \
@@ -706,15 +758,31 @@ getfattr -d -m - "$ROOTFS/usr/bin/sudo"
 getfattr -d -m - "$ROOTFS/usr/bin/blazeos-welcome"
 getfattr -d -m - "$ROOTFS/usr/bin/blazeos-control"
 getfattr -d -m - "$ROOTFS/usr/bin/blaze-house"
-rpm --root "$ROOTFS" -q blaze-release
-grep -qx '\''PRETTY_NAME="Blaze SolarEvolution 5.05"'\'' "$ROOTFS/usr/lib/os-release"
-grep -qx '\''Blaze SolarEvolution release 5.05 (SolarEvolution)'\'' "$ROOTFS/usr/lib/fedora-release"
+chroot "$ROOTFS" rpm -q "${BLAZE_PKG_NAMES[@]}" blaze-akrep-daemon blaze-akrep-ui
+chroot "$ROOTFS" rpm -V "${BLAZE_PKG_NAMES[@]}" blaze-akrep-daemon blaze-akrep-ui || { echo "FATAL: rpm -V verification failed on first-party Blaze RPMs" >&2; exit 1; }
+python3 "'"${BLAZEOS_ROOT:-$(pwd)}"'/packaging/check_ownership.py" --rootfs "$ROOTFS"
+grep -qx '\''PRETTY_NAME="Blaze SolarEvolution 5.05.1"'\'' "$ROOTFS/usr/lib/os-release"
+grep -qx '\''BLAZE_BASE_ID=fedora'\'' "$ROOTFS/usr/lib/os-release"
+grep -qx '\''BLAZE_BASE_VERSION_ID=45'\'' "$ROOTFS/usr/lib/os-release"
+grep -qx '\''Blaze SolarEvolution release 5.05.1 (SolarEvolution)'\'' "$ROOTFS/usr/lib/fedora-release"
 grep -qx '\''GRUB_DISTRIBUTOR="Blaze SolarEvolution"'\'' "$ROOTFS/etc/default/grub"
 grep -qx '\''45'\'' "$ROOTFS/etc/dnf/vars/releasever"
 grep -qx '\''Product=Blaze SolarEvolution'\'' "$ROOTFS/.buildstamp"
 test -L "$ROOTFS/etc/redhat-release"
 test -L "$ROOTFS/etc/system-release"
 test -L "$ROOTFS/etc/systemd/system/multi-user.target.wants/blazeos-identity-guard.service"
+
+if command -v syft >/dev/null 2>&1 || [ -x "'"${BLAZEOS_ROOT:-$(pwd)}"'/.cache/eval_tools/syft" ]; then
+    SYFT_BIN="$(command -v syft || echo "'"${BLAZEOS_ROOT:-$(pwd)}"'/.cache/eval_tools/syft")"
+    GRYPE_BIN="$(command -v grype || echo "'"${BLAZEOS_ROOT:-$(pwd)}"'/.cache/eval_tools/grype")"
+    SBOM_OUT="'"${BLAZEOS_ROOT:-$(pwd)}"'/packaging/out/sbom"
+    mkdir -p "$SBOM_OUT"
+    "$SYFT_BIN" scan "dir:$ROOTFS" -o "cyclonedx-json=$SBOM_OUT/rootfs-cyclonedx.json" -o "spdx-json=$SBOM_OUT/rootfs-spdx.json"
+    if [ -x "$GRYPE_BIN" ]; then
+        "$GRYPE_BIN" -c "'"${BLAZEOS_ROOT:-$(pwd)}"'/.grype.yaml" "sbom:$SBOM_OUT/rootfs-cyclonedx.json" -o json --file "$SBOM_OUT/rootfs-grype.json"
+        python3 -c '\''import json,sys; d=json.load(open(sys.argv[1])); m=d.get("matches",[]); assert len(m)>0, "FATAL: 0 Grype matches on Fedora 45 base rootfs"; print(f"Grype CI gate ok: {len(m)} matches with distro=fedora:45")'\'' "$SBOM_OUT/rootfs-grype.json"
+    fi
+fi
 
 echo "  -> Compressing rootfs into LiveOS/squashfs.img with zstd & xattrs..."
 mkdir -p "'"$WORK"'"/LiveOS
@@ -771,4 +839,8 @@ fi
 echo "=== BUILD COMPLETE! ==="
 ls -lh "$OUT_ISO"
 (cd "$(dirname "$OUT_ISO")" && sha256sum "$(basename "$OUT_ISO")") > "${OUT_ISO}.sha256"
+if [ "$(basename "$OUT_ISO")" != "$(basename "$CANONICAL_ISO_LINK")" ]; then
+    ln -sf "$(basename "$OUT_ISO")" "$CANONICAL_ISO_LINK"
+    (cd "$(dirname "$CANONICAL_ISO_LINK")" && sha256sum "$(basename "$CANONICAL_ISO_LINK")") > "${CANONICAL_ISO_LINK}.sha256"
+fi
 echo "SHA-256: $(cut -d' ' -f1 "${OUT_ISO}.sha256")"

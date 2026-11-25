@@ -42,7 +42,7 @@ for fn in sorted(os.listdir(repo_dir)):
         pkgs[name] = vr
 manifest = {
     "product": "Blaze SolarEvolution",
-    "series": "5.05",
+    "series": "5.05.1",
     "base_fedora": "45",
     "repo_url": "https://darkmorpheus-pc.github.io/Blaze-SolarEvolution/repo/",
     "github_repo": "DarkMorpheus-pc/Blaze-SolarEvolution",
@@ -54,7 +54,7 @@ if os.environ.get("BLAZE_UPGRADE_TARGET_VER"):
         "series": os.environ.get("BLAZE_UPGRADE_SERIES", "6.0"),
         "target_releasever": os.environ["BLAZE_UPGRADE_TARGET_VER"],
         "ready": os.environ.get("BLAZE_UPGRADE_READY", "false").lower() == "true",
-        "min_blaze_release": pkgs.get("blaze-release", "5.05-3.blaze"),
+        "min_blaze_release": pkgs.get("blaze-release", "5.05.1-1.blaze"),
         "notes": os.environ.get("BLAZE_UPGRADE_NOTES", "Yeni Blaze SolarEvolution ana surum yukseltmesi hazir."),
     }
 with open(os.path.join(repo_dir, "channel.json"), "w", encoding="utf-8") as f:

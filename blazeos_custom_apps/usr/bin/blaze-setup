@@ -633,16 +633,19 @@ icon-theme='Papirus-Dark'
 
             # Schedule post-OOBE hygiene + SDDM reload in an independent transient unit
             # BEFORE 99-blaze-setup sudoers is removed so start_desktop transitions cleanly
-            # into autologin (if enabled) or the clean SDDM greeter with the new user!
+            # into autologin (if enabled) or the clean SDDM greeter with the new user.
+            # Use --no-block + sleep instead of --on-active timer (default AccuracySec=1min).
             transition_script = (
+                "sleep 2.2; "
                 "/usr/libexec/blazeos-oobe-hygiene; "
                 f"printf '[Last]\\nSession={selected_desktop}\\nUser={username}\\n' > /var/lib/sddm/state.conf; "
                 "systemctl restart sddm.service"
             )
             privileged_run([
                 "systemd-run",
+                "--no-block",
+                "--collect",
                 "--unit=blaze-oobe-transition",
-                "--on-active=2s",
                 "/bin/sh",
                 "-c",
                 transition_script,

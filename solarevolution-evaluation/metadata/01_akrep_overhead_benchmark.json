@@ -1,0 +1,46 @@
+{
+  "collected_at_utc": "2026-11-24T23:02:08.578593+00:00",
+  "daemon_metrics": {
+    "pid": 769,
+    "active": "active",
+    "enabled": "enabled",
+    "user": "akrep",
+    "vm_rss_kb": 6004,
+    "vm_hwm_kb": 6364,
+    "threads": 1,
+    "idle_cpu_ticks_3s": 0,
+    "dbus_calls": {
+      "GetVersion": {
+        "rc": 0,
+        "latency_ms": 3.81
+      },
+      "GetCapabilities": {
+        "rc": 0,
+        "latency_ms": 2.69
+      },
+      "GetSnapshot": {
+        "rc": 0,
+        "latency_ms": 68.83
+      }
+    },
+    "akrep_card_count": 7,
+    "sentinel_control_count": 7,
+    "selinux_avc_denials_akrep": 0
+  },
+  "boot_with_akrepd_seconds": [
+    5.521,
+    5.374,
+    5.386
+  ],
+  "boot_with_akrepd_median_s": 5.386,
+  "boot_without_akrepd_seconds": [
+    5.366,
+    5.361
+  ],
+  "boot_without_akrepd_median_s": 5.3635,
+  "boot_delta_ms": 22.5,
+  "binary_sizes": {
+    "/usr/bin/akrepd": 7447392,
+    "/usr/bin/akrep-ui": 6920552
+  }
+}
