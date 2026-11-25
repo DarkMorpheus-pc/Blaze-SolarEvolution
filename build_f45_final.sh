@@ -20,7 +20,8 @@ if (( $(stat -c %s "$PATCHED_INITRD") % 4 != 0 )); then
     echo "Refusing to build: patched_initrd size is not 4-byte aligned for trailing cpio archives" >&2
     exit 1
 fi
-RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=${HOME}=/build" cargo build --manifest-path "$SOLARUI_SRC/Cargo.toml" --locked --release -p solar-shell -p solar-session -p solar-core -p blaze-recovery -p blaze-akrep-daemon -p blaze-akrep-ui
+RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=${HOME}=/build" cargo build --manifest-path "$SOLARUI_SRC/Cargo.toml" --locked --offline --release -p solar-shell -p solar-session -p solar-core -p blaze-recovery -p blaze-akrep-daemon -p blaze-akrep-privd -p blaze-akrep-ui
+strip --strip-unneeded "$SOLARUI_SRC/target/release/"{solar-shell,solar-session,solar-core,blaze-recovery,blaze-sentinel,akrepd,akrep-privd,akrep-ui}
 install -m 0755 "$SOLARUI_SRC/target/release/solar-shell" "$OVERLAY/usr/bin/solar-shell"
 install -m 0755 "$SOLARUI_SRC/target/release/solar-shell" "$OVERLAY/usr/bin/solar-settings"
 install -m 0755 "$SOLARUI_SRC/target/release/solar-session" "$OVERLAY/usr/bin/solar-session"
@@ -28,6 +29,7 @@ install -m 0755 "$SOLARUI_SRC/target/release/solar-core" "$OVERLAY/usr/bin/solar
 install -m 0755 "$SOLARUI_SRC/target/release/blaze-recovery" "$OVERLAY/usr/bin/blaze-recovery"
 install -m 0755 "$SOLARUI_SRC/target/release/blaze-sentinel" "$OVERLAY/usr/bin/blaze-sentinel"
 install -m 0755 "$SOLARUI_SRC/target/release/akrepd" "$OVERLAY/usr/bin/akrepd"
+install -m 0755 "$SOLARUI_SRC/target/release/akrep-privd" "$OVERLAY/usr/bin/akrep-privd"
 install -m 0755 "$SOLARUI_SRC/target/release/akrep-ui" "$OVERLAY/usr/bin/akrep-ui"
 SOLAR_SHELL_PROBE="$($OVERLAY/usr/bin/solar-shell switch __blazeos_build_probe__ 2>&1 || true)"
 if ! grep -q 'end4-pc' <<<"$SOLAR_SHELL_PROBE"; then
@@ -520,6 +522,7 @@ chmod 755 "$ROOTFS/usr/bin/blaze-house" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/blaze-recovery" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/blaze-sentinel" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/akrepd" 2>/dev/null || true
+chmod 755 "$ROOTFS/usr/bin/akrep-privd" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/akrep-ui" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/solar-shell" 2>/dev/null || true
 chmod 755 "$ROOTFS/usr/bin/blaze-gamezone" 2>/dev/null || true
@@ -550,6 +553,7 @@ chmod 0755 "$ROOTFS/usr/bin/blaze-recovery" \
     "$ROOTFS/usr/bin/blaze-death-screen" \
     "$ROOTFS/usr/bin/blaze-sentinel" \
     "$ROOTFS/usr/bin/akrepd" \
+    "$ROOTFS/usr/bin/akrep-privd" \
     "$ROOTFS/usr/bin/akrep-ui" \
     "$ROOTFS/usr/bin/blaze-continuum" \
     "$ROOTFS/usr/bin/blaze-ghost-overlay" \
@@ -640,13 +644,19 @@ setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/so
 setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/blaze-recovery" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/blaze-sentinel" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/akrepd" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/akrep-privd" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$ROOTFS/usr/bin/akrep-ui" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:systemd_unit_file_t:s0" "$ROOTFS/usr/lib/systemd/system/akrepd.service" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:systemd_unit_file_t:s0" "$ROOTFS/usr/lib/systemd/system/akrep-privd.service" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" "$ROOTFS/usr/lib/systemd/system-preset/90-blaze-akrep.preset" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" "$ROOTFS/usr/lib/sysusers.d/blaze-akrep.conf" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" "$ROOTFS/usr/lib/tmpfiles.d/blaze-akrep.conf" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" "$ROOTFS/usr/share/dbus-1/system.d/tr.com.blazeos.Akrep1.conf" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" "$ROOTFS/usr/share/dbus-1/system.d/tr.com.blazeos.Akrep1.Privileged.conf" 2>/dev/null || true
+setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" "$ROOTFS/usr/share/dbus-1/system-services/tr.com.blazeos.Akrep1.Privileged.service" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" "$ROOTFS/usr/share/polkit-1/actions/tr.com.blazeos.Akrep1.policy" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" "$ROOTFS/usr/share/applications/tr.com.blazeos.Akrep.desktop" 2>/dev/null || true
+find "$ROOTFS/usr/share/akrep" -exec setfattr -n security.selinux -v "system_u:object_r:usr_t:s0" {} + 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:systemd_unit_file_t:s0" "$ROOTFS/etc/systemd/system/blaze-recovery.target" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:systemd_unit_file_t:s0" "$ROOTFS/etc/systemd/system/blaze-recovery.service" 2>/dev/null || true
 setfattr -n security.selinux -v "system_u:object_r:systemd_unit_file_t:s0" "$ROOTFS/etc/systemd/system/blaze-recovery-gui.target" 2>/dev/null || true
@@ -683,6 +693,7 @@ for bin_path in \
     "$ROOTFS/usr/bin/blaze-death-screen" \
     "$ROOTFS/usr/bin/blaze-sentinel" \
     "$ROOTFS/usr/bin/akrepd" \
+    "$ROOTFS/usr/bin/akrep-privd" \
     "$ROOTFS/usr/bin/akrep-ui" \
     "$ROOTFS/usr/bin/blaze-continuum" \
     "$ROOTFS/usr/bin/blaze-ghost-overlay" \

@@ -95,6 +95,9 @@ def get_niri_validate_binary() -> str | None:
 
 # R1: First-party signed RPM packages in packaging/out/repo/
 EXPECTED_CORE_RPMS = (
+    "blaze-akrep-1.0.0-1.blaze.x86_64.rpm",
+    "blaze-akrep-daemon-1.0.0-1.blaze.x86_64.rpm",
+    "blaze-akrep-ui-1.0.0-1.blaze.x86_64.rpm",
     "blaze-continuum-0.1.0-1.blaze.x86_64.rpm",
     "blaze-firehub-5.05.1-1.blaze.x86_64.rpm",
     "blaze-house-2.1.0-1.blaze.x86_64.rpm",
@@ -163,6 +166,7 @@ REQUIRED_ENABLED_UNITS = (
     "etc/systemd/system/graphical.target.wants/blaze-boot-success.service",
     "etc/systemd/system/multi-user.target.wants/display-manager.service",
     "etc/systemd/system/multi-user.target.wants/blaze-sentinel.service",
+    "etc/systemd/system/multi-user.target.wants/akrepd.service",
     "etc/systemd/system/multi-user.target.wants/blazeos-plymouth-failsafe.service",
     "etc/systemd/system/graphical.target.wants/blazeos-nvidia-firstboot.service",
     "etc/systemd/system/multi-user.target.wants/blaze-optimization.service",
@@ -177,6 +181,9 @@ CRITICAL_SQUASHFS_ELFS = (
     "usr/bin/solar-session",
     "usr/bin/solar-core",
     "usr/bin/blaze-sentinel",
+    "usr/bin/akrepd",
+    "usr/bin/akrep-privd",
+    "usr/bin/akrep-ui",
     "usr/bin/blaze-recovery",
     "usr/bin/blaze-house",
     "opt/FireHub/firehub",

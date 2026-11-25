@@ -1,5 +1,5 @@
 [Unit]
-Description=BlazeOS Akrep Security Center Telemetry Daemon (Read-Only v0.1)
+Description=BlazeOS Akrep Security Center Telemetry Daemon (Read-Only)
 Documentation=https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
 After=dbus.service firewalld.service
 Wants=dbus.service

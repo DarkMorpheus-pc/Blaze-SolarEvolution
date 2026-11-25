@@ -1516,9 +1516,49 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
         omnibar = (ROOT / 'solarui/crates/solar-shell/src/omnibar.rs').read_text(encoding='utf-8')
         self.assertIn('"akrep-ui"', omnibar)
 
+        for prof_name in ('balanced.toml', 'developer.toml', 'gaming.toml', 'public-network.toml'):
+            prof_p = OVERLAY / 'usr/share/akrep/profiles' / prof_name
+            self.assertTrue(prof_p.is_file(), f'Missing Akrep TOML profile: {prof_p}')
+            self.assertIn('selinux_required = true', prof_p.read_text(encoding='utf-8'))
+
+        for bin_name in ('akrepd', 'akrep-privd', 'akrep-ui'):
+            bin_p = OVERLAY / 'usr/bin' / bin_name
+            self.assertTrue(os.access(bin_p, os.X_OK), f'Missing executable {bin_p}')
+            ver_res = subprocess.run([str(bin_p), '--version'], capture_output=True, text=True, timeout=10)
+            self.assertEqual(ver_res.returncode, 0, ver_res.stderr)
+            self.assertIn(f'{bin_name} 1.0.0', ver_res.stdout)
+
+        smoke_res = subprocess.run(
+            [str(OVERLAY / 'usr/bin/akrep-ui'), '--smoke-test'],
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(smoke_res.returncode, 0, smoke_res.stderr)
+        import json as _json
+        smoke_json = _json.loads(smoke_res.stdout)
+        self.assertEqual(smoke_json.get('version'), '1.0.0')
+        self.assertEqual(smoke_json.get('nav_count'), 10)
+
         spec = (ROOT / 'packaging/specs/blaze-akrep.spec').read_text(encoding='utf-8')
-        for sub in ('%package daemon', '%package ui', 'Requires:       gtk4', '%systemd_post akrepd.service'):
+        for sub in (
+            'Version:        1.0.0',
+            '%package daemon',
+            '%package ui',
+            'Suggests:       clamav, clamd, clamav-freshclam',
+            'Requires:       gtk4',
+            'systemd-tmpfiles --create /usr/lib/tmpfiles.d/blaze-akrep.conf',
+            '%systemd_post akrepd.service',
+            '/usr/bin/akrepd',
+            '/usr/bin/akrep-privd',
+            '/usr/share/akrep/profiles/balanced.toml',
+            '/usr/share/akrep/profiles/public-network.toml',
+        ):
             self.assertIn(sub, spec)
+
+        pkgs_json = _json.loads((ROOT / 'packaging/packages.json').read_text(encoding='utf-8'))
+        akrep_pkg = next(p for p in pkgs_json if p['name'] == 'blaze-akrep')
+        self.assertEqual(akrep_pkg['ver'], '1.0.0')
+        self.assertIn('/usr/bin/akrep-privd', akrep_pkg['files'])
+        self.assertIn('/usr/share/akrep/profiles/public-network.toml', akrep_pkg['files'])
 
 
 if __name__ == '__main__':

@@ -20,9 +20,14 @@ REPO
   rpm -q blaze-release blaze-sentinel blaze-tools blaze-recovery blaze-continuum blaze-house solarui solarui-config blaze-oobe blaze-firehub blaze-scap-compat blaze-akrep blaze-akrep-daemon blaze-akrep-ui
   echo "--- sentinel & akrep smoke test:"
   blaze-sentinel status | head -6
-  akrepd --version
-  akrep-ui --version
+  akrepd --version | grep -q "1.0.0"
+  akrep-privd --version | grep -q "1.0.0"
+  akrep-ui --version | grep -q "1.0.0"
   akrepd --oneshot-json | grep -q "\"read_only\": true" || { echo "FATAL: akrepd read_only must be true"; exit 1; }
+  test -f /usr/share/akrep/profiles/balanced.toml
+  test -f /usr/share/akrep/profiles/developer.toml
+  test -f /usr/share/akrep/profiles/gaming.toml
+  test -f /usr/share/akrep/profiles/public-network.toml
   echo "--- blaze.repo shipped by blaze-release:"
   cat /usr/share/dnf5/repos.d/blaze.repo
   echo "--- identity persistence & releasever=45 checks:"

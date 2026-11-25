@@ -880,6 +880,53 @@ class Tier1FeatureCoverageTests(unittest.TestCase):
         self.assertIn("vault_verify_and_boot", bere_gui)
         self.assertIn("vault://BLAZE_REC", bere_gui)
 
+    def test_f18_akrep_v1_packaging_profiles_and_polkit_parity(self):
+        rpmdb_dir = self.cache_dir / "rpmdb_akrep"
+        unsquashfs_extract_paths(
+            self.squashfs_path,
+            rpmdb_dir,
+            ["usr/lib/sysimage/rpm", "var/lib/rpm"],
+        )
+        installed_set = set(rpm_query_root(rpmdb_dir))
+        for pkg in ("blaze-akrep", "blaze-akrep-daemon", "blaze-akrep-ui"):
+            self.assertIn(pkg, installed_set, f"{pkg} RPM missing from squashfs rpmdb")
+
+        for rel in (
+            "usr/bin/akrepd",
+            "usr/bin/akrep-privd",
+            "usr/bin/akrep-ui",
+            "usr/lib/sysusers.d/blaze-akrep.conf",
+            "usr/lib/tmpfiles.d/blaze-akrep.conf",
+            "usr/lib/systemd/system/akrepd.service",
+            "usr/lib/systemd/system/akrep-privd.service",
+            "usr/lib/systemd/system-preset/90-blaze-akrep.preset",
+            "usr/share/dbus-1/system.d/tr.com.blazeos.Akrep1.conf",
+            "usr/share/dbus-1/system.d/tr.com.blazeos.Akrep1.Privileged.conf",
+            "usr/share/dbus-1/system-services/tr.com.blazeos.Akrep1.Privileged.service",
+            "usr/share/polkit-1/actions/tr.com.blazeos.Akrep1.policy",
+            "usr/share/applications/tr.com.blazeos.Akrep.desktop",
+            "usr/share/akrep/profiles/balanced.toml",
+            "usr/share/akrep/profiles/developer.toml",
+            "usr/share/akrep/profiles/gaming.toml",
+            "usr/share/akrep/profiles/public-network.toml",
+        ):
+            self.assertIn(rel, self.squashfs_paths, f"Missing Akrep v1.0 file in squashfs: {rel}")
+
+        polkit_xml = unsquashfs_cat(
+            self.squashfs_path, "usr/share/polkit-1/actions/tr.com.blazeos.Akrep1.policy"
+        ).decode("utf-8", errors="replace")
+        self.assertIn("auth_admin_keep", polkit_xml)
+        for act in (
+            "tr.com.blazeos.Akrep1.selinux.diagnose",
+            "tr.com.blazeos.Akrep1.selinux.manage",
+            "tr.com.blazeos.Akrep1.firewall.manage",
+            "tr.com.blazeos.Akrep1.flatpak.system-manage",
+            "tr.com.blazeos.Akrep1.quarantine.manage",
+            "tr.com.blazeos.Akrep1.profile.apply",
+            "tr.com.blazeos.Akrep1.packages.install-optional",
+        ):
+            self.assertIn(act, polkit_xml)
+
 
 if __name__ == "__main__":
     unittest.main()

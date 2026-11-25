@@ -1,0 +1,261 @@
+================================================================================
+BLAZE SOLAREVOLUTION 5.05.1 RC & AKREP v1.0 TEKNIK DEVAMLILIK VE DEVRIYE REHBERI
+================================================================================
+Belge Surumu : 5.05.1-RC / Akrep 1.0.0-1.blaze
+Taban Sistem : Fedora Linux 45 (x86_64)
+ISO SHA-256  : 05b1bef8d1867f0756d700f51b8e67a74e600c2d1389a245306c45f10b74b2ee
+Depo Adresi  : https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
+
+Bu belge, makine formatlanmadan once mevcut muhendislik durumunu kayipsiz
+belgelemek, format oncesi yedekleme adimlarini standartlastirmak ve format
+sonrasinda hem Antigravity bellegi geri yuklenerek hem de sifirdan yeni bir
+oturum acilarak gelistirmeye kaldigi yerden devam edilmesini saglamak amaciyla
+hazirlanmistir.
+
+--------------------------------------------------------------------------------
+1. 5.05.1 RC SURUMUNDE KAPATILAN P0 / P1 / P2 BULGULAR VE MIMARI DEGISMEZLER
+--------------------------------------------------------------------------------
+1.1 [P0] BERE Acilis Onarimi (Senaryo S6 - SameFileError Cozumu):
+    - `berp-recovery-gui` icinde hedef kok dizin `/` oldugunda `BOOTX64.EFI`
+      dosyasinin kendi uzerine kopyalanmasi sonucu olusan `SameFileError` hatasi
+      `FileRepairTransaction` islemsel yedekleme/geri-alma sinifi ve `realpath` /
+      `samefile` kontrolu ile tamamen giderildi.
+    - Coklu dosya (EFI ikilileri + BLS girisleri + `grub.cfg`) guncellemelerinde
+      gec asamada hata olusursa tum dosyalar otomatik olarak onceki durumuna
+      geri dondurulur.
+
+1.2 [P1] OOBE Hesap Guvenligi (Lynis AUTH-9283) ve PAM/SELinux Gecisi:
+    - Kurulum sonrasi tek kullanimlik `blaze-setup` hesabinin `/etc/shadow`
+      icindeki parola alani `!*:20726::::::` ile kilitlendi; hicbir sistem
+      hesabinda bos parola alani birakilmaz (`build_f45_final.sh` bunu derleme
+      asamasinda dogrular).
+    - `etc/pam.d/sddm-autologin` icinde `pam_permit.so`, kullanici sinirlamasi
+      (`blaze-setup:liveuser`) ve zorunlu `pam_selinux.so close` /
+      `pam_selinux.so open` satirlari korunarak canli oturumun `xdm_t` yerine
+      `unconfined_t` alanina gecmesi garanti altina alindi.
+    - OOBE tamamlandiginda `/usr/libexec/blazeos-oobe-hygiene` calisarak
+      `00-blaze-oobe.conf`, `blaze-oobe.desktop` ve `99-blaze-setup` yetkilerini
+      kalici olarak temizler.
+
+1.3 [P1] %100 RPM Sahipligi, EdDSA Imzalama, OpenSCAP ve SBOM Dogrulugu:
+    - `blazeos_custom_apps/` altindaki tum dosyalar `packaging/ownership-manifest.yaml`
+      icinde siniflandirildi (`first-party-rpm`, `fedora-config-override`,
+      `third-party-vendor`, `excluded`); `packaging/check_ownership.py` hem
+      overlay hem de kurulu rootfs `rpmdb.sqlite` uzerinde %100 kapsama zorlar.
+    - Tum birinci parti Blaze paketleri (`blaze-release`, `blaze-sentinel`,
+      `blaze-recovery`, `blaze-house`, `blaze-tools`, `solarui`, `solarui-config`,
+      `blaze-oobe`, `blaze-firehub`, `blaze-continuum`, `blaze-scap-compat`,
+      `blaze-akrep`, `blaze-akrep-daemon`, `blaze-akrep-ui`) Fedora 45 konteyneri
+      icinde derlenir, EdDSA/OpenPGP anahtari ile imzalanir ve `rpm -K` +
+      `%{OPENPGP:pgpsig}` ile dogrulanir.
+    - `blaze-scap-compat` paketi, stok Fedora OpenSCAP veri akisina dokunmadan
+      Blaze SolarEvolution CPE/OVAL uyumluluk koprusu uretir. `.grype.yaml`
+      (`distro: "fedora:45"`) sifir eslesme kor noktasini ortadan kaldirir.
+
+1.4 [P2] Grup/Gshadow Esitlemesi (AUTH-9216), Initrd/Ventoy ve Denetim Kaydi:
+    - Anaconda kurulum sonlandiricisi ve `blazeos-postinstall`, `/etc/group` ile
+      `/etc/gshadow` uyeligini birebir esitleyerek `grpck -r` temizligi saglar.
+    - `scripts/patch_f45_initrd.sh` ZSTD arsivini 4-bayt sinirina hizalar,
+      Ventoy `/dev/ventoy` udev/dmsquash uyumlulugunu ve `/sbin/blockdev` araciyla
+      `BLAZE_REC` kurtarma kasasinin salt okunur (`RO=1`) kilitlenmesini saglar.
+    - BERE kurtarma ortami tum islemleri parolalari `[REDACTED]` ile maskeleyerek
+      `/var/log/bere-recovery.log` (`0600`) dosyasina ve syslog'a yazar.
+    - Noctalia, Caelestia eklentileri ve Quickshell bilesenlerinden kosulsuz
+      `x86-64-v3` VEX/BMI2 baslangic buyruklari temizlenerek eski x86_64
+      islemcilerde ve `llvmpipe` yazilimsal GL ortamlarinda calisma saglandi.
+
+--------------------------------------------------------------------------------
+2. FEDORA 45 KARSILASTIRMALI TEKNIK DEGERLENDIRME METRIKLERI (OZET)
+--------------------------------------------------------------------------------
+tum ayrintili tablolar ve kanitlar `solarevolution-evaluation/reports/` altindadir:
+- Paket ve Servis Ayak Izi : 1.904 RPM (Fedora 45 Ref: 1.974 RPM), 29 etkin servis,
+                             0 basarisiz systemd birimi, SELinux=Enforcing.
+- Soguk Acilis Suresi      : Ortanca 5.330 sn (3 ardisik soguk yeniden baslatma;
+                             grafiksel SDDM/Wayland hedefi etkin).
+- OpenSCAP Uyumluluk       : CIS Workstation L1 %58.16 (171/294; Fedora 45 Ref %55.12),
+                             CUSP %50.93 (Ref %50.55), Standard %36.49.
+- Lynis Guvenlik Indeksi   : 72 puan (Fedora 45 Ref: 71 puan), 0 uyari.
+- Tedarik Zinciri (SBOM)   : Syft CycloneDX (129.882 bilesen) & SPDX (7.220 paket);
+                             Grype (fedora:45) 1.503 eslesme / 607 tekil CVE.
+- Guvenilirlik & Stres     : 5/5 (%100) stress-ng CPU/RAM + izole /dev/vdb fio +
+                             1 GiB CRC32C dogrulamasi (0 G/C hatasi, 0 OOM).
+- BERE / BERP Kurtarma     : 9/9 (%100) senaryo basarisi (kasa SHA-256 dogrulama,
+                             zorunlu parola kilidi, Btrfs kok geri alma, %100 /home
+                             korunumu, S6 GRUB/EFI onarimi), ortanca sure 17.92 sn.
+
+--------------------------------------------------------------------------------
+3. AKREP v1.0 GUVENLIK MERKEZI MIMARISI (`1.0.0-1.blaze`)
+--------------------------------------------------------------------------------
+Akrep v1.0, yetki ayrimi (privilege separation) ilkesine dayali 3 katmanli bir
+Rust mimarisi kullanir (`solarui/crates/`):
+
+3.1 Ortak Kutuphaneler:
+    - `blaze-sentinel-core`: 7 temel guvenlik kontrolu, 5 onem derecesi
+      (`Protected`, `Attention`, `Critical`, `Unavailable`, `Unknown`), SHA-256
+      ve kanarya dogrulama motoru (`AKREP_VERSION = "1.0.0"`, sema v2).
+    - `blaze-akrep-common`: Tip guvenli D-Bus sozlesmesi, `ActionRequest` /
+      `ActionPlan` / `TransactionRecord` modelleri, kirmizi cizgi dogrulayicilari,
+      Flatpak INI ayristirici (`O_NOFOLLOW`), kullanici kapsamli Flatpak motoru
+      (`UserFlatpakManager`), Portal/PipeWire gizlilik denetleyicisi
+      (`SessionPortalPipewireBackend`) ve RFC1918 LAN rich-rule ureticisi.
+
+3.2 Katman 1 - Salt Okunur Telemetri Servisi (`blaze-akrep-daemon` -> `/usr/bin/akrepd`):
+    - D-Bus Adi : `tr.com.blazeos.Akrep1` (`/tr/com/blazeos/Akrep1`)
+    - Calisma   : Ayricaliksiz `akrep` sistem kullanicisi (`akrepd.service`),
+                  sifir GTK4 bagimliligi, sifir sistem degistirici (mutator) metot,
+                  olay gudumlu `FirewallD1` sinyal izleme (sifir mesgul yoklama).
+
+3.3 Katman 2 - Istege Bagli Polkit Islem Servisi (`blaze-akrep-privd` -> `/usr/bin/akrep-privd`):
+    - D-Bus Adi : `tr.com.blazeos.Akrep1.Privileged` (`akrep-privd.service`)
+    - Calisma   : Yalnizca ihtiyac aninda D-Bus aktivasyonu ile baslar ve 60 sn
+                  bosta kaldiginda (`--idle-timeout-secs 60`) kendi kendine kapanir
+                  (bosta 0 MiB RSS).
+    - Guvenlik  : Her cagrinin D-Bus `system-bus-name` kimligini Polkit uzerinden
+                  dogrular (`tr.com.blazeos.Akrep1.{selinux.diagnose,selinux.manage,
+                  firewall.manage,flatpak.system-manage,quarantine.manage,
+                  profile.apply,packages.install-optional}` -> `auth_admin_keep`).
+    - Islem Motoru (`TransactionEngine`, `/var/lib/akrep` `0700`):
+      `CreatePlan` (SHA-256 imzali onizleme + on-parmak-izi) -> `CommitPlan`
+      (on-goruntu alma -> uygulama -> dogrulama -> atomik JSON kaydi) ->
+      `RollbackTransaction` (dis degisiklik / `ExternalDriftDetected` kontrolu ile
+      guvenli geri alma). Cokme veya `SIGKILL` sonrasinda yarida kalan islemler
+      bir sonraki acilista otomatik olarak `Interrupted` durumuna cekilir.
+    - Kirmizi Cizgiler (Kesin Engellenen Islemler):
+      * SELinux kapatma (`setenforce 0`, `SELINUX=disabled`, `audit2allow`, `semodule`)
+      * Kullanici kapsamli Flatpak degisikliklerinin root (`akrep-privd`) olarak
+        calistirilmasi veya `/home` / `/root` dizinlerine sembolik bag gecisi
+      * Toptan kum havuzu delme (`filesystem=host`, `filesystem=home`, `devices=all`,
+        hassas oturum/sistem D-Bus isimlerine `talk`/`own`)
+      * ClamAV icin TCP/ag soketi kullanimi (yalnizca yerel Unix soketi
+        `/run/clamd.scan/clamd.sock` `zINSTREAM` kabul edilir)
+      * Karantinadan geri yuklemede SUID/SGID/execute-root bitlerinin korunmasi
+        (geri yukleme sirasinda SUID/SGID zorunlu olarak temizlenir, SHA-256 ve
+        SELinux `security.selinux` baglami dogrulanir; kasa formati `AKREPQ1`).
+
+3.4 Katman 3 - Masaustu Arayuzu (`blaze-akrep-ui` -> `/usr/bin/akrep-ui`):
+    - Ayricaliksiz GTK4 istemcisi (`tr.com.blazeos.Akrep`), TR/EN canli dil gecisi,
+      bloklamayan `async_channel` D-Bus isci is parcacigi, islem onizleme penceresi
+      ve 10 bolumlu sol gezinme cubugu (`overview`, `threat_protection`,
+      `system_protection`, `firewall`, `applications`, `device_security`,
+      `privacy`, `profiles`, `history`, `settings`).
+    - Resmi Deklaratif Guvenlik Profilleri (`/usr/share/akrep/profiles/*.toml`):
+      `balanced`, `developer`, `gaming`, `public-network`.
+
+3.5 v1.0 Performans ve Guvenlik Butceleri (Olculen Kurulu UEFI VM Sonuclari):
+    - Bosta `akrepd` bellek kullanimi (`VmRSS`) <= 16 MiB -> Olculen: 6.70 MiB (`6860 kB`)
+    - Bosta `akrep-privd` bellek kullanimi = 0 MiB        -> Olculen: 0 MiB (`0 kB`, 60 sn bosta kapanir)
+    - Bosta `akrepd` CPU kullanimi < %0.5                 -> Olculen: %0.0
+    - `GetSnapshot` ortanca yanit suresi <= 250 ms        -> Olculen: 0.313 ms (ilk sorgu 56.61 ms)
+    - `akrep-ui` Wayland pencere acilis suresi <= 1500 ms -> Olculen: 645.95 ms
+    - Soguk acilis etkisi (`boot_delta`) <= 100 ms        -> Olculen: 0.0 ms (etkin 3.353s vs maskeli 3.386s)
+    - SELinux `Enforcing`, `0` Akrep AVC engellemesi, temiz `rpm -V` (`SEC-10`, `SEC-12`)
+    - Canli ISO BIOS + UEFI E2E (`run_e2e --all --firmware both`): 79/79 PASS
+    - Kurulu UEFI VM Akrep Kabul Kapisi (`gate_akrep_v1.py`): 10/10 PASS
+
+--------------------------------------------------------------------------------
+4. DERLEME, PAKETLEME VE ZORUNLU QEMU DOGRULAMA KOMUTLARI
+--------------------------------------------------------------------------------
+Onemli Not: `f45_base/Fedora-Workstation-Live-45-1.4.x86_64.iso`, buyuk ikililer
+(`blazeos_custom_apps/opt/FireHub/`, `blazeos_custom_apps/usr/lib/kitty/`) ve
+`work_f45_stable/` git deposu disindadir (`.gitignore`). Yeni bir sistemde ISO
+uretmek icin taban Fedora 45 Live ISO'su `f45_base/` altina yerlestirilmeli
+(veya `.agents/skills/blazeos-base-rebase/SKILL.md` adimlari izlenmelidir).
+
+  # 1. Tum Rust birim ve entegrasyon testlerini calistirma:
+  cargo test --manifest-path solarui/Cargo.toml --locked --offline
+
+  # 2. Ayiklanmis (stripped) surum ikililerini derleme ve overlay'e kurma:
+  RUSTFLAGS="--remap-path-prefix=${HOME}=/build" cargo build \
+    --manifest-path solarui/Cargo.toml --release --locked --offline \
+    -p solar-shell -p solar-session -p solar-core -p blaze-recovery \
+    -p blaze-akrep-daemon -p blaze-akrep-privd -p blaze-akrep-ui
+
+  # 3. Overlay sahiplik manifestosu ve imzali RPM deposu uretimi/dogrulamasi:
+  python3 packaging/check_ownership.py
+  ./packaging/build-rpms.sh
+  ./packaging/verify-repo.sh
+
+  # 4. Izole regresyon testleri:
+  python3 -m unittest tests/test_audit_regressions.py
+
+  # 5. Tam hibrit Live ISO insasi:
+  ./build_f45_final.sh
+
+  # 6. ZORUNLU Canli ISO Legacy BIOS + UEFI OVMF QEMU E2E dogrulamasi (AGENTS.md Kural 1):
+  LC_ALL=tr_TR.UTF-8 python3 -m tests.e2e.run_e2e --all --firmware both
+
+  # 7. Kurulu BlazeOS 5.05.1 UEFI VM uzerinde Akrep v1.0 tam kabul kapisi:
+  python3 tests/e2e/gate_akrep_v1.py
+
+--------------------------------------------------------------------------------
+5. FORMAT ONCESI YEDEKLEME ADIMLARI (`backup_antigravity_and_release.sh`)
+--------------------------------------------------------------------------------
+Format atmadan once harici bir NVMe / USB diski baglayin (ornegin `/run/media/$USER/YEDEK`)
+ve asagidaki adimlari sirasiyla uygulayin:
+
+  # Adim 1: Kuru calistirma (--dry-run) ile tum dosyalarin hazir oldugunu dogrulayin:
+  ./scripts/backup_antigravity_and_release.sh --dry-run /run/media/"$USER"/YEDEK/blaze-backup
+
+  # Adim 2: Veritabani ve JSONL tutarliligi icin Antigravity arayuzunu tamamen kapatin.
+
+  # Adim 3: Normal bir sistem terminalinden tam yedeklemeyi baslatin:
+  ./scripts/backup_antigravity_and_release.sh /run/media/"$USER"/YEDEK/blaze-backup
+
+Bu betik hedef klasorde su dosyalari uretir ve `sha256sum -c SHA256SUMS.txt` ile
+otomatik olarak dogrular:
+  - `antigravity-state-backup.tar.zst` (`$HOME/.gemini/antigravity` + `$HOME/.gemini/config`)
+  - `blaze-signing-keyring.tar.zst`    (`$HOME/.blaze-signing` RPM imzalama anahtari, varsa)
+  - `blaze-solarevolution-full.bundle` (Tum dallar ve etiketlerle tam Git gecmisi)
+  - `Blaze-SolarEvolution-5.05.1-RC-x86_64.iso` ve `.iso.sha256`
+  - `solarevolution-evaluation-full.tar.zst` (Ham SBOM ve benchmark kanitlari dahil)
+  - `BLAZE_CONTINUITY_HANDOFF.txt`, `AGENTS.md` ve `SHA256SUMS.txt`
+
+Ek olarak buyuk yerlesik bilesenleri (`blazeos_custom_apps/opt/FireHub`,
+`packages/`, `f45_base/Fedora-Workstation-Live-45-1.4.x86_64.iso`) harici diske
+ayrica kopyalamaniz, format sonrasinda internetten yeniden indirme suresini
+sifirlayacaktir.
+
+--------------------------------------------------------------------------------
+6. FORMAT SONRASI GERI YUKLEME VE DEVAM ETME REHBERI
+--------------------------------------------------------------------------------
+Format ve yeni sistem (ornegin Blaze SolarEvolution 5.05.1 veya Fedora 45)
+kurulumu tamamlandiktan sonra once yedek butunlugunu dogrulayin:
+
+  (cd /run/media/"$USER"/YEDEK/blaze-backup && sha256sum -c SHA256SUMS.txt)
+
+6.1 Git Deposunu ve Imza Anahtarini Geri Yukleme:
+  # Git bundle dosyasindan veya dogrudan GitHub'dan klonlayin:
+  git clone /run/media/"$USER"/YEDEK/blaze-backup/blaze-solarevolution-full.bundle "$HOME/BlazeFedora"
+  cd "$HOME/BlazeFedora"
+  git remote set-url origin https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution.git
+
+  # RPM imzalama anahtarligini geri yukleyin (yedeklendiyse):
+  tar --zstd -xf /run/media/"$USER"/YEDEK/blaze-backup/blaze-signing-keyring.tar.zst -C "$HOME"
+  chmod 0700 "$HOME/.blaze-signing"
+
+  # Teknik degerlendirme ham kanitlarini geri yukleyin (istege bagli):
+  tar --zstd -xf /run/media/"$USER"/YEDEK/blaze-backup/solarevolution-evaluation-full.tar.zst -C "$HOME/BlazeFedora"
+
+6.2 SENARYO A — Antigravity Bellegini Birebir Geri Yukleyerek Devam Etme:
+  1) Antigravity uygulamasini kurun ancak HENUZ ACMAYIN (acik ise tamamen kapatin).
+  2) Arsivlenmis `.gemini/antigravity` ve `.gemini/config` dizinlerini yeni `$HOME`
+     altina acin:
+       tar --zstd -xf /run/media/"$USER"/YEDEK/blaze-backup/antigravity-state-backup.tar.zst -C "$HOME"
+  3) Antigravity'yi baslatin ve `$HOME/BlazeFedora` calisma alanini acin; onceki
+     konusma gecmisi, ogrenilmis kurallar ve eklenti ayarlari hazir olacaktir.
+     (Not: Yeni sistemde kullanici adiniz degistiyse eklenti yapilandirmalarindaki
+     mutlak yollar icin Senaryo B her zaman temiz yedek secenektir.)
+
+6.3 SENARYO B — Sifirdan Temiz Antigravity Oturumu ile Devam Etme:
+  Eger eski oturum gecmisini geri yuklemeden tamamen temiz bir kurulumla devam
+  etmek isterseniz:
+  1) `$HOME/BlazeFedora` klasorunu Antigravity icinde calisma alani olarak acin
+     (`AGENTS.md` otomatik olarak calisma alani kurali olarak yuklenir).
+  2) Ilk isteminizde Antigravity'ye su komutu verin:
+       "Lutfen once AGENTS.md ve BLAZE_CONTINUITY_HANDOFF.txt dosyalarini bastan
+       sona oku, ardindan git log -n 10 ile mevcut durumu dogrula ve hazir oldugunu
+       bildir."
+  Bu iki dosya sayesinde Antigravity tum mimari kurallari, guvenlik kirmizi
+  cizgilerini, paketleme yapisini ve QEMU dogrulama zorunluluklarini eksiksiz
+  devralacaktir.
+================================================================================

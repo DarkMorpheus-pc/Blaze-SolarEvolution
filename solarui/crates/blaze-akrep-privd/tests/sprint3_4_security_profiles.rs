@@ -2414,3 +2414,49 @@ async fn prf_11_public_profile_cache_status_is_0644_while_vault_stays_0600() {
         serde_json::from_str(&fs::read_to_string(&pub_path).unwrap()).unwrap();
     assert!(pub_after_rb["active_profile_id"].is_null());
 }
+
+#[tokio::test]
+async fn prf_12_preexisting_fedora_execstack_boolean_allows_profile_switch_without_mutation() {
+    let h = setup_sprint34_harness();
+    // Stock Fedora 45 selinux-policy-targeted ships selinuxuser_execstack = on out of the box.
+    h.selinux_ops
+        .set_boolean("selinuxuser_execstack", true, true)
+        .unwrap();
+
+    let dev_plan_raw = h.engine.preview_profile(":1.40", "developer").await.unwrap();
+    let dev_plan: ActionPlan = serde_json::from_str(&dev_plan_raw).unwrap();
+    let dev_rec = h
+        .engine
+        .commit_plan(":1.40", &dev_plan.plan_id, &dev_plan.plan_sha256)
+        .await
+        .unwrap();
+    assert_eq!(dev_rec.state, TransactionState::Committed);
+    assert_eq!(
+        h.selinux_ops
+            .read_boolean("selinuxuser_execstack")
+            .unwrap()
+            .unwrap()
+            .current,
+        true
+    );
+
+    let pub_plan_raw = h
+        .engine
+        .preview_profile(":1.40", "public-network")
+        .await
+        .unwrap();
+    let pub_plan: ActionPlan = serde_json::from_str(&pub_plan_raw).unwrap();
+    let pub_rec = h
+        .engine
+        .commit_plan(":1.40", &pub_plan.plan_id, &pub_plan.plan_sha256)
+        .await
+        .unwrap();
+    assert_eq!(pub_rec.state, TransactionState::Committed);
+
+    let rb_rec = h
+        .engine
+        .rollback_transaction(":1.40", &pub_rec.tx_id)
+        .await
+        .unwrap();
+    assert_eq!(rb_rec.state, TransactionState::RolledBack);
+}

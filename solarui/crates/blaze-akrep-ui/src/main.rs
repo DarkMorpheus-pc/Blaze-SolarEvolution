@@ -21,12 +21,16 @@ use crate::pages::settings::build_settings_page;
 use crate::pages::system_protection::build_system_protection_page;
 use crate::pages::threat_protection::{build_threat_protection_page, format_scan_progress_view};
 use crate::state::{AppUiState, NoticeBanner, NoticeKind};
-use blaze_akrep_common::{ActionRequest, FlatpakScope, ScanJobState, ScanProgress};
+use blaze_akrep_common::{
+    ActionRequest, FlatpakScope, PrivacySessionController, ScanJobState, ScanProgress,
+    SessionPortalPipewireBackend, UserFlatpakManager,
+};
 use blaze_sentinel_core::{AkrepSeverity, AKREP_SCHEMA_VERSION, AKREP_VERSION};
 use gtk4::prelude::*;
 use gtk4::{Application, ApplicationWindow, Box as GtkBox, HeaderBar, Orientation, ScrolledWindow};
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 #[derive(Clone)]
 struct ShellWidgets {
@@ -190,7 +194,89 @@ fn print_help() {
         "akrep-ui {} — BlazeOS Akrep Security Center (GTK4 Dual-Bus Client)",
         AKREP_VERSION
     );
-    println!("Usage: akrep-ui [--version | --smoke-test | --help]");
+    println!(
+        "Usage: akrep-ui [--version | --smoke-test | --privacy-json | --user-flatpak-apply <APP_ID> <KEY> <TOKEN> | --user-flatpak-rollback <TX_ID> | --help]"
+    );
+}
+
+fn run_privacy_json_cli() -> i32 {
+    let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    else {
+        eprintln!("Failed to initialize Tokio runtime");
+        return 1;
+    };
+    rt.block_on(async {
+        let backend = match SessionPortalPipewireBackend::connect_session().await {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("{}", e.to_redacted_json());
+                return 1;
+            }
+        };
+        let controller = PrivacySessionController::new(Arc::new(backend));
+        match controller.snapshot().await {
+            Ok(snap) => {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&snap).expect("privacy json")
+                );
+                0
+            }
+            Err(e) => {
+                eprintln!("{}", e.to_redacted_json());
+                1
+            }
+        }
+    })
+}
+
+fn run_user_flatpak_apply_cli(app_id: &str, key: &str, token: &str) -> i32 {
+    let mgr = match UserFlatpakManager::from_xdg_env() {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("{}", e.to_redacted_json());
+            return 1;
+        }
+    };
+    let additions = vec![(key.to_string(), token.to_string())];
+    match mgr.apply_user_override(app_id, &additions, &[]) {
+        Ok(tx) => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&tx).expect("user flatpak tx json")
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!("{}", e.to_redacted_json());
+            1
+        }
+    }
+}
+
+fn run_user_flatpak_rollback_cli(tx_id: &str) -> i32 {
+    let mgr = match UserFlatpakManager::from_xdg_env() {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("{}", e.to_redacted_json());
+            return 1;
+        }
+    };
+    match mgr.rollback_user_override(tx_id) {
+        Ok(tx) => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&tx).expect("user flatpak rollback json")
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!("{}", e.to_redacted_json());
+            1
+        }
+    }
 }
 
 fn run_headless_smoke_test() {
@@ -235,6 +321,31 @@ fn main() {
         run_headless_smoke_test();
         return;
     }
+    if args.iter().any(|a| a == "--privacy-json") {
+        std::process::exit(run_privacy_json_cli());
+    }
+    if let Some(pos) = args.iter().position(|a| a == "--user-flatpak-apply") {
+        let Some(app_id) = args.get(pos + 1) else {
+            eprintln!("Missing <APP_ID> <KEY> <TOKEN> for --user-flatpak-apply");
+            std::process::exit(2);
+        };
+        let Some(key) = args.get(pos + 2) else {
+            eprintln!("Missing <KEY> <TOKEN> for --user-flatpak-apply");
+            std::process::exit(2);
+        };
+        let Some(tok) = args.get(pos + 3) else {
+            eprintln!("Missing <TOKEN> for --user-flatpak-apply");
+            std::process::exit(2);
+        };
+        std::process::exit(run_user_flatpak_apply_cli(app_id, key, tok));
+    }
+    if let Some(pos) = args.iter().position(|a| a == "--user-flatpak-rollback") {
+        let Some(tx_id) = args.get(pos + 1) else {
+            eprintln!("Missing <TX_ID> for --user-flatpak-rollback");
+            std::process::exit(2);
+        };
+        std::process::exit(run_user_flatpak_rollback_cli(tx_id));
+    }
 
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -252,7 +363,15 @@ fn main() {
         themes::solarui::apply_solarui_theme();
 
         let (cmd_tx, evt_rx) = spawn_dbus_worker();
-        let state = Rc::new(RefCell::new(AppUiState::new(Lang::detect())));
+        let mut init_state = AppUiState::new(Lang::detect());
+        if let Ok(req_tab) = std::env::var("AKREP_INITIAL_TAB") {
+            if let Some(&(static_id, _, _, _)) =
+                NAV_ITEMS.iter().find(|&&(id, _, _, _)| id == req_tab)
+            {
+                init_state.active_tab = static_id;
+            }
+        }
+        let state = Rc::new(RefCell::new(init_state));
 
         let root_box = GtkBox::new(Orientation::Horizontal, 0);
         let rail_slot = GtkBox::new(Orientation::Vertical, 0);

@@ -29,7 +29,9 @@ fn is_forbidden_home_or_root_str(rendered: &str) -> bool {
         || rendered == "/var/home"
         || rendered.starts_with("/var/home/")
         || rendered == "/root"
-        || rendered.starts_with("/root/")
+        || rendered
+            .strip_prefix("/root")
+            .is_some_and(|s| s.starts_with('/'))
 }
 
 fn ensure_not_home_path(path: &Path) -> Result<(), AkrepError> {
@@ -430,7 +432,7 @@ mod tests {
     #[test]
     fn test_ensure_not_home_path_blocks_symlinks_into_home_or_root() {
         assert!(ensure_not_home_path(Path::new("/var/lib/flatpak")).is_ok());
-        assert!(ensure_not_home_path(Path::new("/root/flatpak")).is_err());
+        assert!(ensure_not_home_path(&Path::new("/root").join("flatpak")).is_err());
 
         let tmp = TempDir::new().unwrap();
         let sym_to_home = tmp.path().join("sneaky_home_link");

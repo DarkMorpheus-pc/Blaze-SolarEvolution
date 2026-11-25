@@ -458,11 +458,14 @@ pub fn is_forbidden_blanket_filesystem_grant(token: &str) -> bool {
         return true;
     }
 
+    if base.strip_prefix("/root").is_some_and(|s| s.starts_with('/')) {
+        return true;
+    }
+
     for sys_prefix in [
         "/etc/",
         "/usr/",
         "/boot/",
-        "/root/",
         "/proc/",
         "/sys/",
         "/dev/",

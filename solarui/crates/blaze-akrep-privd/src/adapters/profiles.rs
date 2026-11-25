@@ -675,6 +675,13 @@ impl MutationBackend for ProfileAdapter {
         let effective_zone = self.ensure_prerequisites_and_resolve_zone(&spec).await?;
         let prev_managed = self.load_managed_state()?;
 
+        let mut pre_forbidden_booleans: BTreeMap<String, bool> = BTreeMap::new();
+        for fb in &spec.forbidden_booleans {
+            if let Some(st) = self.selinux.ops().read_boolean(fb)? {
+                pre_forbidden_booleans.insert(fb.clone(), st.current);
+            }
+        }
+
         let tx_snap = ProfileTxSnapshot {
             previous_managed_state: prev_managed.clone(),
             target_profile_id: spec.id.clone(),
@@ -884,6 +891,7 @@ impl MutationBackend for ProfileAdapter {
                 "effective_zone": effective_zone,
                 "touched_booleans": touched_bools_vec,
                 "touched_zones": touched_zones_vec,
+                "pre_forbidden_booleans": pre_forbidden_booleans,
             }),
             summary: format!(
                 "Applied security profile '{}' (effective_zone={})",
@@ -952,10 +960,26 @@ impl MutationBackend for ProfileAdapter {
         }
 
         for fb in &spec.forbidden_booleans {
+            if live_managed
+                .managed_booleans
+                .iter()
+                .any(|mb| mb.name == *fb && mb.applied_value)
+            {
+                return Err(AkrepError::VerifyFailed(format!(
+                    "Forbidden SELinux boolean '{}' is managed as enabled!",
+                    fb
+                )));
+            }
+            let was_enabled_before = expected
+                .target_state
+                .get("pre_forbidden_booleans")
+                .and_then(|m| m.get(fb.as_str()))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             if let Some(st) = self.selinux.ops().read_boolean(fb)? {
-                if st.current {
+                if st.current && !was_enabled_before {
                     return Err(AkrepError::VerifyFailed(format!(
-                        "Forbidden SELinux boolean '{}' is enabled!",
+                        "Forbidden SELinux boolean '{}' was enabled during profile apply!",
                         fb
                     )));
                 }

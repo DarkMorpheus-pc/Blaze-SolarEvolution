@@ -17,7 +17,8 @@ OVERLAY="${BLAZEOS_ROOT:-$(pwd)}/blazeos_custom_apps"
 SOLARUI_SRC="${BLAZEOS_ROOT:-$(pwd)}/solarui"
 
 echo "=== [0/5] Building the current SolarUI controller ==="
-RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=${HOME}=/build" cargo build --manifest-path "$SOLARUI_SRC/Cargo.toml" --locked --release -p solar-shell -p solar-session -p solar-core -p blaze-recovery -p blaze-akrep-daemon -p blaze-akrep-ui
+RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=${HOME}=/build" cargo build --manifest-path "$SOLARUI_SRC/Cargo.toml" --locked --offline --release -p solar-shell -p solar-session -p solar-core -p blaze-recovery -p blaze-akrep-daemon -p blaze-akrep-privd -p blaze-akrep-ui
+strip --strip-unneeded "$SOLARUI_SRC/target/release/"{solar-shell,solar-session,solar-core,blaze-recovery,blaze-sentinel,akrepd,akrep-privd,akrep-ui}
 install -m 0755 "$SOLARUI_SRC/target/release/solar-shell" "$OVERLAY/usr/bin/solar-shell"
 install -m 0755 "$SOLARUI_SRC/target/release/solar-shell" "$OVERLAY/usr/bin/solar-settings"
 install -m 0755 "$SOLARUI_SRC/target/release/solar-session" "$OVERLAY/usr/bin/solar-session"
@@ -25,6 +26,7 @@ install -m 0755 "$SOLARUI_SRC/target/release/solar-core" "$OVERLAY/usr/bin/solar
 install -m 0755 "$SOLARUI_SRC/target/release/blaze-recovery" "$OVERLAY/usr/bin/blaze-recovery"
 install -m 0755 "$SOLARUI_SRC/target/release/blaze-sentinel" "$OVERLAY/usr/bin/blaze-sentinel"
 install -m 0755 "$SOLARUI_SRC/target/release/akrepd" "$OVERLAY/usr/bin/akrepd"
+install -m 0755 "$SOLARUI_SRC/target/release/akrep-privd" "$OVERLAY/usr/bin/akrep-privd"
 install -m 0755 "$SOLARUI_SRC/target/release/akrep-ui" "$OVERLAY/usr/bin/akrep-ui"
 SOLAR_SHELL_PROBE="$($OVERLAY/usr/bin/solar-shell switch __blazeos_build_probe__ 2>&1 || true)"
 if ! grep -q 'end4-pc' <<<"$SOLAR_SHELL_PROBE"; then
