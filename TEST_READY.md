@@ -4,11 +4,11 @@
 - **Framework**: Python 3 stdlib `unittest` + `socket` + `subprocess` + `json` + `PIL` (zero dependency on `pytest`, `tesseract`, or `socat`).
 - **Existing Regression & Unit Suite (fast, host-safe)**:
   ```bash
-  python3 -m unittest discover -s /home/darkmorpheus/BlazeFedora/tests -v
+  python3 -m unittest discover -s tests -v
   ```
 - **Rust Workspace Unit Tests**:
   ```bash
-  cargo test --manifest-path /home/darkmorpheus/BlazeFedora/solarui/Cargo.toml --workspace --offline
+  cargo test --manifest-path solarui/Cargo.toml --workspace --offline
   ```
 - **Tiered E2E Suite Commands**:
   - Dry-run environment check:

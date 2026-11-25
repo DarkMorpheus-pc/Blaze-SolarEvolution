@@ -137,13 +137,22 @@ fi
 
 mkdir -p "$DEST_DIR"
 DEST_ABS="$(cd "$DEST_DIR" && pwd)"
+case "${DEST_ABS}/" in
+    "${REPO_ROOT}/"*)
+        echo "[HATA] Hedef yedek dizini Git calisma alani (${REPO_ROOT}) disinda olmalidir." >&2
+        exit 2
+        ;;
+esac
 CHECKSUM_TARGETS=()
 
 echo "[1/6] Antigravity bellegi ve eklenti yapilandirmasi arsivleniyor (tar --zstd)..."
-tar --zstd -cf "${DEST_ABS}/antigravity-state-backup.tar.zst" \
-    --exclude='.gemini/antigravity/*.sock' \
-    --exclude='.gemini/antigravity/*.lock' \
-    -C "$HOME" "${AGY_REL_ITEMS[@]}"
+(
+    umask 0077
+    tar --zstd -cf "${DEST_ABS}/antigravity-state-backup.tar.zst" \
+        --exclude='.gemini/antigravity/*.sock' \
+        --exclude='.gemini/antigravity/*.lock' \
+        -C "$HOME" "${AGY_REL_ITEMS[@]}"
+)
 chmod 0600 "${DEST_ABS}/antigravity-state-backup.tar.zst"
 CHECKSUM_TARGETS+=("antigravity-state-backup.tar.zst")
 
@@ -151,9 +160,12 @@ if [[ -d "$SIGNING_DIR" ]]; then
     echo "[2/6] Blaze RPM EdDSA/GPG imzalama anahtarligi arsivleniyor (0600)..."
     SIGNING_PARENT="$(dirname "$SIGNING_DIR")"
     SIGNING_BASE="$(basename "$SIGNING_DIR")"
-    tar --zstd -cf "${DEST_ABS}/blaze-signing-keyring.tar.zst" \
-        --exclude='S.gpg-agent*' \
-        -C "$SIGNING_PARENT" "$SIGNING_BASE"
+    (
+        umask 0077
+        tar --zstd -cf "${DEST_ABS}/blaze-signing-keyring.tar.zst" \
+            --exclude='S.gpg-agent*' \
+            -C "$SIGNING_PARENT" "$SIGNING_BASE"
+    )
     chmod 0600 "${DEST_ABS}/blaze-signing-keyring.tar.zst"
     CHECKSUM_TARGETS+=("blaze-signing-keyring.tar.zst")
 else

@@ -12,7 +12,7 @@ Key principles:
 3. **Isolation & host safety**:
    - Never modifies `work_f45/`, `Blaze-SolarEvolution-5-x86_64(2026-11-11).iso`, or `f45_base/`.
    - Never touches or kills external QEMU processes (e.g. legacy `blaze-f45-stable-test` / `/tmp/blaze_test_qmp.sock`); uses PID-unique socket and temp directories (`/tmp/blaze_e2e_<pid>_*`).
-   - Gates heavy ISO-extraction suites (`BLAZE_RUN_E2E=1`) and live QEMU VM boots (`BLAZE_RUN_QEMU_E2E=1`) so `python3 -m unittest discover -s /home/darkmorpheus/BlazeFedora/tests -v` remains fast and non-destructive by default, while `python3 -m tests.e2e.run_e2e` unlocks requested tiers cleanly (and propagates `--iso` / `--artifacts-dir` / `--firmware` dynamically).
+   - Gates heavy ISO-extraction suites (`BLAZE_RUN_E2E=1`) and live QEMU VM boots (`BLAZE_RUN_QEMU_E2E=1`) so `python3 -m unittest discover -s tests -v` remains fast and non-destructive by default, while `python3 -m tests.e2e.run_e2e` unlocks requested tiers cleanly (and propagates `--iso` / `--artifacts-dir` / `--firmware` dynamically).
 
 ---
 
