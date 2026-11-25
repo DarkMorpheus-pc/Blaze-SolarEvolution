@@ -553,13 +553,34 @@ pub fn validate_scan_target_path(path_str: &str) -> Result<PathBuf, AkrepError> 
                 .to_string(),
         ));
     }
-    for forbidden in ["/proc", "/sys", "/dev", "/run", "/var/lib/akrep/quarantine"] {
+    for forbidden in [
+        "/proc",
+        "/sys",
+        "/dev",
+        "/run",
+        "/var/lib/akrep",
+        "/etc/sudoers.d",
+    ] {
         if path_str == forbidden || path_str.starts_with(&format!("{}/", forbidden)) {
             return Err(AkrepError::ForbiddenOperation(format!(
-                "Scanning virtual or quarantine path '{}' is forbidden",
+                "Scanning protected or virtual path '{}' is forbidden",
                 forbidden
             )));
         }
+    }
+    if matches!(
+        path_str,
+        "/etc/shadow"
+            | "/etc/shadow-"
+            | "/etc/gshadow"
+            | "/etc/gshadow-"
+            | "/etc/sudoers"
+            | "/etc/security/opasswd"
+    ) {
+        return Err(AkrepError::ForbiddenOperation(format!(
+            "Scanning sensitive credential file '{}' is forbidden",
+            path_str
+        )));
     }
     Ok(p.to_path_buf())
 }

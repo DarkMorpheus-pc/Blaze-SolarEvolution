@@ -1,11 +1,11 @@
 use blaze_akrep_common::{
-    build_cidr_port_rich_rule, is_rfc1918_ipv4_cidr, validate_clamd_endpoint, ActionPlan,
-    ActionRequest, AkrepError, DeviceSecurityStatus, FirewallProto, FlatpakScope,
-    MockFlatpakRuntimeProbe, ProfileCatalogResponse, QuarantineInventory, RulePersistence,
-    ScanJobState, ScanProgress, ScanRequest, ScanVerdict, ScannerEngineState, ScannerStatusReport,
-    SecureBootState, SecurityProfileSpec, SignatureFreshness, TransactionState,
-    POLKIT_PACKAGES_INSTALL, POLKIT_PROFILE_APPLY, POLKIT_QUARANTINE_MANAGE,
-    POLKIT_SELINUX_DIAGNOSE,
+    build_cidr_port_rich_rule, is_rfc1918_ipv4_cidr, validate_clamd_endpoint,
+    validate_scan_target_path, ActionPlan, ActionRequest, AkrepError, DeviceSecurityStatus,
+    FirewallProto, FlatpakScope, MockFlatpakRuntimeProbe, ProfileCatalogResponse,
+    QuarantineInventory, RulePersistence, ScanJobState, ScanProgress, ScanRequest, ScanVerdict,
+    ScannerEngineState, ScannerStatusReport, SecureBootState, SecurityProfileSpec,
+    SignatureFreshness, TransactionState, POLKIT_PACKAGES_INSTALL, POLKIT_PROFILE_APPLY,
+    POLKIT_QUARANTINE_MANAGE, POLKIT_SELINUX_DIAGNOSE,
 };
 use blaze_akrep_privd::{
     build_eicar_test_bytes, build_polkit_subject, decode_qpkg_and_hash, inspect_kernel_lockdown_at,
@@ -78,10 +78,11 @@ fn setup_harness_with_profiles_dir(profiles_dir: PathBuf) -> Sprint34Harness {
         Arc::new(MockFlatpakRuntimeProbe::new()),
     ));
     let device_security = Arc::new(DeviceSecurityAdapter::new(device_ops.clone()));
-    let scanner = Arc::new(ScannerAdapter::new(
+    let scanner = Arc::new(ScannerAdapter::with_options(
         state_dir.clone(),
         scanner_backend.clone(),
         installer_ops.clone(),
+        true,
     ));
     let quarantine = Arc::new(QuarantineAdapter::new_lazy(state_dir.clone()));
     let profiles = Arc::new(ProfileAdapter::with_paths(
@@ -102,7 +103,8 @@ fn setup_harness_with_profiles_dir(profiles_dir: PathBuf) -> Sprint34Harness {
     ));
 
     let engine =
-        TransactionEngine::new(state_dir.clone(), auth.clone(), composite).expect("engine init");
+        TransactionEngine::new_with_options(state_dir.clone(), auth.clone(), composite, true)
+            .expect("engine init");
 
     Sprint34Harness {
         root_tmp,
@@ -1947,4 +1949,420 @@ async fn sec_11_honest_unavailable_posture_never_falsely_protected() {
         .await
         .unwrap_err();
     assert!(matches!(prof_err, AkrepError::BackendUnavailable(_)));
+}
+
+// ============================================================================
+// Fix Round 1 Security & Reliability Regression Tests
+// ============================================================================
+
+#[test]
+fn reg_c1_privd_unit_allows_home_and_tmp_while_akrepd_stays_isolated() {
+    let systemd_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../blazeos_custom_apps/usr/lib/systemd/system")
+        .canonicalize()
+        .expect("systemd unit dir");
+    let privd_unit = fs::read_to_string(systemd_dir.join("akrep-privd.service")).unwrap();
+    assert!(privd_unit.contains("ProtectHome=no"));
+    assert!(privd_unit.contains("PrivateTmp=no"));
+    assert!(!privd_unit.contains("ProtectHome=yes"));
+    assert!(!privd_unit.contains("PrivateTmp=yes"));
+
+    let akrepd_unit = fs::read_to_string(systemd_dir.join("akrepd.service")).unwrap();
+    assert!(akrepd_unit.contains("ProtectHome=yes"));
+    assert!(akrepd_unit.contains("PrivateTmp=yes"));
+}
+
+#[tokio::test]
+async fn reg_c2_prod_engine_blocks_socket_override_sensitive_paths_and_untrusted_clamd_sockets() {
+    let tmp = TempDir::new().unwrap();
+    let state_dir = tmp.path().join("var_lib_akrep");
+    let sample = tmp.path().join("clean.txt");
+    fs::write(&sample, b"hello").unwrap();
+
+    let auth = Arc::new(MockAuthorizer::new());
+    auth.allow_all_for_bus(":1.40", 1000);
+
+    let selinux = Arc::new(SelinuxAdapter::new(Arc::new(
+        MockSelinuxOps::new_fedora_enforcing(),
+    )));
+    let firewall = Arc::new(FirewallAdapter::new(Arc::new(
+        MockFirewallBackend::new_fedora_workstation(),
+    )));
+    let flatpak = Arc::new(SystemFlatpakAdapter::with_roots(
+        tmp.path().join("fp"),
+        tmp.path().join("apps"),
+        Arc::new(MockFlatpakRuntimeProbe::new()),
+    ));
+    let dev_sec = Arc::new(DeviceSecurityAdapter::new(Arc::new(
+        MockDeviceSecurityOps::new_healthy_uefi(),
+    )));
+    let prod_scanner = Arc::new(ScannerAdapter::new(
+        state_dir.clone(),
+        Arc::new(MockClamScanner::new_healthy()),
+        Arc::new(MockScannerInstallerOps::new(false)),
+    ));
+    let quarantine = Arc::new(QuarantineAdapter::new_lazy(state_dir.clone()));
+    let profiles = Arc::new(ProfileAdapter::with_paths(
+        official_profiles_dir(),
+        state_dir.clone(),
+        selinux.clone(),
+        firewall.clone(),
+    ));
+    let composite = Arc::new(CompositeMutationBackend::new_full(
+        selinux,
+        firewall,
+        flatpak,
+        dev_sec,
+        prod_scanner.clone(),
+        quarantine,
+        profiles,
+    ));
+
+    // Production TransactionEngine::new() has allow_test_actions = false
+    let prod_engine = TransactionEngine::new(state_dir, auth, composite).unwrap();
+
+    let evil_req = ScanRequest {
+        target_path: sample.to_string_lossy().to_string(),
+        recursive: false,
+        socket_override: Some("/tmp/evil.sock".to_string()),
+        synchronous: true,
+    };
+    let err = prod_engine
+        .start_scan(":1.40", &serde_json::to_string(&evil_req).unwrap())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, AkrepError::ForbiddenOperation(_)));
+
+    // Direct production ScannerAdapter also rejects socket_override
+    let direct_err = prod_scanner.start_scan(evil_req, 1000).await.unwrap_err();
+    assert!(matches!(direct_err, AkrepError::ForbiddenOperation(_)));
+
+    // Sensitive credential & Akrep state paths blocked in validate_scan_target_path
+    for sensitive in [
+        "/etc/shadow",
+        "/etc/gshadow",
+        "/etc/sudoers",
+        "/etc/sudoers.d/wheel",
+        "/var/lib/akrep/audit.log",
+    ] {
+        assert!(matches!(
+            validate_scan_target_path(sensitive),
+            Err(AkrepError::ForbiddenOperation(_))
+        ));
+    }
+
+    // Strict production clamd socket metadata checks: world-writable (0666) or non-system uid >= 1000 rejected
+    let sock_path = tmp.path().join("untrusted.sock");
+    let _listener = UnixListener::bind(&sock_path).unwrap();
+    fs::set_permissions(&sock_path, fs::Permissions::from_mode(0o666)).unwrap();
+    let strict_scanner = ClamdUnixSocketScanner::with_config_strict(
+        &[sock_path.to_string_lossy().to_string()],
+        PathBuf::from("/nonexistent/clamscan"),
+        tmp.path().join("db"),
+        true,
+    )
+    .unwrap();
+    assert!(matches!(
+        strict_scanner.inspect_engine(),
+        Err(AkrepError::ForbiddenOperation(_))
+    ));
+
+    fs::set_permissions(&sock_path, fs::Permissions::from_mode(0o660)).unwrap();
+    // SAFETY: `geteuid` is thread-safe and infallible.
+    if unsafe { libc::geteuid() } >= 1000 {
+        assert!(matches!(
+            strict_scanner.inspect_engine(),
+            Err(AkrepError::ForbiddenOperation(_))
+        ));
+    }
+}
+
+#[tokio::test]
+async fn reg_i1_scanner_rejects_intermediate_directory_symlinks() {
+    let h = setup_sprint34_harness();
+
+    let sym_proc = h.work_dir.join("sym_proc");
+    symlink("/proc", &sym_proc).unwrap();
+    let proc_req = ScanRequest {
+        target_path: sym_proc.join("1/cmdline").to_string_lossy().to_string(),
+        recursive: false,
+        socket_override: None,
+        synchronous: true,
+    };
+    let err_proc = h
+        .engine
+        .start_scan(":1.40", &serde_json::to_string(&proc_req).unwrap())
+        .await
+        .unwrap_err();
+    assert!(matches!(err_proc, AkrepError::ForbiddenOperation(_)));
+
+    let q_dir = h.state_dir.join("quarantine");
+    let sym_q = h.work_dir.join("sym_q");
+    symlink(&q_dir, &sym_q).unwrap();
+    let q_req = ScanRequest {
+        target_path: sym_q.to_string_lossy().to_string(),
+        recursive: true,
+        socket_override: None,
+        synchronous: true,
+    };
+    let err_q = h
+        .engine
+        .start_scan(":1.40", &serde_json::to_string(&q_req).unwrap())
+        .await
+        .unwrap_err();
+    assert!(matches!(err_q, AkrepError::ForbiddenOperation(_)));
+}
+
+#[tokio::test]
+async fn reg_i2_active_background_scan_blocks_idle_expiry() {
+    let h = setup_sprint34_harness();
+    h.scanner_backend
+        .set_per_file_delay(Duration::from_millis(80));
+    for i in 0..10 {
+        fs::write(h.work_dir.join(format!("bg_{}.bin", i)), b"payload").unwrap();
+    }
+    assert!(!h.engine.has_active_background_jobs());
+
+    let req = ScanRequest {
+        target_path: h.work_dir.to_string_lossy().to_string(),
+        recursive: true,
+        socket_override: None,
+        synchronous: false,
+    };
+    let started: ScanProgress = serde_json::from_str(
+        &h.engine
+            .start_scan(":1.40", &serde_json::to_string(&req).unwrap())
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(h.engine.has_active_background_jobs());
+
+    let _ = h
+        .engine
+        .cancel_scan(":1.40", &started.job_id)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(120)).await;
+    assert!(!h.engine.has_active_background_jobs());
+}
+
+#[tokio::test]
+async fn reg_i3_mid_step2_profile_apply_failure_rolls_back_without_double_revert_or_leaked_rules() {
+    let h = setup_sprint34_harness();
+
+    // User adds custom port 8443/tcp, then applies `developer` profile
+    h.firewall_backend
+        .add_runtime_port("FedoraWorkstation", "8443", FirewallProto::Tcp, 0)
+        .await
+        .unwrap();
+
+    let dev_plan = h
+        .engine
+        .create_plan(
+            ":1.40",
+            ActionRequest::ApplyProfile {
+                profile_id: "developer".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    h.engine
+        .commit_plan(":1.40", &dev_plan.plan_id, &dev_plan.plan_sha256)
+        .await
+        .unwrap();
+    assert!(
+        h.selinux_ops
+            .read_boolean("container_manage_cgroup")
+            .unwrap()
+            .unwrap()
+            .current
+    );
+
+    // Prepare transition `developer -> gaming`, then inject failure after 2 of the 6 rich rules succeed
+    let game_plan = h
+        .engine
+        .create_plan(
+            ":1.40",
+            ActionRequest::ApplyProfile {
+                profile_id: "gaming".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    h.firewall_backend.set_fail_after_rich_rule_adds(Some(2));
+
+    let err = h
+        .engine
+        .commit_plan(":1.40", &game_plan.plan_id, &game_plan.plan_sha256)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, AkrepError::ApplyFailed(_)));
+
+    // Verify automatic rollback removed the 2 partial gaming rules, restored `developer` boolean, and preserved 8443/tcp!
+    let fw = h
+        .firewall_backend
+        .get_zone_state("FedoraWorkstation")
+        .await
+        .unwrap();
+    assert!(
+        fw.runtime_rich_rules.is_empty(),
+        "partial Step 2 rich rules must be cleaned up on rollback"
+    );
+    assert!(fw
+        .runtime_ports
+        .contains(&("8443".to_string(), "tcp".to_string())));
+    assert!(
+        h.selinux_ops
+            .read_boolean("container_manage_cgroup")
+            .unwrap()
+            .unwrap()
+            .current
+    );
+
+    let cat: ProfileCatalogResponse =
+        serde_json::from_str(&h.engine.list_profiles(":1.40").await.unwrap()).unwrap();
+    assert_eq!(cat.active_profile_id.as_deref(), Some("developer"));
+}
+
+#[tokio::test]
+async fn reg_i4_quarantine_restore_strips_suid_sgid_bits() {
+    let h = setup_sprint34_harness();
+    let suid_bin = h.work_dir.join("suid_candidate.bin");
+    fs::write(&suid_bin, b"BINARY_PAYLOAD").unwrap();
+    fs::set_permissions(&suid_bin, fs::Permissions::from_mode(0o4755)).unwrap();
+
+    let q_plan = h
+        .engine
+        .create_plan(
+            ":1.40",
+            ActionRequest::QuarantineFile {
+                path: suid_bin.to_string_lossy().to_string(),
+                threat_name: "Test.SuidCheck".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let q_rec = h
+        .engine
+        .commit_plan(":1.40", &q_plan.plan_id, &q_plan.plan_sha256)
+        .await
+        .unwrap();
+    let qid = q_rec
+        .target_state
+        .get("quarantine_id")
+        .and_then(|v| v.as_str())
+        .unwrap()
+        .to_string();
+
+    let r_plan = h
+        .engine
+        .create_plan(
+            ":1.40",
+            ActionRequest::RestoreQuarantine { quarantine_id: qid },
+        )
+        .await
+        .unwrap();
+    let r_rec = h
+        .engine
+        .commit_plan(":1.40", &r_plan.plan_id, &r_plan.plan_sha256)
+        .await
+        .unwrap();
+    assert_eq!(r_rec.state, TransactionState::Committed);
+
+    let restored_mode = fs::metadata(&suid_bin).unwrap().permissions().mode() & 0o7777;
+    assert_eq!(
+        restored_mode, 0o0755,
+        "RestoreQuarantine must strip S_ISUID/S_ISGID bits (expected 0755, got {:04o})",
+        restored_mode
+    );
+}
+
+#[tokio::test]
+async fn reg_m2_m3_m4_job_cap_quarantine_rollback_conflict_and_audit_actions() {
+    let h = setup_sprint34_harness();
+    let sample = h.work_dir.join("tiny.txt");
+    fs::write(&sample, b"ok").unwrap();
+
+    // M-2: Run 70 synchronous scans and verify old evicted job_ids do not grow unboundedly
+    let mut first_job_id = String::new();
+    let mut last_job_id = String::new();
+    for i in 0..70 {
+        let p: ScanProgress = serde_json::from_str(
+            &h.engine
+                .start_scan(
+                    ":1.40",
+                    &serde_json::to_string(&ScanRequest {
+                        target_path: sample.to_string_lossy().to_string(),
+                        recursive: false,
+                        socket_override: None,
+                        synchronous: true,
+                    })
+                    .unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        if i == 0 {
+            first_job_id = p.job_id;
+        } else if i == 69 {
+            last_job_id = p.job_id;
+        }
+    }
+    assert!(h
+        .engine
+        .get_scan_status(":1.40", &first_job_id)
+        .await
+        .is_err());
+    assert!(h
+        .engine
+        .get_scan_status(":1.40", &last_job_id)
+        .await
+        .is_ok());
+
+    // M-4: Verify get_scan_status / cancel_scan denials and inspect_device_security exact Polkit action audit
+    h.auth.deny_all_for_bus(":1.98", 1098);
+    let _ = h.engine.get_scan_status(":1.98", &last_job_id).await;
+    let _ = h.engine.cancel_scan(":1.98", &last_job_id).await;
+
+    h.auth
+        .allow_actions_for_bus(":1.97", 1097, [POLKIT_SELINUX_DIAGNOSE]);
+    let _ = h.engine.inspect_device_security(":1.97").await.unwrap();
+
+    let events = h.engine.audit().read_events().unwrap();
+    assert!(events.iter().any(|e| e.event == "scan_status_denied"));
+    assert!(events.iter().any(|e| e.event == "scan_cancel_denied"));
+    assert!(events.iter().any(|e| {
+        e.event == "device_security_inspect_completed"
+            && e.actor_bus_name.as_deref() == Some(":1.97")
+            && e.polkit_action.as_deref() == Some(POLKIT_SELINUX_DIAGNOSE)
+    }));
+
+    // M-3: Verify QuarantineAdapter::rollback surfaces conflict error instead of silent Ok if original_path reappeared
+    let m3_file = h.work_dir.join("m3_conflict.bin");
+    fs::write(&m3_file, b"M3_ORIG").unwrap();
+    let q_plan = h
+        .engine
+        .create_plan(
+            ":1.40",
+            ActionRequest::QuarantineFile {
+                path: m3_file.to_string_lossy().to_string(),
+                threat_name: "Test.M3".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let q_rec = h
+        .engine
+        .commit_plan(":1.40", &q_plan.plan_id, &q_plan.plan_sha256)
+        .await
+        .unwrap();
+
+    fs::write(&m3_file, b"BLOCKING_NEW_FILE").unwrap();
+    let q_adapter = QuarantineAdapter::new(h.state_dir.clone()).unwrap();
+    let snap_dir = h.engine.snapshots_dir().join(&q_rec.tx_id);
+    let rb_res = blaze_akrep_privd::MutationBackend::rollback(&q_adapter, &q_rec, &snap_dir).await;
+    assert!(matches!(rb_res, Err(AkrepError::RollbackFailed(_))));
+    assert_eq!(fs::read(&m3_file).unwrap(), b"BLOCKING_NEW_FILE");
 }

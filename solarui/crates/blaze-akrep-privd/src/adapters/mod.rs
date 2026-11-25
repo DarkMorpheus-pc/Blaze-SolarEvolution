@@ -394,4 +394,8 @@ impl MutationBackend for CompositeMutationBackend {
             .await
             .map_err(|e| AkrepError::Internal(format!("profiles list join error: {}", e)))?
     }
+
+    fn has_active_background_jobs(&self) -> bool {
+        self.scanner.has_active_scans()
+    }
 }

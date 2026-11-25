@@ -8,7 +8,8 @@ use blaze_akrep_common::{
     build_cidr_port_rich_rule, redact_secrets, ActionRequest, AkrepError, ManagedBooleanBaseline,
     ManagedInterfaceMove, ManagedProfileState, ManagedRemovedService, ManagedRichRuleEntry,
     PlanDiffItem, ProfileCatalogResponse, RiskLevel, SecurityProfileSpec, SecurityProfileSummary,
-    SelinuxRuntimeMode, StateFingerprint, TransactionRecord, OFFICIAL_PROFILE_IDS,
+    SelinuxRuntimeMode, StateFingerprint, TransactionRecord, TransactionState,
+    OFFICIAL_PROFILE_IDS,
 };
 use blaze_sentinel_core::sha256_hex;
 use chrono::Utc;
@@ -37,6 +38,12 @@ struct ProfileTxSnapshot {
     previous_managed_state: ManagedProfileState,
     target_profile_id: String,
     effective_zone: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ProfileAppliedProgress {
+    prev_reverted: bool,
+    applied_so_far: ManagedProfileState,
 }
 
 fn format_boolean_fp(state: &RawBooleanState) -> StateFingerprint {
@@ -597,6 +604,7 @@ impl MutationBackend for ProfileAdapter {
         // Step 1: Revert all previously Akrep-managed items cleanly without touching user rules
         self.revert_managed_items(&prev_managed).await?;
 
+        let applied_progress_path = snapshot_dir.join("profile_applied.json");
         let mut new_managed = ManagedProfileState {
             active_profile_id: Some(spec.id.clone()),
             effective_zone: Some(effective_zone.clone()),
@@ -606,6 +614,13 @@ impl MutationBackend for ProfileAdapter {
             moved_interfaces: Vec::new(),
             removed_runtime_services: Vec::new(),
         };
+        write_json_atomic_0600(
+            &applied_progress_path,
+            &ProfileAppliedProgress {
+                prev_reverted: true,
+                applied_so_far: new_managed.clone(),
+            },
+        )?;
 
         if !spec.clear_managed_rules {
             // Step 2a: Apply managed SELinux booleans
@@ -630,6 +645,13 @@ impl MutationBackend for ProfileAdapter {
                     applied_value: mb.value,
                     applied_persistent: mb.persistent,
                 });
+                write_json_atomic_0600(
+                    &applied_progress_path,
+                    &ProfileAppliedProgress {
+                        prev_reverted: true,
+                        applied_so_far: new_managed.clone(),
+                    },
+                )?;
             }
 
             // Step 2b: Apply RFC1918 LAN rich rules (claiming ownership ONLY of rules added by Akrep)
@@ -648,15 +670,33 @@ impl MutationBackend for ProfileAdapter {
                             .add_permanent_rich_rule(&effective_zone, &rule_str)
                             .await?;
                     }
-                    self.firewall
+                    if let Err(rt_err) = self
+                        .firewall
                         .backend()
                         .add_runtime_rich_rule(&effective_zone, &rule_str, 0)
-                        .await?;
+                        .await
+                    {
+                        if lr.permanent {
+                            let _ = self
+                                .firewall
+                                .backend()
+                                .remove_permanent_rich_rule(&effective_zone, &rule_str)
+                                .await;
+                        }
+                        return Err(rt_err);
+                    }
                     new_managed.managed_rich_rules.push(ManagedRichRuleEntry {
                         zone: effective_zone.clone(),
                         rule: rule_str,
                         permanent: lr.permanent,
                     });
+                    write_json_atomic_0600(
+                        &applied_progress_path,
+                        &ProfileAppliedProgress {
+                            prev_reverted: true,
+                            applied_so_far: new_managed.clone(),
+                        },
+                    )?;
                 }
             }
 
@@ -678,6 +718,13 @@ impl MutationBackend for ProfileAdapter {
                             prior_zone: z.clone(),
                             applied_zone: effective_zone.clone(),
                         });
+                        write_json_atomic_0600(
+                            &applied_progress_path,
+                            &ProfileAppliedProgress {
+                                prev_reverted: true,
+                                applied_so_far: new_managed.clone(),
+                            },
+                        )?;
                     }
                 }
             }
@@ -701,6 +748,13 @@ impl MutationBackend for ProfileAdapter {
                                 zone: effective_zone.clone(),
                                 service: svc.clone(),
                             });
+                        write_json_atomic_0600(
+                            &applied_progress_path,
+                            &ProfileAppliedProgress {
+                                prev_reverted: true,
+                                applied_so_far: new_managed.clone(),
+                            },
+                        )?;
                     }
                 }
             }
@@ -719,7 +773,13 @@ impl MutationBackend for ProfileAdapter {
             .removed_runtime_services
             .sort_by(|a, b| (&a.zone, &a.service).cmp(&(&b.zone, &b.service)));
 
-        write_json_atomic_0600(&snapshot_dir.join("profile_applied.json"), &new_managed)?;
+        write_json_atomic_0600(
+            &applied_progress_path,
+            &ProfileAppliedProgress {
+                prev_reverted: true,
+                applied_so_far: new_managed.clone(),
+            },
+        )?;
         self.save_managed_state(&new_managed)?;
 
         let (touched_bools, touched_zones) = self
@@ -925,17 +985,31 @@ impl MutationBackend for ProfileAdapter {
 
         let applied_snap_path = snapshot_dir.join("profile_applied.json");
         if applied_snap_path.is_file() {
-            if let Ok(raw) = fs::read_to_string(&applied_snap_path) {
-                if let Ok(applied_state) = serde_json::from_str::<ManagedProfileState>(&raw) {
-                    self.revert_managed_items(&applied_state)
+            let raw = fs::read_to_string(&applied_snap_path)
+                .map_err(|e| AkrepError::RollbackFailed(e.to_string()))?;
+            if let Ok(progress) = serde_json::from_str::<ProfileAppliedProgress>(&raw) {
+                if progress.prev_reverted {
+                    self.revert_managed_items(&progress.applied_so_far)
                         .await
                         .map_err(|e| AkrepError::RollbackFailed(e.message().to_string()))?;
                 }
+            } else if let Ok(legacy_state) = serde_json::from_str::<ManagedProfileState>(&raw) {
+                self.revert_managed_items(&legacy_state)
+                    .await
+                    .map_err(|e| AkrepError::RollbackFailed(e.message().to_string()))?;
+            } else {
+                return Err(AkrepError::RollbackFailed(
+                    "Corrupt profile_applied.json in transaction snapshot".to_string(),
+                ));
             }
-        } else if let Ok(live_managed) = self.load_managed_state() {
-            self.revert_managed_items(&live_managed)
-                .await
-                .map_err(|e| AkrepError::RollbackFailed(e.message().to_string()))?;
+        } else if record.state != TransactionState::RollingBack || record.apply_result.is_some() {
+            // Only revert live_managed if apply had actually completed; if Step 1 failed before
+            // profile_applied.json existed, rehydrating previous_managed_state below restores Step 1 cleanly.
+            if let Ok(live_managed) = self.load_managed_state() {
+                self.revert_managed_items(&live_managed)
+                    .await
+                    .map_err(|e| AkrepError::RollbackFailed(e.message().to_string()))?;
+            }
         }
 
         self.rehydrate_managed_state(&snap.previous_managed_state)

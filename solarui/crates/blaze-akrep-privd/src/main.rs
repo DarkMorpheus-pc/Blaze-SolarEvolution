@@ -139,10 +139,12 @@ async fn main() -> Result<()> {
                 break;
             }
             _ = ticker.tick(), if cfg.idle_timeout_secs > 0 => {
-                if idle.is_idle_expired(Duration::from_secs(cfg.idle_timeout_secs)) {
+                if engine.has_active_background_jobs() {
+                    idle.touch();
+                } else if idle.is_idle_expired(Duration::from_secs(cfg.idle_timeout_secs)) {
                     info!(
                         idle_timeout_secs = cfg.idle_timeout_secs,
-                        "akrep-privd idle timeout reached with zero active calls, exiting cleanly"
+                        "akrep-privd idle timeout reached with zero active calls or background jobs, exiting cleanly"
                     );
                     break;
                 }

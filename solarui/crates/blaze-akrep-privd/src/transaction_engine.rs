@@ -134,6 +134,10 @@ pub trait MutationBackend: Send + Sync {
             "Security profile backend is not wired on this MutationBackend".to_string(),
         ))
     }
+
+    fn has_active_background_jobs(&self) -> bool {
+        false
+    }
 }
 
 pub struct DefaultStubBackend;
@@ -397,6 +401,10 @@ impl TransactionEngine {
 
     pub fn authorizer(&self) -> &Arc<dyn Authorizer> {
         &self.authorizer
+    }
+
+    pub fn has_active_background_jobs(&self) -> bool {
+        self.backend.has_active_background_jobs()
     }
 
     fn persist_record_logged(&self, tx_path: &Path, record: &TransactionRecord, stage: &str) {
@@ -1464,18 +1472,18 @@ impl TransactionEngine {
         &self,
         caller_bus_name: &str,
     ) -> Result<String, AkrepError> {
-        let caller = match self
+        let (caller, used_polkit_action) = match self
             .authorizer
             .verify_caller(caller_bus_name, POLKIT_QUARANTINE_MANAGE, false)
             .await
         {
-            Ok(c) => c,
+            Ok(c) => (c, POLKIT_QUARANTINE_MANAGE),
             Err(_) => match self
                 .authorizer
                 .verify_caller(caller_bus_name, POLKIT_SELINUX_DIAGNOSE, true)
                 .await
             {
-                Ok(c) => c,
+                Ok(c) => (c, POLKIT_SELINUX_DIAGNOSE),
                 Err(err) => {
                     self.audit_logged(
                         "device_security_inspect_denied",
@@ -1504,7 +1512,7 @@ impl TransactionEngine {
             None,
             Some(caller.uid),
             Some(&caller.bus_name),
-            Some(POLKIT_SELINUX_DIAGNOSE),
+            Some(used_polkit_action),
             "ok",
             "Device security posture inspection completed",
         );
@@ -1610,6 +1618,21 @@ impl TransactionEngine {
             return Err(err.redacted());
         }
 
+        if req.socket_override.is_some() && !self.allow_test_actions {
+            let msg = "Custom clamd socket_override is forbidden on production D-Bus".to_string();
+            self.audit_logged(
+                "scan_rejected_redline",
+                None,
+                None,
+                Some(caller.uid),
+                Some(&caller.bus_name),
+                Some(POLKIT_QUARANTINE_MANAGE),
+                "rejected",
+                &msg,
+            );
+            return Err(AkrepError::ForbiddenOperation(msg));
+        }
+
         let progress = self
             .backend
             .start_scan(req, caller.uid)
@@ -1637,10 +1660,23 @@ impl TransactionEngine {
         job_id: &str,
     ) -> Result<String, AkrepError> {
         validate_record_id("job_id", job_id)?;
-        self.authorizer
+        if let Err(err) = self
+            .authorizer
             .verify_caller(caller_bus_name, POLKIT_QUARANTINE_MANAGE, true)
             .await
-            .map_err(|e| e.redacted())?;
+        {
+            self.audit_logged(
+                "scan_status_denied",
+                None,
+                None,
+                None,
+                Some(caller_bus_name),
+                Some(POLKIT_QUARANTINE_MANAGE),
+                "denied",
+                err.message(),
+            );
+            return Err(err.redacted());
+        }
 
         let progress = self
             .backend
@@ -1657,11 +1693,26 @@ impl TransactionEngine {
         job_id: &str,
     ) -> Result<String, AkrepError> {
         validate_record_id("job_id", job_id)?;
-        let caller = self
+        let caller = match self
             .authorizer
             .verify_caller(caller_bus_name, POLKIT_QUARANTINE_MANAGE, true)
             .await
-            .map_err(|e| e.redacted())?;
+        {
+            Ok(c) => c,
+            Err(err) => {
+                self.audit_logged(
+                    "scan_cancel_denied",
+                    None,
+                    None,
+                    None,
+                    Some(caller_bus_name),
+                    Some(POLKIT_QUARANTINE_MANAGE),
+                    "denied",
+                    err.message(),
+                );
+                return Err(err.redacted());
+            }
+        };
 
         let progress = self
             .backend

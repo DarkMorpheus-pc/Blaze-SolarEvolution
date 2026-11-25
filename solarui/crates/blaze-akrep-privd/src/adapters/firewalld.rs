@@ -1910,6 +1910,7 @@ struct MockFirewallInner {
     epoch: Instant,
     virtual_offset_secs: u64,
     simulate_stale_verify: bool,
+    fail_after_rich_rule_adds: Option<usize>,
 }
 
 impl MockFirewallInner {
@@ -1996,6 +1997,7 @@ impl MockFirewallBackend {
                 epoch: Instant::now(),
                 virtual_offset_secs: 0,
                 simulate_stale_verify: false,
+                fail_after_rich_rule_adds: None,
             }),
         }
     }
@@ -2036,6 +2038,13 @@ impl MockFirewallBackend {
                 expires_at_secs: None,
             });
         }
+    }
+
+    pub fn set_fail_after_rich_rule_adds(&self, count: Option<usize>) {
+        self.inner
+            .lock()
+            .expect("mock firewall mutex")
+            .fail_after_rich_rule_adds = count;
     }
 }
 
@@ -2257,6 +2266,15 @@ impl FirewallBackend for MockFirewallBackend {
         g.prune_all();
         if g.simulate_stale_verify {
             return Ok(());
+        }
+        if let Some(rem) = g.fail_after_rich_rule_adds {
+            if rem == 0 {
+                g.fail_after_rich_rule_adds = None;
+                return Err(AkrepError::ApplyFailed(
+                    "Simulated mid-apply rich rule failure".to_string(),
+                ));
+            }
+            g.fail_after_rich_rule_adds = Some(rem - 1);
         }
         let now = g.now_secs();
         let expires = if timeout_secs == 0 {

@@ -16,9 +16,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Read;
-use std::os::unix::fs::{FileTypeExt, OpenOptionsExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt};
+use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixStream as StdUnixStream;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
@@ -33,8 +34,112 @@ pub const DEFAULT_CLAMD_SOCKETS: &[&str] = &[
 pub const DEFAULT_CLAMSCAN_BIN: &str = "/usr/bin/clamscan";
 pub const DEFAULT_CLAMAV_DB_DIR: &str = "/var/lib/clamav";
 pub const SIGNATURE_FRESH_MAX_SECS: u64 = 7 * 86_400;
+pub const MAX_TRACKED_SCAN_JOBS: usize = 64;
 const INSTREAM_CHUNK_SIZE: usize = 32 * 1024;
 const MAX_SCAN_WALK_FILES: usize = 50_000;
+
+pub fn validate_unix_socket_metadata(
+    sock_path: &Path,
+    enforce_system_owner: bool,
+) -> Result<(), AkrepError> {
+    let meta = fs::symlink_metadata(sock_path)?;
+    if meta.file_type().is_symlink() {
+        return Err(AkrepError::ForbiddenOperation(format!(
+            "Symlink clamd socket path '{}' is forbidden",
+            sock_path.display()
+        )));
+    }
+    if !meta.file_type().is_socket() {
+        return Err(AkrepError::ForbiddenOperation(format!(
+            "Refusing non-socket clamd path '{}'",
+            sock_path.display()
+        )));
+    }
+    if enforce_system_owner {
+        let mode = meta.mode() & 0o777;
+        if (mode & 0o002) != 0 {
+            return Err(AkrepError::ForbiddenOperation(format!(
+                "Refusing world-writable clamd socket '{}' (mode {:04o})",
+                sock_path.display(),
+                mode
+            )));
+        }
+        if meta.uid() >= 1000 {
+            return Err(AkrepError::ForbiddenOperation(format!(
+                "Refusing non-system clamd socket '{}' owned by uid={}",
+                sock_path.display(),
+                meta.uid()
+            )));
+        }
+    }
+    Ok(())
+}
+
+pub fn resolve_and_validate_scan_path(
+    raw_target: &str,
+    state_dir: Option<&Path>,
+) -> Result<PathBuf, AkrepError> {
+    let target = validate_scan_target_path(raw_target)?;
+    if let Some(sd) = state_dir {
+        if target == sd || target.starts_with(sd) {
+            return Err(AkrepError::ForbiddenOperation(
+                "Scanning inside Akrep state directory is forbidden".to_string(),
+            ));
+        }
+    }
+
+    let mut cur = PathBuf::from("/");
+    for comp in target.components() {
+        if let Component::Normal(seg) = comp {
+            cur.push(seg);
+            let meta = fs::symlink_metadata(&cur).map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    AkrepError::InvalidInput(format!(
+                        "Scan target_path '{}' does not exist",
+                        raw_target
+                    ))
+                } else {
+                    AkrepError::from(e)
+                }
+            })?;
+            if meta.file_type().is_symlink() {
+                return Err(AkrepError::ForbiddenOperation(format!(
+                    "Symlink component '{}' in scan path is forbidden",
+                    cur.display()
+                )));
+            }
+        }
+    }
+
+    let canon = fs::canonicalize(&target).map_err(|_| {
+        AkrepError::InvalidInput(format!("Scan target_path '{}' does not exist", raw_target))
+    })?;
+    let _ = validate_scan_target_path(&canon.to_string_lossy())?;
+
+    if let Some(sd) = state_dir {
+        if canon == sd || canon.starts_with(sd) {
+            return Err(AkrepError::ForbiddenOperation(
+                "Scanning inside Akrep state directory is forbidden".to_string(),
+            ));
+        }
+        if let Ok(canon_sd) = fs::canonicalize(sd) {
+            if canon == canon_sd || canon.starts_with(&canon_sd) {
+                return Err(AkrepError::ForbiddenOperation(
+                    "Scanning inside canonical Akrep state directory is forbidden".to_string(),
+                ));
+            }
+        }
+    }
+
+    let root_meta = fs::symlink_metadata(&canon)?;
+    if !root_meta.file_type().is_file() && !root_meta.file_type().is_dir() {
+        return Err(AkrepError::ForbiddenOperation(
+            "Scan target_path must be a regular file or directory".to_string(),
+        ));
+    }
+
+    Ok(canon)
+}
 
 pub fn parse_cvd_header_version(header: &[u8]) -> Option<u32> {
     let text = std::str::from_utf8(header).ok()?;
@@ -202,6 +307,7 @@ pub struct ClamdUnixSocketScanner {
     socket_paths: Vec<PathBuf>,
     clamscan_bin: PathBuf,
     db_dir: PathBuf,
+    enforce_system_socket_ownership: bool,
 }
 
 impl ClamdUnixSocketScanner {
@@ -210,6 +316,7 @@ impl ClamdUnixSocketScanner {
             socket_paths: DEFAULT_CLAMD_SOCKETS.iter().map(PathBuf::from).collect(),
             clamscan_bin: PathBuf::from(DEFAULT_CLAMSCAN_BIN),
             db_dir: PathBuf::from(DEFAULT_CLAMAV_DB_DIR),
+            enforce_system_socket_ownership: true,
         }
     }
 
@@ -217,6 +324,15 @@ impl ClamdUnixSocketScanner {
         socket_endpoints: &[String],
         clamscan_bin: PathBuf,
         db_dir: PathBuf,
+    ) -> Result<Self, AkrepError> {
+        Self::with_config_strict(socket_endpoints, clamscan_bin, db_dir, false)
+    }
+
+    pub fn with_config_strict(
+        socket_endpoints: &[String],
+        clamscan_bin: PathBuf,
+        db_dir: PathBuf,
+        enforce_system_socket_ownership: bool,
     ) -> Result<Self, AkrepError> {
         let mut socket_paths = Vec::with_capacity(socket_endpoints.len());
         for ep in socket_endpoints {
@@ -226,18 +342,23 @@ impl ClamdUnixSocketScanner {
             socket_paths,
             clamscan_bin,
             db_dir,
+            enforce_system_socket_ownership,
         })
     }
 
-    fn find_listening_unix_socket(&self) -> Result<Option<PathBuf>, AkrepError> {
+    fn probe_listening_unix_socket(&self) -> Result<Option<PathBuf>, AkrepError> {
         for candidate in &self.socket_paths {
             let cand_str = candidate.to_string_lossy();
             let validated = validate_clamd_endpoint(&cand_str)?;
-            let Ok(meta) = fs::symlink_metadata(&validated) else {
-                continue;
-            };
-            if !meta.file_type().is_socket() {
-                continue;
+            match fs::symlink_metadata(&validated) {
+                Ok(_) => {
+                    validate_unix_socket_metadata(
+                        &validated,
+                        self.enforce_system_socket_ownership,
+                    )?;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(AkrepError::from(e)),
             }
             if StdUnixStream::connect(&validated).is_ok() {
                 return Ok(Some(validated));
@@ -246,26 +367,18 @@ impl ClamdUnixSocketScanner {
         Ok(None)
     }
 
-    async fn scan_via_unix_socket(
-        sock_path: &Path,
+    async fn stream_file_over_unix_socket(
+        mut stream: UnixStream,
         target_file: &Path,
         cancel: &AtomicBool,
     ) -> Result<ScanVerdict, AkrepError> {
-        let validated_sock = validate_clamd_endpoint(&sock_path.to_string_lossy())?;
-        let sock_meta = fs::symlink_metadata(&validated_sock)?;
-        if !sock_meta.file_type().is_socket() {
-            return Err(AkrepError::ForbiddenOperation(format!(
-                "Refusing non-socket clamd path '{}'",
-                validated_sock.display()
-            )));
-        }
-
         let target_owned = target_file.to_path_buf();
         let mut file = tokio::task::spawn_blocking(move || {
+            let canon = resolve_and_validate_scan_path(&target_owned.to_string_lossy(), None)?;
             let f = OpenOptions::new()
                 .read(true)
                 .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-                .open(&target_owned)
+                .open(&canon)
                 .map_err(|e| {
                     if e.raw_os_error() == Some(libc::ELOOP) {
                         AkrepError::ForbiddenOperation(
@@ -281,12 +394,14 @@ impl ClamdUnixSocketScanner {
                     "Non-regular file rejected by scanner".to_string(),
                 ));
             }
+            if let Ok(fd_target) = fs::read_link(format!("/proc/self/fd/{}", f.as_raw_fd())) {
+                let _ = validate_scan_target_path(&fd_target.to_string_lossy())?;
+            }
             Ok::<fs::File, AkrepError>(f)
         })
         .await
         .map_err(|e| AkrepError::Internal(format!("file open join error: {}", e)))??;
 
-        let mut stream = UnixStream::connect(&validated_sock).await?;
         stream.write_all(b"zINSTREAM\0").await?;
 
         let mut early_close = false;
@@ -384,7 +499,8 @@ impl ClamdUnixSocketScanner {
         let target = target_file.to_path_buf();
 
         tokio::task::spawn_blocking(move || {
-            let meta = fs::symlink_metadata(&target)?;
+            let canon_target = resolve_and_validate_scan_path(&target.to_string_lossy(), None)?;
+            let meta = fs::symlink_metadata(&canon_target)?;
             if !meta.file_type().is_file() {
                 return Err(AkrepError::ForbiddenOperation(
                     "Non-regular or symlink target rejected by clamscan fallback".to_string(),
@@ -402,7 +518,7 @@ impl ClamdUnixSocketScanner {
 
             cmd.arg(format!("--database={}", db.display()))
                 .args(["--no-summary", "--stdout", "--"])
-                .arg(&target);
+                .arg(&canon_target);
 
             let out = cmd.output()?;
             let stdout = String::from_utf8_lossy(&out.stdout);
@@ -432,7 +548,7 @@ impl ClamdUnixSocketScanner {
 impl AvScanBackend for ClamdUnixSocketScanner {
     fn inspect_engine(&self) -> Result<(ScannerEngineState, SignatureDbStatus), AkrepError> {
         let sig_db = inspect_signature_db_at(&self.db_dir, SystemTime::now());
-        if let Some(sock) = self.find_listening_unix_socket()? {
+        if let Some(sock) = self.probe_listening_unix_socket()? {
             return Ok((
                 ScannerEngineState::ClamdSocket {
                     socket_path: sock.to_string_lossy().to_string(),
@@ -463,9 +579,35 @@ impl AvScanBackend for ClamdUnixSocketScanner {
         path: &Path,
         cancel: &AtomicBool,
     ) -> Result<ScanVerdict, AkrepError> {
-        if let Some(sock) = self.find_listening_unix_socket()? {
-            return Self::scan_via_unix_socket(&sock, path, cancel).await;
+        for candidate in &self.socket_paths {
+            let validated = validate_clamd_endpoint(&candidate.to_string_lossy())?;
+            match fs::symlink_metadata(&validated) {
+                Ok(_) => {
+                    validate_unix_socket_metadata(
+                        &validated,
+                        self.enforce_system_socket_ownership,
+                    )?;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(AkrepError::from(e)),
+            }
+
+            match UnixStream::connect(&validated).await {
+                Ok(stream) => {
+                    return Self::stream_file_over_unix_socket(stream, path, cancel).await;
+                }
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
+                    ) =>
+                {
+                    continue;
+                }
+                Err(e) => return Err(AkrepError::from(e)),
+            }
         }
+
         let sig_db = inspect_signature_db_at(&self.db_dir, SystemTime::now());
         if self.clamscan_bin.is_file() && sig_db.availability == Availability::Available {
             return Self::scan_via_clamscan_cli(&self.clamscan_bin, &self.db_dir, path, cancel)
@@ -719,6 +861,7 @@ pub struct ScannerAdapter {
     installer: Arc<dyn ScannerInstallerOps>,
     jobs: Arc<Mutex<HashMap<String, Arc<ScanJobHandle>>>>,
     history_lock: Arc<Mutex<()>>,
+    allow_test_socket_override: bool,
 }
 
 impl ScannerAdapter {
@@ -727,21 +870,38 @@ impl ScannerAdapter {
         backend: Arc<dyn AvScanBackend>,
         installer: Arc<dyn ScannerInstallerOps>,
     ) -> Self {
+        Self::with_options(state_dir, backend, installer, false)
+    }
+
+    pub fn with_options(
+        state_dir: PathBuf,
+        backend: Arc<dyn AvScanBackend>,
+        installer: Arc<dyn ScannerInstallerOps>,
+        allow_test_socket_override: bool,
+    ) -> Self {
         Self {
             state_dir,
             backend,
             installer,
             jobs: Arc::new(Mutex::new(HashMap::new())),
             history_lock: Arc::new(Mutex::new(())),
+            allow_test_socket_override,
         }
     }
 
     pub fn new_system(state_dir: PathBuf) -> Self {
-        Self::new(
+        Self::with_options(
             state_dir,
             Arc::new(ClamdUnixSocketScanner::new_system()),
             Arc::new(LinuxScannerInstallerOps),
+            false,
         )
+    }
+
+    pub fn has_active_scans(&self) -> bool {
+        let jobs = self.jobs.lock().expect("scan jobs mutex");
+        jobs.values()
+            .any(|h| h.progress.lock().expect("progress mutex").state == ScanJobState::Running)
     }
 
     pub fn history_path(&self) -> PathBuf {
@@ -804,14 +964,13 @@ impl ScannerAdapter {
         actor_uid: u32,
     ) -> Result<ScanProgress, AkrepError> {
         req.validate_red_lines()?;
-        let target_path = validate_scan_target_path(&req.target_path)?;
-
-        let local_quarantine = self.state_dir.join("quarantine");
-        if target_path == local_quarantine || target_path.starts_with(&local_quarantine) {
+        if req.socket_override.is_some() && !self.allow_test_socket_override {
             return Err(AkrepError::ForbiddenOperation(
-                "Scanning inside Akrep quarantine vault is forbidden".to_string(),
+                "Custom clamd socket_override is forbidden on production scanner".to_string(),
             ));
         }
+        let target_path = resolve_and_validate_scan_path(&req.target_path, Some(&self.state_dir))?;
+        let local_quarantine = self.state_dir.join("quarantine");
 
         let scan_backend: Arc<dyn AvScanBackend> = if let Some(sock_override) = &req.socket_override
         {
@@ -831,23 +990,6 @@ impl ScannerAdapter {
                 "Optional ClamAV scanner is not installed (install optional packages: {})",
                 install_hint
             )));
-        }
-
-        let root_meta = fs::symlink_metadata(&target_path).map_err(|_| {
-            AkrepError::InvalidInput(format!(
-                "Scan target_path '{}' does not exist",
-                req.target_path
-            ))
-        })?;
-        if root_meta.file_type().is_symlink() {
-            return Err(AkrepError::ForbiddenOperation(
-                "Scanning symlink target directly is forbidden".to_string(),
-            ));
-        }
-        if !root_meta.file_type().is_file() && !root_meta.file_type().is_dir() {
-            return Err(AkrepError::ForbiddenOperation(
-                "Scan target_path must be a regular file or directory".to_string(),
-            ));
         }
 
         let job_id = generate_uuid_v4()?;
@@ -873,6 +1015,32 @@ impl ScannerAdapter {
         });
         {
             let mut jobs = self.jobs.lock().expect("scan jobs mutex");
+            if jobs.len() >= MAX_TRACKED_SCAN_JOBS {
+                let mut terminal_ids: Vec<(String, String)> = jobs
+                    .iter()
+                    .filter_map(|(id, h)| {
+                        let p = h.progress.lock().expect("progress mutex");
+                        if p.state != ScanJobState::Running {
+                            Some((id.clone(), p.started_at.clone()))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                terminal_ids.sort_by(|a, b| a.1.cmp(&b.1));
+                for (evict_id, _) in terminal_ids {
+                    if jobs.len() < MAX_TRACKED_SCAN_JOBS {
+                        break;
+                    }
+                    jobs.remove(&evict_id);
+                }
+                if jobs.len() >= MAX_TRACKED_SCAN_JOBS {
+                    return Err(AkrepError::TransactionConflict(format!(
+                        "Maximum concurrent scan jobs ({}) reached",
+                        MAX_TRACKED_SCAN_JOBS
+                    )));
+                }
+            }
             jobs.insert(job_id.clone(), Arc::clone(&handle));
         }
 

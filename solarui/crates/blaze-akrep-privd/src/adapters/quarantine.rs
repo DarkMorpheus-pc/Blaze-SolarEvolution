@@ -450,8 +450,9 @@ fn set_selinux_xattr_fd(fd: i32, ctx: &str) -> Result<(), AkrepError> {
 }
 
 fn fchmod_fd(fd: i32, mode: u32) -> Result<(), AkrepError> {
+    // Strip S_ISUID, S_ISGID, and S_ISVTX bits unconditionally so quarantine operations can never create setuid/setgid files.
     // SAFETY: `fd` is a valid open file descriptor.
-    let rc = unsafe { libc::fchmod(fd, (mode & 0o7777) as libc::mode_t) };
+    let rc = unsafe { libc::fchmod(fd, (mode & 0o0777) as libc::mode_t) };
     if rc != 0 {
         return Err(AkrepError::from(std::io::Error::last_os_error()));
     }
@@ -1084,7 +1085,7 @@ impl QuarantineAdapter {
             }
         }
 
-        if let Err(e) = fchmod_fd(tmp_file.as_raw_fd(), meta.original_mode) {
+        if let Err(e) = fchmod_fd(tmp_file.as_raw_fd(), meta.original_mode & 0o0777) {
             drop(tmp_file);
             unsafe {
                 let _ = libc::unlinkat(parent_fd.as_raw_fd(), tmp_c.as_ptr(), 0);
@@ -1210,7 +1211,7 @@ impl QuarantineAdapter {
                         current_value: format!("quarantined ({})", quarantine_id),
                         desired_value: format!(
                             "restored (mode {:04o}, sha256={})",
-                            meta.original_mode & 0o7777,
+                            meta.original_mode & 0o0777,
                             &meta.sha256[..12]
                         ),
                         description_tr: format!(
@@ -1453,7 +1454,12 @@ impl QuarantineAdapter {
                     .and_then(|n| n.to_str())
                     .ok_or_else(|| AkrepError::VerifyFailed("Invalid leaf".to_string()))?;
                 let parent_fd = open_parent_dir_nofollow(parent, &self.vault_dir)?;
-                let (restored_file, _st) = open_regular_file_at_nofollow(&parent_fd, leaf)?;
+                let (restored_file, restored_st) = open_regular_file_at_nofollow(&parent_fd, leaf)?;
+                if (restored_st.st_mode & 0o6000) != 0 {
+                    return Err(AkrepError::VerifyFailed(
+                        "Restored file unexpectedly retained setuid/setgid mode bits".to_string(),
+                    ));
+                }
                 let actual_sha = hash_open_file(&restored_file)?;
                 if actual_sha != meta.sha256 {
                     return Err(AkrepError::VerifyFailed(format!(
@@ -1524,10 +1530,10 @@ impl QuarantineAdapter {
 
         match snap.op.as_str() {
             "quarantine" => {
-                if self.qpkg_path(&snap.quarantine_id).is_file()
-                    && !Path::new(&snap.original_path).exists()
-                {
-                    let _ = self.restore_quarantine_sync(&snap.quarantine_id, true)?;
+                if self.qpkg_path(&snap.quarantine_id).is_file() {
+                    let _ = self
+                        .restore_quarantine_sync(&snap.quarantine_id, true)
+                        .map_err(|e| AkrepError::RollbackFailed(e.message().to_string()))?;
                 }
                 Ok(format!(
                     "Rolled back quarantine '{}' and restored '{}'",
