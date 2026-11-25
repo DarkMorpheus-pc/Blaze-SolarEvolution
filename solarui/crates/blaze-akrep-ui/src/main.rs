@@ -8,7 +8,7 @@ mod themes;
 use crate::components::header_banner::{build_header_banner, HeaderBannerCallbacks};
 use crate::components::nav_rail::{build_nav_rail, NAV_ITEMS};
 use crate::components::plan_dialog::present_plan_preview_dialog;
-use crate::dbus_client::{spawn_dbus_worker, UiCommand, UiEvent};
+use crate::dbus_client::{dispatch_cmd, spawn_dbus_worker, UiCommand, UiEvent};
 use crate::i18n::Lang;
 use crate::pages::applications::build_applications_page;
 use crate::pages::device_security::build_device_security_page;
@@ -19,8 +19,9 @@ use crate::pages::privacy::build_privacy_page;
 use crate::pages::profiles::build_profiles_page;
 use crate::pages::settings::build_settings_page;
 use crate::pages::system_protection::build_system_protection_page;
-use crate::pages::threat_protection::build_threat_protection_page;
+use crate::pages::threat_protection::{build_threat_protection_page, format_scan_progress_view};
 use crate::state::{AppUiState, NoticeBanner, NoticeKind};
+use blaze_akrep_common::{ActionRequest, FlatpakScope, ScanJobState, ScanProgress};
 use blaze_sentinel_core::{AkrepSeverity, AKREP_SCHEMA_VERSION, AKREP_VERSION};
 use gtk4::prelude::*;
 use gtk4::{Application, ApplicationWindow, Box as GtkBox, HeaderBar, Orientation, ScrolledWindow};
@@ -33,6 +34,23 @@ struct ShellWidgets {
     rail_slot: GtkBox,
     banner_slot: GtkBox,
     scroller: ScrolledWindow,
+}
+
+pub fn should_update_scan_in_place(
+    prev: Option<&ScanProgress>,
+    next: &ScanProgress,
+    has_live_widgets: bool,
+) -> bool {
+    if !has_live_widgets || next.state != ScanJobState::Running {
+        return false;
+    }
+    let Some(p) = prev else {
+        return false;
+    };
+    p.state == ScanJobState::Running
+        && p.job_id == next.job_id
+        && p.findings.len() == next.findings.len()
+        && p.error_message == next.error_message
 }
 
 fn clear_box(container: &GtkBox) {
@@ -53,6 +71,7 @@ fn render_chrome(
     let active_tab = st.active_tab;
     let lang = st.lang;
     let snap = st.snapshot.clone();
+    let (_, active_prof_tr, active_prof_en) = st.effective_active_profile();
     let offline = st.offline_reason.clone();
     let notice = st.notice.clone();
     drop(st);
@@ -83,12 +102,13 @@ fn render_chrome(
 
     let banner = build_header_banner(
         snap.as_ref(),
+        (&active_prof_tr, &active_prof_en),
         offline.as_deref(),
         notice.as_ref(),
         lang,
         HeaderBannerCallbacks {
             on_refresh: Box::new(move || {
-                let _ = cmd_refresh.send_blocking(UiCommand::Refresh);
+                dispatch_cmd(&cmd_refresh, UiCommand::Refresh);
             }),
             on_toggle_lang: Box::new(move || {
                 {
@@ -115,7 +135,14 @@ fn render_page(
     state: &Rc<RefCell<AppUiState>>,
     cmd_tx: &async_channel::Sender<UiCommand>,
 ) {
-    let active_tab = state.borrow().active_tab;
+    let active_tab = {
+        let mut st = state.borrow_mut();
+        if st.active_tab != "threat_protection" {
+            st.live_scan_widgets = None;
+            st.live_scan_path_entry = None;
+        }
+        st.active_tab
+    };
 
     let w_nav = widgets.clone();
     let st_nav = Rc::clone(state);
@@ -140,7 +167,7 @@ fn render_page(
         "applications" => build_applications_page(state, cmd_tx, on_rerender),
         "device_security" => build_device_security_page(state, cmd_tx),
         "privacy" => build_privacy_page(state, cmd_tx),
-        "profiles" => build_profiles_page(state, cmd_tx),
+        "profiles" => build_profiles_page(state, cmd_tx, &widgets.window, on_rerender),
         "history" => build_history_page(state, cmd_tx),
         "settings" => build_settings_page(state, cmd_tx, on_rerender),
         _ => build_overview_page(state, on_select),
@@ -272,11 +299,10 @@ fn main() {
 
         let cmd_close = cmd_tx.clone();
         window.connect_close_request(move |_| {
-            let _ = cmd_close.send_blocking(UiCommand::Stop);
+            dispatch_cmd(&cmd_close, UiCommand::Stop);
             gtk4::glib::Propagation::Proceed
         });
 
-        // Receive all background D-Bus & user-session updates strictly on GTK main thread via spawn_local
         let st_ev = Rc::clone(&state);
         let w_ev = widgets.clone();
         let cmd_ev = cmd_tx.clone();
@@ -321,7 +347,22 @@ fn main() {
                         if is_profile_preview && st_ev.borrow().active_tab == "profiles" {
                             render_page(&w_ev, &st_ev, &cmd_ev);
                         }
-                        present_plan_preview_dialog(&w_ev.window, &plan, lang, cmd_ev.clone());
+                        let w_cancel = w_ev.clone();
+                        let st_cancel = Rc::clone(&st_ev);
+                        let cmd_cancel = cmd_ev.clone();
+                        let on_cancel: Rc<dyn Fn()> = Rc::new(move || {
+                            if st_cancel.borrow().active_tab == "profiles" {
+                                render_page(&w_cancel, &st_cancel, &cmd_cancel);
+                            }
+                        });
+                        present_plan_preview_dialog(
+                            &w_ev.window,
+                            &st_ev,
+                            &plan,
+                            lang,
+                            cmd_ev.clone(),
+                            Some(on_cancel),
+                        );
                     }
                     UiEvent::TransactionCommitted(rec) => {
                         {
@@ -339,11 +380,23 @@ fn main() {
                                     rec.tx_id, sum_en
                                 ),
                             });
-                            if matches!(
-                                rec.request,
-                                blaze_akrep_common::ActionRequest::ApplyProfile { .. }
-                            ) {
+                            if matches!(rec.request, ActionRequest::ApplyProfile { .. }) {
                                 st.last_profile_preview = None;
+                            }
+                            if let ActionRequest::FlatpakSetOverride {
+                                ref app_id,
+                                scope: FlatpakScope::System,
+                                ..
+                            } = rec.request
+                            {
+                                let is_running = st
+                                    .app_inventory
+                                    .as_ref()
+                                    .and_then(|inv| inv.find_flatpak(app_id, FlatpakScope::System))
+                                    .is_some_and(|a| a.running);
+                                if is_running {
+                                    st.apps_draft.restart_needed_app = Some(app_id.clone());
+                                }
                             }
                             st.history_records.retain(|r| r.tx_id != rec.tx_id);
                             st.history_records.insert(0, *rec);
@@ -395,8 +448,29 @@ fn main() {
                             render_page(&w_ev, &st_ev, &cmd_ev);
                         }
                     }
-                    UiEvent::SystemFlatpaksInspected(_snap) => {
-                        let _ = cmd_ev.send(UiCommand::RefreshUserApplications).await;
+                    UiEvent::SystemFlatpaksInspected(snap) => {
+                        let count = snap.apps.len();
+                        {
+                            let mut st = st_ev.borrow_mut();
+                            st.privileged_system_apps = Some(snap.apps);
+                            st.privileged_system_global_tokens = Some(snap.global_override_tokens);
+                            st.merge_privileged_system_apps_into_inventory();
+                            st.notice = Some(NoticeBanner {
+                                kind: NoticeKind::Info,
+                                message_tr: format!(
+                                    "Sistem Flatpak denetimi yüklendi ({} uygulama).",
+                                    count
+                                ),
+                                message_en: format!(
+                                    "System Flatpak audit loaded ({} application(s)).",
+                                    count
+                                ),
+                            });
+                        }
+                        render_chrome(&w_ev, &st_ev, &cmd_ev);
+                        if st_ev.borrow().active_tab == "applications" {
+                            render_page(&w_ev, &st_ev, &cmd_ev);
+                        }
                     }
                     UiEvent::DeviceSecurityInspected(status) => {
                         st_ev.borrow_mut().device_security = Some(*status);
@@ -411,8 +485,28 @@ fn main() {
                         }
                     }
                     UiEvent::ScanProgressUpdated(prog) => {
-                        st_ev.borrow_mut().active_scan = Some(*prog);
-                        if st_ev.borrow().active_tab == "threat_protection" {
+                        let updated_in_place = {
+                            let mut st = st_ev.borrow_mut();
+                            let in_place = should_update_scan_in_place(
+                                st.active_scan.as_ref(),
+                                &prog,
+                                st.live_scan_widgets.is_some(),
+                            );
+                            if in_place {
+                                let lang = st.lang;
+                                let (frac, bar_txt, cur_txt) =
+                                    format_scan_progress_view(&prog, lang);
+                                if let Some((ref pbar, ref cur_lbl)) = st.live_scan_widgets {
+                                    pbar.set_fraction(frac);
+                                    pbar.set_text(Some(&bar_txt));
+                                    cur_lbl.set_text(&cur_txt);
+                                    cur_lbl.set_visible(!cur_txt.is_empty());
+                                }
+                            }
+                            st.active_scan = Some(*prog);
+                            in_place
+                        };
+                        if !updated_in_place && st_ev.borrow().active_tab == "threat_protection" {
                             render_page(&w_ev, &st_ev, &cmd_ev);
                         }
                     }
@@ -424,7 +518,8 @@ fn main() {
                     }
                     UiEvent::ProfilesLoaded(cat) => {
                         st_ev.borrow_mut().profile_catalog = Some(*cat);
-                        if st_ev.borrow().active_tab == "profiles" {
+                        render_chrome(&w_ev, &st_ev, &cmd_ev);
+                        if matches!(st_ev.borrow().active_tab, "profiles" | "overview") {
                             render_page(&w_ev, &st_ev, &cmd_ev);
                         }
                     }
@@ -442,6 +537,7 @@ fn main() {
                             let mut st = st_ev.borrow_mut();
                             st.app_inventory = Some(*inventory);
                             st.user_flatpak_txs = user_txs;
+                            st.merge_privileged_system_apps_into_inventory();
                         }
                         if matches!(st_ev.borrow().active_tab, "applications" | "history") {
                             render_page(&w_ev, &st_ev, &cmd_ev);
@@ -522,11 +618,16 @@ mod tests {
     use crate::components::nav_rail::map_card_id_to_tab;
     use crate::components::severity_css_class;
     use crate::dbus_client::format_dbus_or_akrep_error;
+    use crate::pages::applications::compute_capability_override_delta;
     use crate::pages::firewall::{
-        extract_port_proto_from_rich_rule, extract_source_cidr_from_rich_rule,
+        extract_port_proto_from_rich_rule, extract_service_from_rich_rule,
+        extract_source_cidr_from_rich_rule, rich_rule_remove_request,
     };
     use crate::pages::history::can_rollback_request;
-    use blaze_akrep_common::{ActionRequest, AkrepError, FirewallProto};
+    use blaze_akrep_common::{
+        ActionRequest, AkrepError, FirewallProto, ManagedProfileState, ProfileCatalogResponse,
+        ScanFinding, ScanVerdict,
+    };
     use std::collections::HashSet;
 
     #[test]
@@ -583,15 +684,114 @@ mod tests {
     }
 
     #[test]
-    fn test_firewall_rich_rule_cidr_and_port_extraction() {
-        let rule = "rule family=\"ipv4\" source address=\"192.168.1.0/24\" port port=\"25565\" protocol=\"tcp\" accept";
+    fn test_firewall_rich_rule_cidr_port_service_and_accept_guard() {
+        let port_rule = "rule family=\"ipv4\" source address=\"192.168.1.0/24\" port port=\"25565\" protocol=\"tcp\" accept";
         assert_eq!(
-            extract_source_cidr_from_rich_rule(rule).as_deref(),
+            extract_source_cidr_from_rich_rule(port_rule).as_deref(),
             Some("192.168.1.0/24")
         );
         assert_eq!(
-            extract_port_proto_from_rich_rule(rule),
+            extract_port_proto_from_rich_rule(port_rule),
             Some(("25565".to_string(), FirewallProto::Tcp))
+        );
+        assert_eq!(
+            rich_rule_remove_request("public", port_rule, false),
+            Some(ActionRequest::FirewallRemovePort {
+                zone: "public".to_string(),
+                port: "25565".to_string(),
+                proto: FirewallProto::Tcp,
+                permanent: false,
+                source_cidr: Some("192.168.1.0/24".to_string()),
+            })
+        );
+
+        let svc_rule =
+            "rule family=\"ipv4\" source address=\"192.168.1.0/24\" service name=\"ssh\" accept";
+        assert_eq!(
+            extract_service_from_rich_rule(svc_rule).as_deref(),
+            Some("ssh")
+        );
+        assert_eq!(
+            rich_rule_remove_request("public", svc_rule, true),
+            Some(ActionRequest::FirewallRemoveService {
+                zone: "public".to_string(),
+                service: "ssh".to_string(),
+                permanent: true,
+                source_cidr: Some("192.168.1.0/24".to_string()),
+            })
+        );
+
+        // Reject/drop rich rules must not synthesize an accept-removal request
+        let drop_rule =
+            "rule family=\"ipv4\" source address=\"192.168.1.0/24\" port port=\"25565\" protocol=\"tcp\" drop";
+        assert_eq!(rich_rule_remove_request("public", drop_rule, false), None);
+    }
+
+    #[test]
+    fn test_in_place_scan_progress_and_camera_override_delta() {
+        let p1 = ScanProgress {
+            job_id: "job-1".to_string(),
+            target_path: "/tmp".to_string(),
+            scanned_files: 10,
+            total_files: 100,
+            percent: 10,
+            current_path: Some("/tmp/a".to_string()),
+            findings: vec![],
+            state: ScanJobState::Running,
+            started_at: "2026-11-25T19:00:00Z".to_string(),
+            finished_at: None,
+            error_message: None,
+        };
+        let mut p2 = p1.clone();
+        p2.scanned_files = 45;
+        p2.percent = 45;
+        p2.current_path = Some("/tmp/b".to_string());
+        assert!(should_update_scan_in_place(Some(&p1), &p2, true));
+
+        let mut p3 = p2.clone();
+        p3.findings.push(ScanFinding {
+            path: "/tmp/eicar".to_string(),
+            verdict: ScanVerdict::Infected {
+                signature: "EICAR".to_string(),
+            },
+            threat_name: Some("EICAR".to_string()),
+            size_bytes: 68,
+        });
+        assert!(!should_update_scan_in_place(Some(&p2), &p3, true));
+
+        let mut p4 = p2.clone();
+        p4.state = ScanJobState::Completed;
+        assert!(!should_update_scan_in_place(Some(&p2), &p4, true));
+
+        let (adds, rems) =
+            compute_capability_override_delta("Context.devices", "all", "!all", true);
+        assert_eq!(
+            adds,
+            vec![("Context.devices".to_string(), "!all".to_string())]
+        );
+        assert_eq!(
+            rems,
+            vec![("Context.devices".to_string(), "all".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_effective_active_profile_prefers_live_catalog() {
+        let mut st = AppUiState::new(Lang::En);
+        assert_eq!(st.effective_active_profile().0, "balanced");
+
+        st.profile_catalog = Some(ProfileCatalogResponse {
+            active_profile_id: Some("gaming".to_string()),
+            managed_state: ManagedProfileState::default(),
+            profiles: vec![],
+        });
+        assert_eq!(
+            st.effective_active_profile(),
+            (
+                "gaming".to_string(),
+                "Oyun".to_string(),
+                "Gaming".to_string()
+            )
         );
     }
 
@@ -662,7 +862,7 @@ mod tests {
 
         let inv_after = mgr.inspect_unified().unwrap();
         let rec = inv_after
-            .find_flatpak("org.example.Notes", blaze_akrep_common::FlatpakScope::User)
+            .find_flatpak("org.example.Notes", FlatpakScope::User)
             .unwrap();
         assert!(!rec.effective_permissions.network.granted);
 

@@ -5,23 +5,31 @@ use crate::transaction_engine::{
 };
 use async_trait::async_trait;
 use blaze_akrep_common::{
-    build_cidr_port_rich_rule, redact_secrets, ActionRequest, AkrepError, ManagedBooleanBaseline,
-    ManagedInterfaceMove, ManagedProfileState, ManagedRemovedService, ManagedRichRuleEntry,
-    PlanDiffItem, ProfileCatalogResponse, RiskLevel, SecurityProfileSpec, SecurityProfileSummary,
-    SelinuxRuntimeMode, StateFingerprint, TransactionRecord, TransactionState,
-    OFFICIAL_PROFILE_IDS,
+    build_cidr_port_rich_rule, generate_uuid_v4, redact_secrets, ActionRequest, AkrepError,
+    ManagedBooleanBaseline, ManagedInterfaceMove, ManagedProfileState, ManagedRemovedService,
+    ManagedRichRuleEntry, PlanDiffItem, ProfileCatalogResponse, RiskLevel, SecurityProfileSpec,
+    SecurityProfileSummary, SelinuxRuntimeMode, StateFingerprint, TransactionRecord,
+    TransactionState, OFFICIAL_PROFILE_IDS,
 };
 use blaze_sentinel_core::sha256_hex;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self, OpenOptions};
-use std::io::Read;
-use std::os::unix::fs::OpenOptionsExt;
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Write};
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub const DEFAULT_PROFILES_DIR: &str = "/usr/share/akrep/profiles";
+pub const DEFAULT_PUBLIC_PROFILE_STATUS_PATH: &str = "/var/cache/akrep/active_profile.json";
+
+#[derive(Debug, Serialize)]
+struct PublicProfileStatusPayload<'a> {
+    active_profile_id: &'a Option<String>,
+    effective_zone: &'a Option<String>,
+    updated_at: &'a Option<String>,
+}
 
 #[derive(Debug, Serialize)]
 struct CanonicalManagedProfileTuple<'a> {
@@ -92,10 +100,74 @@ fn read_file_nofollow_utf8(path: &Path) -> Result<String, AkrepError> {
     Ok(s)
 }
 
+fn write_public_profile_status_atomic_0644(
+    target: &Path,
+    state: &ManagedProfileState,
+) -> Result<(), AkrepError> {
+    let parent = target.parent().ok_or_else(|| {
+        AkrepError::Internal("public profile status path missing parent".to_string())
+    })?;
+    if let Ok(meta) = fs::symlink_metadata(parent) {
+        if meta.file_type().is_symlink() {
+            return Err(AkrepError::ForbiddenOperation(
+                "Refusing to write public profile status inside symlinked directory".to_string(),
+            ));
+        }
+    } else {
+        fs::create_dir_all(parent)?;
+        let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o755));
+    }
+
+    if let Ok(meta) = fs::symlink_metadata(target) {
+        if meta.file_type().is_symlink() {
+            return Err(AkrepError::ForbiddenOperation(
+                "Refusing to overwrite symlinked public profile status file".to_string(),
+            ));
+        }
+    }
+
+    let payload_obj = PublicProfileStatusPayload {
+        active_profile_id: &state.active_profile_id,
+        effective_zone: &state.effective_zone,
+        updated_at: &state.updated_at,
+    };
+    let bytes = serde_json::to_vec_pretty(&payload_obj)
+        .map_err(|e| AkrepError::Internal(format!("public profile json encode error: {}", e)))?;
+
+    let nonce = generate_uuid_v4()?;
+    let tmp_path = parent.join(format!(".active_profile.{}.tmp", nonce));
+    let mut tmp = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .mode(0o644)
+        .open(&tmp_path)?;
+    if let Err(err) = tmp
+        .set_permissions(fs::Permissions::from_mode(0o644))
+        .and_then(|_| tmp.write_all(&bytes))
+        .and_then(|_| tmp.sync_all())
+    {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(AkrepError::from(err));
+    }
+    drop(tmp);
+
+    if let Err(err) = fs::rename(&tmp_path, target) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(AkrepError::from(err));
+    }
+    let _ = fs::set_permissions(target, fs::Permissions::from_mode(0o644));
+    if let Ok(dir_f) = File::open(parent) {
+        let _ = dir_f.sync_all();
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct ProfileAdapter {
     profiles_dir: PathBuf,
     state_dir: PathBuf,
+    public_status_path: Option<PathBuf>,
     selinux: Arc<SelinuxAdapter>,
     firewall: Arc<FirewallAdapter>,
 }
@@ -110,9 +182,15 @@ impl ProfileAdapter {
         Self {
             profiles_dir,
             state_dir,
+            public_status_path: None,
             selinux,
             firewall,
         }
+    }
+
+    pub fn with_public_status_path(mut self, path: PathBuf) -> Self {
+        self.public_status_path = Some(path);
+        self
     }
 
     pub fn new_system(
@@ -120,12 +198,18 @@ impl ProfileAdapter {
         selinux: Arc<SelinuxAdapter>,
         firewall: Arc<FirewallAdapter>,
     ) -> Self {
-        Self::with_paths(
-            PathBuf::from(DEFAULT_PROFILES_DIR),
+        let public_status_path = if state_dir == Path::new("/var/lib/akrep") {
+            Some(PathBuf::from(DEFAULT_PUBLIC_PROFILE_STATUS_PATH))
+        } else {
+            Some(state_dir.join("public_active_profile.json"))
+        };
+        Self {
+            profiles_dir: PathBuf::from(DEFAULT_PROFILES_DIR),
             state_dir,
+            public_status_path,
             selinux,
             firewall,
-        )
+        }
     }
 
     pub fn active_profile_state_path(&self) -> PathBuf {
@@ -148,7 +232,11 @@ impl ProfileAdapter {
 
     fn save_managed_state(&self, state: &ManagedProfileState) -> Result<(), AkrepError> {
         fs::create_dir_all(&self.state_dir)?;
-        write_json_atomic_0600(&self.active_profile_state_path(), state)
+        write_json_atomic_0600(&self.active_profile_state_path(), state)?;
+        if let Some(pub_path) = &self.public_status_path {
+            let _ = write_public_profile_status_atomic_0644(pub_path, state);
+        }
+        Ok(())
     }
 
     fn managed_state_fingerprint(

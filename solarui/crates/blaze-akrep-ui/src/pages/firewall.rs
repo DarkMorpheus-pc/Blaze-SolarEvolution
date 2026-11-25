@@ -1,5 +1,5 @@
 use crate::components::{build_kv_row, severity_css_class};
-use crate::dbus_client::UiCommand;
+use crate::dbus_client::{dispatch_cmd, UiCommand};
 use crate::state::{AppUiState, FirewallRuleInputKind};
 use blaze_akrep_common::{ActionRequest, FirewallProto, RulePersistence};
 use blaze_sentinel_core::AkrepSeverity;
@@ -7,6 +7,10 @@ use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Button, CheckButton, Entry, Label, Orientation};
 use std::cell::RefCell;
 use std::rc::Rc;
+
+pub fn is_accept_rich_rule(rule: &str) -> bool {
+    rule.trim().ends_with(" accept")
+}
 
 pub fn extract_source_cidr_from_rich_rule(rule: &str) -> Option<String> {
     let marker = "source address=\"";
@@ -17,6 +21,9 @@ pub fn extract_source_cidr_from_rich_rule(rule: &str) -> Option<String> {
 }
 
 pub fn extract_port_proto_from_rich_rule(rule: &str) -> Option<(String, FirewallProto)> {
+    if !is_accept_rich_rule(rule) {
+        return None;
+    }
     let p_marker = "port port=\"";
     let p_idx = rule.find(p_marker)?;
     let p_rest = &rule[p_idx + p_marker.len()..];
@@ -32,6 +39,39 @@ pub fn extract_port_proto_from_rich_rule(rule: &str) -> Option<(String, Firewall
         _ => FirewallProto::Tcp,
     };
     Some((port, proto))
+}
+
+pub fn extract_service_from_rich_rule(rule: &str) -> Option<String> {
+    if !is_accept_rich_rule(rule) {
+        return None;
+    }
+    let s_marker = "service name=\"";
+    let s_idx = rule.find(s_marker)?;
+    let s_rest = &rule[s_idx + s_marker.len()..];
+    let s_end = s_rest.find('"')?;
+    Some(s_rest[..s_end].to_string())
+}
+
+pub fn rich_rule_remove_request(zone: &str, rule: &str, permanent: bool) -> Option<ActionRequest> {
+    let cidr = extract_source_cidr_from_rich_rule(rule)?;
+    if let Some((port, proto)) = extract_port_proto_from_rich_rule(rule) {
+        return Some(ActionRequest::FirewallRemovePort {
+            zone: zone.to_string(),
+            port,
+            proto,
+            permanent,
+            source_cidr: Some(cidr),
+        });
+    }
+    if let Some(service) = extract_service_from_rich_rule(rule) {
+        return Some(ActionRequest::FirewallRemoveService {
+            zone: zone.to_string(),
+            service,
+            permanent,
+            source_cidr: Some(cidr),
+        });
+    }
+    None
 }
 
 pub fn build_firewall_page(
@@ -81,9 +121,12 @@ pub fn build_firewall_page(
     inspect_btn.add_css_class("akrep-primary-btn");
     let cmd_insp = cmd_tx.clone();
     inspect_btn.connect_clicked(move |_| {
-        let _ = cmd_insp.send_blocking(UiCommand::InspectFirewall {
-            zone_filter: String::new(),
-        });
+        dispatch_cmd(
+            &cmd_insp,
+            UiCommand::InspectFirewall {
+                zone_filter: String::new(),
+            },
+        );
     });
     s_hdr.append(&inspect_btn);
     status_card.append(&s_hdr);
@@ -168,13 +211,16 @@ pub fn build_firewall_page(
     let st_bind = Rc::clone(state);
     bind_btn.connect_clicked(move |_| {
         let d = st_bind.borrow().firewall_draft.clone();
-        let _ = cmd_bind.send_blocking(UiCommand::CreatePlan {
-            request: ActionRequest::FirewallBindInterface {
-                zone: d.bind_zone.trim().to_string(),
-                interface: d.bind_interface.trim().to_string(),
-                permanent: d.bind_permanent,
+        dispatch_cmd(
+            &cmd_bind,
+            UiCommand::CreatePlan {
+                request: ActionRequest::FirewallBindInterface {
+                    zone: d.bind_zone.trim().to_string(),
+                    interface: d.bind_interface.trim().to_string(),
+                    permanent: d.bind_permanent,
+                },
             },
-        });
+        );
     });
     bind_row.append(&bind_btn);
     status_card.append(&bind_row);
@@ -192,7 +238,6 @@ pub fn build_firewall_page(
     b_title.set_xalign(0.0);
     builder_card.append(&b_title);
 
-    // Preset chips
     let preset_row = GtkBox::new(Orientation::Horizontal, 8);
     let preset_lbl = Label::new(Some(lang.pick("Hazır Şablonlar:", "Quick Presets:")));
     preset_lbl.add_css_class("akrep-subtitle");
@@ -397,13 +442,13 @@ pub fn build_firewall_page(
                 source_cidr: cidr_opt,
             },
         };
-        let _ = cmd_add.send_blocking(UiCommand::CreatePlan { request: req });
+        dispatch_cmd(&cmd_add, UiCommand::CreatePlan { request: req });
     });
     row2.append(&add_btn);
     builder_card.append(&row2);
     root.append(&builder_card);
 
-    // 3. Existing Rules List with Remove Actions
+    // 3. Existing Rules List (Runtime, Runtime+Permanent, and Permanent-Only)
     let rules_card = GtkBox::new(Orientation::Vertical, 10);
     rules_card.add_css_class("akrep-detail-box");
     let r_title = Label::new(Some(lang.pick(
@@ -416,12 +461,13 @@ pub fn build_firewall_page(
 
     if let Some(fw) = &fw_state {
         for z in &fw.zone_details {
-            if !z.active
-                && !z.is_default
-                && z.runtime_ports.is_empty()
-                && z.permanent_ports.is_empty()
-                && z.runtime_rich_rules.is_empty()
-            {
+            let has_rules = !z.runtime_ports.is_empty()
+                || !z.permanent_ports.is_empty()
+                || !z.runtime_services.is_empty()
+                || !z.permanent_services.is_empty()
+                || !z.runtime_rich_rules.is_empty()
+                || !z.permanent_rich_rules.is_empty();
+            if !z.active && !z.is_default && !has_rules {
                 continue;
             }
             let z_box = GtkBox::new(Orientation::Vertical, 6);
@@ -436,11 +482,12 @@ pub fn build_firewall_page(
             z_hdr.set_xalign(0.0);
             z_box.append(&z_hdr);
 
+            // Runtime (+ Permanent) ports
             for (port, proto_str) in &z.runtime_ports {
                 let is_perm = z
                     .permanent_ports
                     .iter()
-                    .any(|(pp, pr)| pp == port && pr == proto_str);
+                    .any(|(pp, pr)| pp == port && pr.eq_ignore_ascii_case(proto_str));
                 let proto = if proto_str.eq_ignore_ascii_case("udp") {
                     FirewallProto::Udp
                 } else {
@@ -468,20 +515,72 @@ pub fn build_firewall_page(
                 let zname = z.name.clone();
                 let pval = port.clone();
                 rm_btn.connect_clicked(move |_| {
-                    let _ = cmd_rm.send_blocking(UiCommand::CreatePlan {
-                        request: ActionRequest::FirewallRemovePort {
-                            zone: zname.clone(),
-                            port: pval.clone(),
-                            proto,
-                            permanent: is_perm,
-                            source_cidr: None,
+                    dispatch_cmd(
+                        &cmd_rm,
+                        UiCommand::CreatePlan {
+                            request: ActionRequest::FirewallRemovePort {
+                                zone: zname.clone(),
+                                port: pval.clone(),
+                                proto,
+                                permanent: is_perm,
+                                source_cidr: None,
+                            },
                         },
-                    });
+                    );
                 });
                 prow.append(&rm_btn);
                 z_box.append(&prow);
             }
 
+            // Permanent-only ports
+            for (port, proto_str) in &z.permanent_ports {
+                let in_rt = z
+                    .runtime_ports
+                    .iter()
+                    .any(|(rp, rr)| rp == port && rr.eq_ignore_ascii_case(proto_str));
+                if in_rt {
+                    continue;
+                }
+                let proto = if proto_str.eq_ignore_ascii_case("udp") {
+                    FirewallProto::Udp
+                } else {
+                    FirewallProto::Tcp
+                };
+                let prow = GtkBox::new(Orientation::Horizontal, 8);
+                let plbl = Label::new(Some(&format!(
+                    "Port: {}/{} [Permanent]",
+                    port,
+                    proto.as_str()
+                )));
+                plbl.add_css_class("akrep-mono");
+                plbl.set_xalign(0.0);
+                plbl.set_hexpand(true);
+                prow.append(&plbl);
+
+                let rm_btn = Button::with_label(lang.pick("Kaldır", "Remove"));
+                rm_btn.add_css_class("akrep-danger-btn");
+                let cmd_rm = cmd_tx.clone();
+                let zname = z.name.clone();
+                let pval = port.clone();
+                rm_btn.connect_clicked(move |_| {
+                    dispatch_cmd(
+                        &cmd_rm,
+                        UiCommand::CreatePlan {
+                            request: ActionRequest::FirewallRemovePort {
+                                zone: zname.clone(),
+                                port: pval.clone(),
+                                proto,
+                                permanent: true,
+                                source_cidr: None,
+                            },
+                        },
+                    );
+                });
+                prow.append(&rm_btn);
+                z_box.append(&prow);
+            }
+
+            // Runtime (+ Permanent) services
             for svc in &z.runtime_services {
                 let is_perm = z.permanent_services.contains(svc);
                 let srow = GtkBox::new(Orientation::Horizontal, 8);
@@ -505,47 +604,116 @@ pub fn build_firewall_page(
                 let zname = z.name.clone();
                 let sval = svc.clone();
                 rm_btn.connect_clicked(move |_| {
-                    let _ = cmd_rm.send_blocking(UiCommand::CreatePlan {
-                        request: ActionRequest::FirewallRemoveService {
-                            zone: zname.clone(),
-                            service: sval.clone(),
-                            permanent: is_perm,
-                            source_cidr: None,
+                    dispatch_cmd(
+                        &cmd_rm,
+                        UiCommand::CreatePlan {
+                            request: ActionRequest::FirewallRemoveService {
+                                zone: zname.clone(),
+                                service: sval.clone(),
+                                permanent: is_perm,
+                                source_cidr: None,
+                            },
                         },
-                    });
+                    );
                 });
                 srow.append(&rm_btn);
                 z_box.append(&srow);
             }
 
+            // Permanent-only services
+            for svc in &z.permanent_services {
+                if z.runtime_services.contains(svc) {
+                    continue;
+                }
+                let srow = GtkBox::new(Orientation::Horizontal, 8);
+                let slbl = Label::new(Some(&format!("Service: {} [Permanent]", svc)));
+                slbl.add_css_class("akrep-mono");
+                slbl.set_xalign(0.0);
+                slbl.set_hexpand(true);
+                srow.append(&slbl);
+
+                let rm_btn = Button::with_label(lang.pick("Kaldır", "Remove"));
+                rm_btn.add_css_class("akrep-ghost-btn");
+                let cmd_rm = cmd_tx.clone();
+                let zname = z.name.clone();
+                let sval = svc.clone();
+                rm_btn.connect_clicked(move |_| {
+                    dispatch_cmd(
+                        &cmd_rm,
+                        UiCommand::CreatePlan {
+                            request: ActionRequest::FirewallRemoveService {
+                                zone: zname.clone(),
+                                service: sval.clone(),
+                                permanent: true,
+                                source_cidr: None,
+                            },
+                        },
+                    );
+                });
+                srow.append(&rm_btn);
+                z_box.append(&srow);
+            }
+
+            // Runtime (+ Permanent) rich rules
             for rr in &z.runtime_rich_rules {
                 let is_perm = z.permanent_rich_rules.contains(rr);
                 let rrow = GtkBox::new(Orientation::Horizontal, 8);
-                let rlbl = Label::new(Some(&format!("Rich Rule: {}", rr)));
+                let rlbl = Label::new(Some(&format!(
+                    "Rich Rule ({}): {}",
+                    if is_perm {
+                        "Runtime + Permanent"
+                    } else {
+                        "Runtime"
+                    },
+                    rr
+                )));
                 rlbl.add_css_class("akrep-mono");
                 rlbl.set_xalign(0.0);
                 rlbl.set_wrap(true);
                 rlbl.set_hexpand(true);
                 rrow.append(&rlbl);
 
-                if let (Some(cidr), Some((port, proto))) = (
-                    extract_source_cidr_from_rich_rule(rr),
-                    extract_port_proto_from_rich_rule(rr),
-                ) {
+                if let Some(rm_req) = rich_rule_remove_request(&z.name, rr, is_perm) {
                     let rm_btn = Button::with_label(lang.pick("Kaldır", "Remove"));
                     rm_btn.add_css_class("akrep-danger-btn");
                     let cmd_rm = cmd_tx.clone();
-                    let zname = z.name.clone();
                     rm_btn.connect_clicked(move |_| {
-                        let _ = cmd_rm.send_blocking(UiCommand::CreatePlan {
-                            request: ActionRequest::FirewallRemovePort {
-                                zone: zname.clone(),
-                                port: port.clone(),
-                                proto,
-                                permanent: is_perm,
-                                source_cidr: Some(cidr.clone()),
+                        dispatch_cmd(
+                            &cmd_rm,
+                            UiCommand::CreatePlan {
+                                request: rm_req.clone(),
                             },
-                        });
+                        );
+                    });
+                    rrow.append(&rm_btn);
+                }
+                z_box.append(&rrow);
+            }
+
+            // Permanent-only rich rules
+            for rr in &z.permanent_rich_rules {
+                if z.runtime_rich_rules.contains(rr) {
+                    continue;
+                }
+                let rrow = GtkBox::new(Orientation::Horizontal, 8);
+                let rlbl = Label::new(Some(&format!("Rich Rule [Permanent]: {}", rr)));
+                rlbl.add_css_class("akrep-mono");
+                rlbl.set_xalign(0.0);
+                rlbl.set_wrap(true);
+                rlbl.set_hexpand(true);
+                rrow.append(&rlbl);
+
+                if let Some(rm_req) = rich_rule_remove_request(&z.name, rr, true) {
+                    let rm_btn = Button::with_label(lang.pick("Kaldır", "Remove"));
+                    rm_btn.add_css_class("akrep-danger-btn");
+                    let cmd_rm = cmd_tx.clone();
+                    rm_btn.connect_clicked(move |_| {
+                        dispatch_cmd(
+                            &cmd_rm,
+                            UiCommand::CreatePlan {
+                                request: rm_req.clone(),
+                            },
+                        );
                     });
                     rrow.append(&rm_btn);
                 }

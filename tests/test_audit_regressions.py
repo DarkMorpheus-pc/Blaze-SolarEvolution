@@ -1475,6 +1475,9 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
             self.assertIn(page_id, nav_src)
 
         self.assertTrue((OVERLAY / 'usr/lib/sysusers.d/blaze-akrep.conf').is_file())
+        tmpfiles_cfg = (OVERLAY / 'usr/lib/tmpfiles.d/blaze-akrep.conf').read_text(encoding='utf-8')
+        self.assertIn('d /var/lib/akrep 0700 root root -', tmpfiles_cfg)
+        self.assertIn('d /var/cache/akrep 0755 root root -', tmpfiles_cfg)
         svc = (OVERLAY / 'usr/lib/systemd/system/akrepd.service').read_text(encoding='utf-8')
         self.assertIn('User=akrep', svc)
         self.assertIn('BusName=tr.com.blazeos.Akrep1', svc)

@@ -1,5 +1,7 @@
 use crate::components::build_kv_row;
-use crate::dbus_client::{UiCommand, AKREP_BUS_NAME, AKREP_INTERFACE_NAME, AKREP_OBJECT_PATH};
+use crate::dbus_client::{
+    dispatch_cmd, UiCommand, AKREP_BUS_NAME, AKREP_INTERFACE_NAME, AKREP_OBJECT_PATH,
+};
 use crate::i18n::Lang;
 use crate::state::AppUiState;
 use blaze_akrep_common::{
@@ -32,7 +34,6 @@ pub fn build_settings_page(
     title.set_xalign(0.0);
     root.append(&title);
 
-    // 1. Language Switcher Card
     let lang_card = GtkBox::new(Orientation::Vertical, 10);
     lang_card.add_css_class("akrep-detail-box");
     let l_title = Label::new(Some(lang.pick("Arayüz Dili", "Interface Language")));
@@ -62,13 +63,12 @@ pub fn build_settings_page(
     ver_btn.add_css_class("akrep-ghost-btn");
     let cmd_v = cmd_tx.clone();
     ver_btn.connect_clicked(move |_| {
-        let _ = cmd_v.send_blocking(UiCommand::QueryPrivVersion);
+        dispatch_cmd(&cmd_v, UiCommand::QueryPrivVersion);
     });
     btn_row.append(&ver_btn);
     lang_card.append(&btn_row);
     root.append(&lang_card);
 
-    // 2. Service Versions & Privilege-Separation Contract Card
     let info_box = GtkBox::new(Orientation::Vertical, 8);
     info_box.add_css_class("akrep-detail-box");
     let i_title = Label::new(Some(lang.pick(
@@ -146,7 +146,6 @@ pub fn build_settings_page(
     }
     root.append(&info_box);
 
-    // 3. Performance & Resource Footprint Card
     let perf_box = GtkBox::new(Orientation::Vertical, 8);
     perf_box.add_css_class("akrep-detail-box");
     let p_title = Label::new(Some(lang.pick(

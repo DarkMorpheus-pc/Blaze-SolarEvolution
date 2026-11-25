@@ -1,5 +1,5 @@
 use crate::components::{availability_css_class, build_kv_row};
-use crate::dbus_client::UiCommand;
+use crate::dbus_client::{dispatch_cmd, UiCommand};
 use crate::state::AppUiState;
 use blaze_akrep_common::PrivacyStreamKind;
 use blaze_sentinel_core::Availability;
@@ -40,7 +40,7 @@ pub fn build_privacy_page(
     refresh_btn.add_css_class("akrep-primary-btn");
     let cmd_ref = cmd_tx.clone();
     refresh_btn.connect_clicked(move |_| {
-        let _ = cmd_ref.send_blocking(UiCommand::RefreshPrivacySession);
+        dispatch_cmd(&cmd_ref, UiCommand::RefreshPrivacySession);
     });
     hdr_row.append(&refresh_btn);
     root.append(&hdr_row);
@@ -144,8 +144,10 @@ pub fn build_privacy_page(
                 let cmd_stop = cmd_tx.clone();
                 let nid = stream.node_id;
                 stop_btn.connect_clicked(move |_| {
-                    let _ =
-                        cmd_stop.send_blocking(UiCommand::TerminatePipewireStream { node_id: nid });
+                    dispatch_cmd(
+                        &cmd_stop,
+                        UiCommand::TerminatePipewireStream { node_id: nid },
+                    );
                 });
                 srow.append(&stop_btn);
                 k_box.append(&srow);
@@ -311,11 +313,14 @@ pub fn build_privacy_page(
                 let rid = entry.resource_id.clone();
                 let aid = entry.app_id.clone();
                 rev_btn.connect_clicked(move |_| {
-                    let _ = cmd_rev.send_blocking(UiCommand::RevokePortalPermission {
-                        table: t.clone(),
-                        resource_id: rid.clone(),
-                        app_id: aid.clone(),
-                    });
+                    dispatch_cmd(
+                        &cmd_rev,
+                        UiCommand::RevokePortalPermission {
+                            table: t.clone(),
+                            resource_id: rid.clone(),
+                            app_id: aid.clone(),
+                        },
+                    );
                 });
                 erow.append(&rev_btn);
                 store_card.append(&erow);

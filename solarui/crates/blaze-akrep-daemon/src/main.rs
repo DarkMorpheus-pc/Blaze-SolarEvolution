@@ -219,6 +219,19 @@ mod tests {
         let active = crate::collectors::profiles::collect_profiles_at(&state_path, &dir);
         assert_eq!(active.active_id, "gaming");
         assert_eq!(active.active_en, "Gaming");
+
+        let cache_path = dir.join("cache_active_profile.json");
+        std::fs::write(
+            &cache_path,
+            r#"{"active_profile_id":"public-network","effective_zone":"drop"}"#,
+        )
+        .unwrap();
+        let from_cache = crate::collectors::profiles::collect_profiles_from_candidates(
+            &[&cache_path, &state_path],
+            &dir,
+        );
+        assert_eq!(from_cache.active_id, "public-network");
+        assert_eq!(from_cache.active_en, "Public Network");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -1,19 +1,28 @@
 use crate::components::{build_kv_row, risk_css_class, risk_label};
-use crate::dbus_client::UiCommand;
+use crate::dbus_client::{dispatch_cmd, UiCommand};
 use crate::i18n::Lang;
+use crate::state::AppUiState;
 use blaze_akrep_common::ActionPlan;
 use gtk4::prelude::*;
 use gtk4::{
     Align, ApplicationWindow, Box as GtkBox, Button, HeaderBar, Image, Label, Orientation,
     ScrolledWindow, Window,
 };
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 pub fn present_plan_preview_dialog(
     parent: &ApplicationWindow,
+    state: &Rc<RefCell<AppUiState>>,
     plan: &ActionPlan,
     lang: Lang,
     cmd_tx: async_channel::Sender<UiCommand>,
+    on_cancelled: Option<Rc<dyn Fn()>>,
 ) {
+    if let Some(prev_dlg) = state.borrow_mut().active_plan_dialog.take() {
+        prev_dlg.close();
+    }
+
     let dialog = Window::builder()
         .transient_for(parent)
         .modal(true)
@@ -25,6 +34,9 @@ pub fn present_plan_preview_dialog(
         ))
         .build();
     dialog.add_css_class("akrep-modal");
+    state.borrow_mut().active_plan_dialog = Some(dialog.clone());
+
+    let committed = Rc::new(Cell::new(false));
 
     let hb = HeaderBar::new();
     hb.add_css_class("akrep-headerbar");
@@ -174,14 +186,46 @@ pub fn present_plan_preview_dialog(
     let plan_id = plan.plan_id.clone();
     let plan_sha256 = plan.plan_sha256.clone();
     let dlg_ok = dialog.clone();
+    let committed_ok = Rc::clone(&committed);
     approve_btn.connect_clicked(move |_| {
-        let _ = cmd_tx.send_blocking(UiCommand::CommitPlan {
-            plan_id: plan_id.clone(),
-            plan_sha256: plan_sha256.clone(),
-        });
+        committed_ok.set(true);
+        dispatch_cmd(
+            &cmd_tx,
+            UiCommand::CommitPlan {
+                plan_id: plan_id.clone(),
+                plan_sha256: plan_sha256.clone(),
+            },
+        );
         dlg_ok.close();
     });
     footer.append(&approve_btn);
+
+    let st_close = Rc::clone(state);
+    let committed_close = Rc::clone(&committed);
+    let plan_id_close = plan.plan_id.clone();
+    dialog.connect_close_request(move |win| {
+        let should_notify = {
+            let mut s = st_close.borrow_mut();
+            if s.active_plan_dialog.as_ref() == Some(win) {
+                s.active_plan_dialog = None;
+            }
+            if !committed_close.get()
+                && s.last_profile_preview.as_ref().map(|p| p.plan_id.as_str())
+                    == Some(plan_id_close.as_str())
+            {
+                s.last_profile_preview = None;
+                true
+            } else {
+                false
+            }
+        };
+        if should_notify {
+            if let Some(cb) = &on_cancelled {
+                cb();
+            }
+        }
+        gtk4::glib::Propagation::Proceed
+    });
 
     root.append(&footer);
     dialog.set_child(Some(&root));

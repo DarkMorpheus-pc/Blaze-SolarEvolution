@@ -17,6 +17,7 @@ pub fn build_overview_page(
     let st = state.borrow();
     let lang = st.lang;
     let snap = st.snapshot.clone();
+    let (active_prof_id, active_prof_tr, active_prof_en) = st.effective_active_profile();
     drop(st);
 
     let root = GtkBox::new(Orientation::Vertical, 16);
@@ -68,8 +69,8 @@ pub fn build_overview_page(
     let prof_txt = Label::new(Some(&format!(
         "{}: {} ({}) — {}",
         lang.pick("Etkin Güvenlik Profili", "Active Security Profile"),
-        lang.pick(&s.active_profile_tr, &s.active_profile_en),
-        s.active_profile_id,
+        lang.pick(&active_prof_tr, &active_prof_en),
+        active_prof_id,
         lang.pick(
             "SELinux Enforcing ve Firewalld tüm profillerde zorunlu tutulur.",
             "SELinux Enforcing and Firewalld remain mandatory across all profiles.",
@@ -104,8 +105,20 @@ pub fn build_overview_page(
     flow.set_homogeneous(true);
 
     for card in &s.cards {
+        let mut adjusted_card = card.clone();
+        if adjusted_card.id == "profiles" {
+            adjusted_card.summary_tr = format!(
+                "Etkin Profil: {} • SELinux Enforcing & Firewalld Aktif",
+                active_prof_tr
+            );
+            adjusted_card.summary_en = format!(
+                "Active Profile: {} • SELinux Enforcing & Firewalld Active",
+                active_prof_en
+            );
+            adjusted_card.metric = active_prof_en.to_ascii_uppercase();
+        }
         let cb = Rc::clone(&on_select_tab);
-        let btn = build_status_card(card, lang, move |section_id| {
+        let btn = build_status_card(&adjusted_card, lang, move |section_id| {
             cb(map_card_id_to_tab(&section_id));
         });
         flow.insert(&btn, -1);

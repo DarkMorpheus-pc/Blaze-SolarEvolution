@@ -85,12 +85,16 @@ fn setup_harness_with_profiles_dir(profiles_dir: PathBuf) -> Sprint34Harness {
         true,
     ));
     let quarantine = Arc::new(QuarantineAdapter::new_lazy(state_dir.clone()));
-    let profiles = Arc::new(ProfileAdapter::with_paths(
-        profiles_dir,
-        state_dir.clone(),
-        selinux.clone(),
-        firewall.clone(),
-    ));
+    let public_cache_status = root_tmp.path().join("var_cache_akrep/active_profile.json");
+    let profiles = Arc::new(
+        ProfileAdapter::with_paths(
+            profiles_dir,
+            state_dir.clone(),
+            selinux.clone(),
+            firewall.clone(),
+        )
+        .with_public_status_path(public_cache_status),
+    );
 
     let composite = Arc::new(CompositeMutationBackend::new_full(
         selinux,
@@ -2365,4 +2369,48 @@ async fn reg_m2_m3_m4_job_cap_quarantine_rollback_conflict_and_audit_actions() {
     let rb_res = blaze_akrep_privd::MutationBackend::rollback(&q_adapter, &q_rec, &snap_dir).await;
     assert!(matches!(rb_res, Err(AkrepError::RollbackFailed(_))));
     assert_eq!(fs::read(&m3_file).unwrap(), b"BLOCKING_NEW_FILE");
+}
+
+#[tokio::test]
+async fn prf_11_public_profile_cache_status_is_0644_while_vault_stays_0600() {
+    let h = setup_sprint34_harness();
+    let pub_path = h
+        .root_tmp
+        .path()
+        .join("var_cache_akrep/active_profile.json");
+
+    let plan_raw = h.engine.preview_profile(":1.40", "gaming").await.unwrap();
+    let plan: ActionPlan = serde_json::from_str(&plan_raw).unwrap();
+    let rec = h
+        .engine
+        .commit_plan(":1.40", &plan.plan_id, &plan.plan_sha256)
+        .await
+        .unwrap();
+    assert_eq!(rec.state, TransactionState::Committed);
+
+    assert!(pub_path.is_file());
+    let pub_mode = fs::metadata(&pub_path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(pub_mode, 0o644);
+    let priv_mode = fs::metadata(h.state_dir.join("active_profile.json"))
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(priv_mode, 0o600);
+
+    let pub_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&pub_path).unwrap()).unwrap();
+    assert_eq!(pub_json["active_profile_id"], "gaming");
+    assert!(pub_json.get("managed_booleans").is_none());
+
+    let rb_rec = h
+        .engine
+        .rollback_transaction(":1.40", &rec.tx_id)
+        .await
+        .unwrap();
+    assert_eq!(rb_rec.state, TransactionState::RolledBack);
+
+    let pub_after_rb: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&pub_path).unwrap()).unwrap();
+    assert!(pub_after_rb["active_profile_id"].is_null());
 }

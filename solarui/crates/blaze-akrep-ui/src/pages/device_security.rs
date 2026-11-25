@@ -1,5 +1,5 @@
 use crate::components::{build_kv_row, severity_css_class};
-use crate::dbus_client::UiCommand;
+use crate::dbus_client::{dispatch_cmd, UiCommand};
 use crate::state::AppUiState;
 use blaze_sentinel_core::AkrepSeverity;
 use gtk4::prelude::*;
@@ -36,13 +36,12 @@ pub fn build_device_security_page(
     deep_btn.add_css_class("akrep-primary-btn");
     let cmd_deep = cmd_tx.clone();
     deep_btn.connect_clicked(move |_| {
-        let _ = cmd_deep.send_blocking(UiCommand::InspectDeviceSecurity);
+        dispatch_cmd(&cmd_deep, UiCommand::InspectDeviceSecurity);
     });
     hdr_row.append(&deep_btn);
     root.append(&hdr_row);
 
     if let Some(d) = &dev {
-        // 1. Firmware & Hardware Security (Secure Boot + TPM 2.0)
         let hw_card = GtkBox::new(Orientation::Vertical, 8);
         hw_card.add_css_class("akrep-detail-box");
         let hw_hdr = GtkBox::new(Orientation::Horizontal, 8);
@@ -82,7 +81,6 @@ pub fn build_device_security_page(
         hw_card.append(&build_kv_row("TPM 2.0", &d.tpm.detail));
         root.append(&hw_card);
 
-        // 2. Kernel Lockdown & Runtime Integrity
         let krn_card = GtkBox::new(Orientation::Vertical, 8);
         krn_card.add_css_class("akrep-detail-box");
         let k_title = Label::new(Some(lang.pick(
@@ -113,7 +111,6 @@ pub fn build_device_security_page(
         ));
         root.append(&krn_card);
 
-        // 3. Connected USB Devices Audit
         let usb_card = GtkBox::new(Orientation::Vertical, 8);
         usb_card.add_css_class("akrep-detail-box");
         let u_hdr = GtkBox::new(Orientation::Horizontal, 8);
@@ -176,7 +173,6 @@ pub fn build_device_security_page(
         }
         root.append(&usb_card);
 
-        // 4. Critical RPM OpenPGP Signature Health
         let rpm_card = GtkBox::new(Orientation::Vertical, 8);
         rpm_card.add_css_class("akrep-detail-box");
         let r_hdr = GtkBox::new(Orientation::Horizontal, 8);
@@ -240,7 +236,6 @@ pub fn build_device_security_page(
         root.append(&rpm_card);
     }
 
-    // Always include read-only sysfs/sysctl/DNF5 baseline from akrepd telemetry
     let base_card = GtkBox::new(Orientation::Vertical, 8);
     base_card.add_css_class("akrep-detail-box");
     let b_title = Label::new(Some(lang.pick(

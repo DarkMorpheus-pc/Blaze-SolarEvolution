@@ -1,32 +1,236 @@
 use crate::components::{build_kv_row, severity_css_class};
-use crate::dbus_client::UiCommand;
+use crate::dbus_client::{dispatch_cmd, UiCommand};
+use crate::i18n::Lang;
 use crate::state::AppUiState;
 use blaze_akrep_common::{
-    ActionRequest, ScanJobState, ScanRequest, ScanVerdict, ScannerEngineState,
-    OPTIONAL_SCANNER_INSTALL_HINT,
+    ActionRequest, QuarantineMetadata, ScanJobState, ScanProgress, ScanRequest, ScanVerdict,
+    ScannerEngineState, OPTIONAL_SCANNER_INSTALL_HINT,
 };
 use blaze_sentinel_core::{AkrepSeverity, SENTINEL_VERSION};
 use gtk4::prelude::*;
 use gtk4::{
-    Align, ApplicationWindow, Box as GtkBox, Button, CheckButton, Entry, FileDialog, Label,
-    Orientation, ProgressBar,
+    Align, ApplicationWindow, Box as GtkBox, Button, CheckButton, Entry, FileDialog, HeaderBar,
+    Image, Label, Orientation, ProgressBar, Window,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
+
+pub fn format_scan_progress_view(prog: &ScanProgress, lang: Lang) -> (f64, String, String) {
+    let fraction = (prog.percent.min(100) as f64) / 100.0;
+    let bar_text = format!(
+        "{:?} — {}% ({}/{} {})",
+        prog.state,
+        prog.percent,
+        prog.scanned_files,
+        prog.total_files,
+        lang.pick("dosya", "files")
+    );
+    let current_text = match &prog.current_path {
+        Some(cur) => format!("{}: {}", lang.pick("Taranan", "Current"), cur),
+        None => String::new(),
+    };
+    (fraction, bar_text, current_text)
+}
+
+fn present_vault_delete_confirm_dialog(
+    parent: &ApplicationWindow,
+    entry: &QuarantineMetadata,
+    lang: Lang,
+    cmd_tx: async_channel::Sender<UiCommand>,
+) {
+    let dlg = Window::builder()
+        .transient_for(parent)
+        .modal(true)
+        .default_width(540)
+        .title(lang.pick(
+            "Kalıcı Karantina Silme Onayı",
+            "Confirm Permanent Quarantine Deletion",
+        ))
+        .build();
+    dlg.add_css_class("akrep-modal");
+
+    let hb = HeaderBar::new();
+    hb.add_css_class("akrep-headerbar");
+    dlg.set_titlebar(Some(&hb));
+
+    let root = GtkBox::new(Orientation::Vertical, 12);
+    root.set_margin_top(16);
+    root.set_margin_bottom(16);
+    root.set_margin_start(18);
+    root.set_margin_end(18);
+
+    let hdr = GtkBox::new(Orientation::Horizontal, 10);
+    let icon = Image::from_icon_name("dialog-warning-symbolic");
+    icon.set_pixel_size(26);
+    hdr.append(&icon);
+    let title = Label::new(Some(lang.pick(
+        "Karantinadaki Dosya Kalıcı Olarak Silinsin mi?",
+        "Permanently Delete Quarantined Artifact?",
+    )));
+    title.add_css_class("akrep-section-hdr");
+    title.set_xalign(0.0);
+    title.set_wrap(true);
+    title.set_hexpand(true);
+    hdr.append(&title);
+    root.append(&hdr);
+
+    let warn = Label::new(Some(lang.pick(
+        "Bu işlem geri alınamaz! Karantinadaki dosya baytları ve meta verileri kasadan kalıcı olarak kaldırılacaktır.",
+        "This action is irreversible! The isolated payload and metadata will be permanently erased from the quarantine vault.",
+    )));
+    warn.add_css_class("akrep-toast-err");
+    warn.set_xalign(0.0);
+    warn.set_wrap(true);
+    root.append(&warn);
+
+    let meta = GtkBox::new(Orientation::Vertical, 6);
+    meta.add_css_class("akrep-detail-box");
+    meta.append(&build_kv_row(
+        lang.pick("Özgün Yol", "Original Path"),
+        &entry.original_path,
+    ));
+    meta.append(&build_kv_row(
+        lang.pick("Tehdit Adı", "Threat Signature"),
+        &entry.threat_name,
+    ));
+    meta.append(&build_kv_row("Quarantine ID", &entry.quarantine_id));
+    meta.append(&build_kv_row("SHA-256", &entry.sha256));
+    root.append(&meta);
+
+    let actions = GtkBox::new(Orientation::Horizontal, 10);
+    actions.set_halign(Align::End);
+
+    let cancel_btn = Button::with_label(lang.pick("İptal", "Cancel"));
+    cancel_btn.add_css_class("akrep-ghost-btn");
+    let d_cancel = dlg.clone();
+    cancel_btn.connect_clicked(move |_| d_cancel.close());
+    actions.append(&cancel_btn);
+
+    let confirm_btn = Button::with_label(lang.pick(
+        "Kalıcı Silme Planını Oluştur",
+        "Confirm Permanent Delete (Preview Plan)",
+    ));
+    confirm_btn.add_css_class("akrep-danger-btn");
+    let qid = entry.quarantine_id.clone();
+    let d_ok = dlg.clone();
+    confirm_btn.connect_clicked(move |_| {
+        dispatch_cmd(
+            &cmd_tx,
+            UiCommand::CreatePlan {
+                request: ActionRequest::DeleteQuarantine {
+                    quarantine_id: qid.clone(),
+                    confirm_permanent_delete: true,
+                },
+            },
+        );
+        d_ok.close();
+    });
+    actions.append(&confirm_btn);
+
+    root.append(&actions);
+    dlg.set_child(Some(&root));
+    dlg.present();
+}
+
+fn present_scan_detection_delete_dialog(
+    parent: &ApplicationWindow,
+    file_path: &str,
+    threat_name: &str,
+    lang: Lang,
+    cmd_tx: async_channel::Sender<UiCommand>,
+) {
+    let dlg = Window::builder()
+        .transient_for(parent)
+        .modal(true)
+        .default_width(540)
+        .title(lang.pick(
+            "Güvenli Karantina İzolasyonu ve Silme Onayı",
+            "Armored Quarantine Isolation & Deletion Confirmation",
+        ))
+        .build();
+    dlg.add_css_class("akrep-modal");
+
+    let hb = HeaderBar::new();
+    hb.add_css_class("akrep-headerbar");
+    dlg.set_titlebar(Some(&hb));
+
+    let root = GtkBox::new(Orientation::Vertical, 12);
+    root.set_margin_top(16);
+    root.set_margin_bottom(16);
+    root.set_margin_start(18);
+    root.set_margin_end(18);
+
+    let msg = Label::new(Some(lang.pick(
+        "Akrep güvenlik politikası gereği canlı dosyalar doğrudan körlemesine silinmez; önce SHA-256 doğrulamalı zırhlı karantina kasasına (0700/0000) alınır, ardından kasadan kalıcı olarak silinebilir.",
+        "By Akrep safety policy, live files are never unlinked blindly; the file is first isolated into the SHA-256 verified Quarantine Vault (0700/0000), where you can permanently delete it.",
+    )));
+    msg.set_xalign(0.0);
+    msg.set_wrap(true);
+    root.append(&msg);
+
+    let meta = GtkBox::new(Orientation::Vertical, 6);
+    meta.add_css_class("akrep-detail-box");
+    meta.append(&build_kv_row(lang.pick("Dosya", "File Path"), file_path));
+    meta.append(&build_kv_row(
+        lang.pick("Tehdit İmzası", "Threat Signature"),
+        threat_name,
+    ));
+    root.append(&meta);
+
+    let actions = GtkBox::new(Orientation::Horizontal, 10);
+    actions.set_halign(Align::End);
+
+    let cancel_btn = Button::with_label(lang.pick("İptal", "Cancel"));
+    cancel_btn.add_css_class("akrep-ghost-btn");
+    let d_cancel = dlg.clone();
+    cancel_btn.connect_clicked(move |_| d_cancel.close());
+    actions.append(&cancel_btn);
+
+    let q_btn = Button::with_label(lang.pick(
+        "Önce Karantinaya İzole Et (Polkit)",
+        "Isolate to Quarantine Vault First (Polkit)",
+    ));
+    q_btn.add_css_class("akrep-danger-btn");
+    let fp = file_path.to_string();
+    let tn = threat_name.to_string();
+    let d_ok = dlg.clone();
+    q_btn.connect_clicked(move |_| {
+        dispatch_cmd(
+            &cmd_tx,
+            UiCommand::CreatePlan {
+                request: ActionRequest::QuarantineFile {
+                    path: fp.clone(),
+                    threat_name: tn.clone(),
+                },
+            },
+        );
+        d_ok.close();
+    });
+    actions.append(&q_btn);
+
+    root.append(&actions);
+    dlg.set_child(Some(&root));
+    dlg.present();
+}
 
 pub fn build_threat_protection_page(
     state: &Rc<RefCell<AppUiState>>,
     cmd_tx: &async_channel::Sender<UiCommand>,
     window: &ApplicationWindow,
 ) -> GtkBox {
-    let st = state.borrow();
-    let lang = st.lang;
-    let snap = st.snapshot.clone();
-    let scanner = st.scanner_report.clone();
-    let active_scan = st.active_scan.clone();
-    let quarantine = st.quarantine.clone();
-    let draft = st.threat_draft.clone();
-    drop(st);
+    let (lang, snap, scanner, active_scan, quarantine, draft) = {
+        let mut st = state.borrow_mut();
+        st.live_scan_widgets = None;
+        st.live_scan_path_entry = None;
+        (
+            st.lang,
+            st.snapshot.clone(),
+            st.scanner_report.clone(),
+            st.active_scan.clone(),
+            st.quarantine.clone(),
+            st.threat_draft.clone(),
+        )
+    };
 
     let root = GtkBox::new(Orientation::Vertical, 16);
 
@@ -58,8 +262,8 @@ pub fn build_threat_protection_page(
         None => AkrepSeverity::Unknown,
     };
     let s_badge = Label::new(Some(match lang {
-        crate::i18n::Lang::Tr => integrity_sev.label_tr(),
-        crate::i18n::Lang::En => integrity_sev.label_en(),
+        Lang::Tr => integrity_sev.label_tr(),
+        Lang::En => integrity_sev.label_en(),
     }));
     s_badge.add_css_class("akrep-badge");
     s_badge.add_css_class(severity_css_class(integrity_sev));
@@ -127,8 +331,8 @@ pub fn build_threat_protection_page(
             _ => (
                 rep.severity,
                 match lang {
-                    crate::i18n::Lang::Tr => rep.severity.label_tr().to_string(),
-                    crate::i18n::Lang::En => rep.severity.label_en().to_string(),
+                    Lang::Tr => rep.severity.label_tr().to_string(),
+                    Lang::En => rep.severity.label_en().to_string(),
                 },
             ),
         },
@@ -152,7 +356,7 @@ pub fn build_threat_protection_page(
     inspect_sc_btn.add_css_class("akrep-ghost-btn");
     let cmd_sc = cmd_tx.clone();
     inspect_sc_btn.connect_clicked(move |_| {
-        let _ = cmd_sc.send_blocking(UiCommand::InspectScanner);
+        dispatch_cmd(&cmd_sc, UiCommand::InspectScanner);
     });
     e_hdr.append(&inspect_sc_btn);
     engine_box.append(&e_hdr);
@@ -221,16 +425,19 @@ pub fn build_threat_protection_page(
         inst_btn.add_css_class("akrep-primary-btn");
         let cmd_inst = cmd_tx.clone();
         inst_btn.connect_clicked(move |_| {
-            let _ = cmd_inst.send_blocking(UiCommand::CreatePlan {
-                request: ActionRequest::InstallOptionalScanner,
-            });
+            dispatch_cmd(
+                &cmd_inst,
+                UiCommand::CreatePlan {
+                    request: ActionRequest::InstallOptionalScanner,
+                },
+            );
         });
         inst_row.append(&inst_btn);
         engine_box.append(&inst_row);
     }
     root.append(&engine_box);
 
-    // 3. On-Demand File / Folder Scan Trigger & Progress Card
+    // 3. On-Demand File / Folder Scan Trigger & In-Place Live Progress Card
     let scan_box = GtkBox::new(Orientation::Vertical, 10);
     scan_box.add_css_class("akrep-detail-box");
 
@@ -253,22 +460,31 @@ pub fn build_threat_protection_page(
     path_entry.connect_changed(move |ent| {
         st_path.borrow_mut().threat_draft.scan_path = ent.text().to_string();
     });
+    state.borrow_mut().live_scan_path_entry = Some(path_entry.clone());
     input_row.append(&path_entry);
 
     let file_btn = Button::with_label(lang.pick("Dosya Seç...", "Select File..."));
     file_btn.add_css_class("akrep-ghost-btn");
     let win_file = window.clone();
-    let ent_file = path_entry.clone();
+    let st_file = Rc::clone(state);
     file_btn.connect_clicked(move |_| {
         let dlg = FileDialog::builder()
             .title("Select File to Scan")
             .modal(true)
             .build();
-        let ent = ent_file.clone();
+        let st_cb = Rc::clone(&st_file);
         dlg.open(Some(&win_file), gtk4::gio::Cancellable::NONE, move |res| {
             if let Ok(file) = res {
                 if let Some(p) = file.path() {
-                    ent.set_text(&p.to_string_lossy());
+                    let chosen = p.to_string_lossy().to_string();
+                    let live_ent = {
+                        let mut s = st_cb.borrow_mut();
+                        s.threat_draft.scan_path = chosen.clone();
+                        s.live_scan_path_entry.clone()
+                    };
+                    if let Some(ent) = live_ent {
+                        ent.set_text(&chosen);
+                    }
                 }
             }
         });
@@ -278,17 +494,25 @@ pub fn build_threat_protection_page(
     let folder_btn = Button::with_label(lang.pick("Klasör Seç...", "Select Folder..."));
     folder_btn.add_css_class("akrep-ghost-btn");
     let win_dir = window.clone();
-    let ent_dir = path_entry.clone();
+    let st_dir = Rc::clone(state);
     folder_btn.connect_clicked(move |_| {
         let dlg = FileDialog::builder()
             .title("Select Folder to Scan")
             .modal(true)
             .build();
-        let ent = ent_dir.clone();
+        let st_cb = Rc::clone(&st_dir);
         dlg.select_folder(Some(&win_dir), gtk4::gio::Cancellable::NONE, move |res| {
             if let Ok(folder) = res {
                 if let Some(p) = folder.path() {
-                    ent.set_text(&p.to_string_lossy());
+                    let chosen = p.to_string_lossy().to_string();
+                    let live_ent = {
+                        let mut s = st_cb.borrow_mut();
+                        s.threat_draft.scan_path = chosen.clone();
+                        s.live_scan_path_entry.clone()
+                    };
+                    if let Some(ent) = live_ent {
+                        ent.set_text(&chosen);
+                    }
                 }
             }
         });
@@ -321,54 +545,51 @@ pub fn build_threat_protection_page(
     let st_start = Rc::clone(state);
     start_btn.connect_clicked(move |_| {
         let d = st_start.borrow().threat_draft.clone();
-        let _ = cmd_start.send_blocking(UiCommand::StartScan {
-            request: ScanRequest {
-                target_path: d.scan_path.trim().to_string(),
-                recursive: d.recursive,
-                socket_override: None,
-                synchronous: false,
+        dispatch_cmd(
+            &cmd_start,
+            UiCommand::StartScan {
+                request: ScanRequest {
+                    target_path: d.scan_path.trim().to_string(),
+                    recursive: d.recursive,
+                    socket_override: None,
+                    synchronous: false,
+                },
             },
-        });
+        );
     });
     opt_row.append(&start_btn);
     scan_box.append(&opt_row);
 
     if let Some(prog) = &active_scan {
+        let (frac, bar_txt, cur_txt) = format_scan_progress_view(prog, lang);
         let pbar = ProgressBar::new();
         pbar.set_show_text(true);
-        pbar.set_fraction((prog.percent.min(100) as f64) / 100.0);
-        pbar.set_text(Some(&format!(
-            "{:?} — {}% ({}/{} {})",
-            prog.state,
-            prog.percent,
-            prog.scanned_files,
-            prog.total_files,
-            lang.pick("dosya", "files")
-        )));
+        pbar.set_fraction(frac);
+        pbar.set_text(Some(&bar_txt));
         scan_box.append(&pbar);
 
-        if let Some(cur) = &prog.current_path {
-            let cur_lbl = Label::new(Some(&format!(
-                "{}: {}",
-                lang.pick("Taranan", "Current"),
-                cur
-            )));
-            cur_lbl.add_css_class("akrep-mono");
-            cur_lbl.set_xalign(0.0);
-            cur_lbl.set_wrap(true);
-            scan_box.append(&cur_lbl);
-        }
+        let cur_lbl = Label::new(Some(&cur_txt));
+        cur_lbl.add_css_class("akrep-mono");
+        cur_lbl.set_xalign(0.0);
+        cur_lbl.set_wrap(true);
+        cur_lbl.set_visible(!cur_txt.is_empty());
+        scan_box.append(&cur_lbl);
 
         if prog.state == ScanJobState::Running {
+            state.borrow_mut().live_scan_widgets = Some((pbar, cur_lbl));
+
             let cancel_btn = Button::with_label(lang.pick("Taramayı İptal Et", "Cancel Scan"));
             cancel_btn.add_css_class("akrep-danger-btn");
             cancel_btn.set_halign(Align::Start);
             let cmd_cancel = cmd_tx.clone();
             let jid = prog.job_id.clone();
             cancel_btn.connect_clicked(move |_| {
-                let _ = cmd_cancel.send_blocking(UiCommand::CancelScan {
-                    job_id: jid.clone(),
-                });
+                dispatch_cmd(
+                    &cmd_cancel,
+                    UiCommand::CancelScan {
+                        job_id: jid.clone(),
+                    },
+                );
             });
             scan_box.append(&cancel_btn);
         }
@@ -395,17 +616,23 @@ pub fn build_threat_protection_page(
                 let f_row = GtkBox::new(Orientation::Horizontal, 10);
                 f_row.add_css_class("akrep-diff-row");
 
-                let (v_lbl, v_sev) = match &finding.verdict {
-                    ScanVerdict::Infected { signature } => {
-                        (format!("INFECTED: {}", signature), AkrepSeverity::Critical)
-                    }
-                    ScanVerdict::Suspicious { reason } => {
-                        (format!("SUSPICIOUS: {}", reason), AkrepSeverity::Attention)
-                    }
-                    ScanVerdict::Unknown { reason } => {
-                        (format!("UNKNOWN: {}", reason), AkrepSeverity::Unknown)
-                    }
-                    ScanVerdict::Clean => ("CLEAN".to_string(), AkrepSeverity::Protected),
+                let (v_lbl, v_sev, actionable) = match &finding.verdict {
+                    ScanVerdict::Infected { signature } => (
+                        format!("INFECTED: {}", signature),
+                        AkrepSeverity::Critical,
+                        true,
+                    ),
+                    ScanVerdict::Suspicious { reason } => (
+                        format!("SUSPICIOUS: {}", reason),
+                        AkrepSeverity::Attention,
+                        true,
+                    ),
+                    ScanVerdict::Unknown { reason } => (
+                        format!("UNKNOWN: {}", reason),
+                        AkrepSeverity::Unknown,
+                        false,
+                    ),
+                    ScanVerdict::Clean => ("CLEAN".to_string(), AkrepSeverity::Protected, false),
                 };
 
                 let vb = Label::new(Some(&v_lbl));
@@ -420,23 +647,48 @@ pub fn build_threat_protection_page(
                 pl.set_hexpand(true);
                 f_row.append(&pl);
 
-                let q_btn = Button::with_label(lang.pick("Karantinaya Al", "Quarantine"));
-                q_btn.add_css_class("akrep-primary-btn");
-                let cmd_q = cmd_tx.clone();
-                let fpath = finding.path.clone();
-                let tname = finding
-                    .threat_name
-                    .clone()
-                    .unwrap_or_else(|| "Detected.Threat".to_string());
-                q_btn.connect_clicked(move |_| {
-                    let _ = cmd_q.send_blocking(UiCommand::CreatePlan {
-                        request: ActionRequest::QuarantineFile {
-                            path: fpath.clone(),
-                            threat_name: tname.clone(),
-                        },
+                if actionable {
+                    let tname = finding
+                        .threat_name
+                        .clone()
+                        .unwrap_or_else(|| "Detected.Threat".to_string());
+
+                    let q_btn = Button::with_label(lang.pick("Karantinaya Al", "Quarantine"));
+                    q_btn.add_css_class("akrep-primary-btn");
+                    let cmd_q = cmd_tx.clone();
+                    let fpath_q = finding.path.clone();
+                    let tname_q = tname.clone();
+                    q_btn.connect_clicked(move |_| {
+                        dispatch_cmd(
+                            &cmd_q,
+                            UiCommand::CreatePlan {
+                                request: ActionRequest::QuarantineFile {
+                                    path: fpath_q.clone(),
+                                    threat_name: tname_q.clone(),
+                                },
+                            },
+                        );
                     });
-                });
-                f_row.append(&q_btn);
+                    f_row.append(&q_btn);
+
+                    let del_det_btn =
+                        Button::with_label(lang.pick("Sil (Onayla)", "Delete (Confirm)"));
+                    del_det_btn.add_css_class("akrep-danger-btn");
+                    let win_det = window.clone();
+                    let cmd_det = cmd_tx.clone();
+                    let fpath_d = finding.path.clone();
+                    let tname_d = tname;
+                    del_det_btn.connect_clicked(move |_| {
+                        present_scan_detection_delete_dialog(
+                            &win_det,
+                            &fpath_d,
+                            &tname_d,
+                            lang,
+                            cmd_det.clone(),
+                        );
+                    });
+                    f_row.append(&del_det_btn);
+                }
 
                 scan_box.append(&f_row);
             }
@@ -452,7 +704,7 @@ pub fn build_threat_protection_page(
     }
     root.append(&scan_box);
 
-    // 4. Quarantine Vault Card
+    // 4. Quarantine Vault Card (Per-Item Confirmation Modal for Permanent Delete)
     let vault_box = GtkBox::new(Orientation::Vertical, 10);
     vault_box.add_css_class("akrep-detail-box");
 
@@ -466,20 +718,11 @@ pub fn build_threat_protection_page(
     v_title.set_hexpand(true);
     v_hdr.append(&v_title);
 
-    let confirm_del_chk =
-        CheckButton::with_label(lang.pick("Kalıcı silmeyi onayla", "Confirm permanent delete"));
-    confirm_del_chk.set_active(draft.confirm_permanent_delete);
-    let st_del = Rc::clone(state);
-    confirm_del_chk.connect_toggled(move |chk| {
-        st_del.borrow_mut().threat_draft.confirm_permanent_delete = chk.is_active();
-    });
-    v_hdr.append(&confirm_del_chk);
-
     let load_v_btn = Button::with_label(lang.pick("Kasayı Yükle (Polkit)", "Load Vault (Polkit)"));
     load_v_btn.add_css_class("akrep-ghost-btn");
     let cmd_lv = cmd_tx.clone();
     load_v_btn.connect_clicked(move |_| {
-        let _ = cmd_lv.send_blocking(UiCommand::ListQuarantine);
+        dispatch_cmd(&cmd_lv, UiCommand::ListQuarantine);
     });
     v_hdr.append(&load_v_btn);
     vault_box.append(&v_hdr);
@@ -525,29 +768,31 @@ pub fn build_threat_protection_page(
                     let cmd_r = cmd_tx.clone();
                     let qid_r = entry.quarantine_id.clone();
                     res_btn.connect_clicked(move |_| {
-                        let _ = cmd_r.send_blocking(UiCommand::CreatePlan {
-                            request: ActionRequest::RestoreQuarantine {
-                                quarantine_id: qid_r.clone(),
+                        dispatch_cmd(
+                            &cmd_r,
+                            UiCommand::CreatePlan {
+                                request: ActionRequest::RestoreQuarantine {
+                                    quarantine_id: qid_r.clone(),
+                                },
                             },
-                        });
+                        );
                     });
                     erow.append(&res_btn);
                 }
 
-                let del_btn = Button::with_label(lang.pick("Kalıcı Sil", "Delete (Confirm)"));
+                let del_btn = Button::with_label(lang.pick("Sil (Onayla)", "Delete (Confirm)"));
                 del_btn.add_css_class("akrep-danger-btn");
                 del_btn.set_valign(Align::Center);
+                let win_del = window.clone();
                 let cmd_d = cmd_tx.clone();
-                let st_d = Rc::clone(state);
-                let qid_d = entry.quarantine_id.clone();
+                let entry_clone = entry.clone();
                 del_btn.connect_clicked(move |_| {
-                    let confirmed = st_d.borrow().threat_draft.confirm_permanent_delete;
-                    let _ = cmd_d.send_blocking(UiCommand::CreatePlan {
-                        request: ActionRequest::DeleteQuarantine {
-                            quarantine_id: qid_d.clone(),
-                            confirm_permanent_delete: confirmed,
-                        },
-                    });
+                    present_vault_delete_confirm_dialog(
+                        &win_del,
+                        &entry_clone,
+                        lang,
+                        cmd_d.clone(),
+                    );
                 });
                 erow.append(&del_btn);
 

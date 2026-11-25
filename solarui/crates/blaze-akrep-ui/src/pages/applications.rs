@@ -1,5 +1,5 @@
-use crate::components::{build_kv_row, tx_state_css_class, tx_state_label};
-use crate::dbus_client::UiCommand;
+use crate::components::{tx_state_css_class, tx_state_label};
+use crate::dbus_client::{dispatch_cmd, UiCommand};
 use crate::i18n::Lang;
 use crate::state::{AppFilterTab, AppUiState};
 use blaze_akrep_common::{
@@ -16,6 +16,27 @@ type CapabilityToggleSpec<'a> = (
     Option<PermissionSourceLayer>,
     (&'a str, &'a str, &'a str),
 );
+
+pub type OverridePairList = Vec<(String, String)>;
+
+pub fn compute_capability_override_delta(
+    spec_key: &str,
+    pos_tok: &str,
+    neg_tok: &str,
+    currently_granted: bool,
+) -> (OverridePairList, OverridePairList) {
+    if currently_granted {
+        (
+            vec![(spec_key.to_string(), neg_tok.to_string())],
+            vec![(spec_key.to_string(), pos_tok.to_string())],
+        )
+    } else {
+        (
+            vec![(spec_key.to_string(), pos_tok.to_string())],
+            vec![(spec_key.to_string(), neg_tok.to_string())],
+        )
+    }
+}
 
 fn source_layer_label(layer: Option<PermissionSourceLayer>, lang: Lang) -> &'static str {
     match layer {
@@ -36,21 +57,27 @@ fn dispatch_override(
 ) {
     match app.scope {
         FlatpakScope::User => {
-            let _ = cmd_tx.send_blocking(UiCommand::ApplyUserFlatpakOverride {
-                app_id: app.app_id.clone(),
-                additions,
-                removals,
-            });
-        }
-        FlatpakScope::System => {
-            let _ = cmd_tx.send_blocking(UiCommand::CreatePlan {
-                request: ActionRequest::FlatpakSetOverride {
+            dispatch_cmd(
+                cmd_tx,
+                UiCommand::ApplyUserFlatpakOverride {
                     app_id: app.app_id.clone(),
-                    scope: FlatpakScope::System,
                     additions,
                     removals,
                 },
-            });
+            );
+        }
+        FlatpakScope::System => {
+            dispatch_cmd(
+                cmd_tx,
+                UiCommand::CreatePlan {
+                    request: ActionRequest::FlatpakSetOverride {
+                        app_id: app.app_id.clone(),
+                        scope: FlatpakScope::System,
+                        additions,
+                        removals,
+                    },
+                },
+            );
         }
     }
 }
@@ -86,7 +113,7 @@ pub fn build_applications_page(
     sys_insp_btn.add_css_class("akrep-ghost-btn");
     let cmd_sys = cmd_tx.clone();
     sys_insp_btn.connect_clicked(move |_| {
-        let _ = cmd_sys.send_blocking(UiCommand::InspectSystemFlatpaks);
+        dispatch_cmd(&cmd_sys, UiCommand::InspectSystemFlatpaks);
     });
     hdr_row.append(&sys_insp_btn);
 
@@ -94,7 +121,7 @@ pub fn build_applications_page(
     refresh_btn.add_css_class("akrep-ghost-btn");
     let cmd_ref = cmd_tx.clone();
     refresh_btn.connect_clicked(move |_| {
-        let _ = cmd_ref.send_blocking(UiCommand::RefreshUserApplications);
+        dispatch_cmd(&cmd_ref, UiCommand::RefreshUserApplications);
     });
     hdr_row.append(&refresh_btn);
     root.append(&hdr_row);
@@ -200,7 +227,6 @@ pub fn build_applications_page(
         }));
     }
 
-    // App selector strip + detail card
     let list_card = GtkBox::new(Orientation::Vertical, 8);
     list_card.add_css_class("akrep-detail-box");
     let list_hdr = Label::new(Some(&format!(
@@ -374,7 +400,7 @@ pub fn build_applications_page(
                 ),
                 ep.camera.direct_devices_all,
                 ep.camera.source,
-                ("Context.devices", "!all", "!all"),
+                ("Context.devices", "all", "!all"),
             ),
             (
                 lang.pick("USB Cihazları", "USB Devices"),
@@ -423,8 +449,8 @@ pub fn build_applications_page(
             });
             crow.append(&st_b);
 
-            // Note: blanket `devices=all` is a forbidden red-line grant, so for Camera/Devices only tightening (`!all`) is offered!
-            if !(spec_key == "Context.devices" && pos_tok == "!all" && !granted) {
+            // Blanket `devices=all` is a forbidden red-line grant, so only tightening (`!all` + remove `all`) is offered!
+            if !(spec_key == "Context.devices" && pos_tok == "all" && !granted) {
                 let btn_txt = if granted {
                     lang.pick("Kısıtla", "Restrict")
                 } else {
@@ -438,17 +464,7 @@ pub fn build_applications_page(
                 let pt = pos_tok.to_string();
                 let nt = neg_tok.to_string();
                 act_btn.connect_clicked(move |_| {
-                    let (adds, rems) = if granted {
-                        (
-                            vec![(sk.clone(), nt.clone())],
-                            vec![(sk.clone(), pt.clone())],
-                        )
-                    } else {
-                        (
-                            vec![(sk.clone(), pt.clone())],
-                            vec![(sk.clone(), nt.clone())],
-                        )
-                    };
+                    let (adds, rems) = compute_capability_override_delta(&sk, &pt, &nt, granted);
                     dispatch_override(&app_clone, adds, rems, &cmd_c);
                 });
                 crow.append(&act_btn);
@@ -532,31 +548,71 @@ pub fn build_applications_page(
         add_fs_row.append(&add_fs_btn);
         perm_card.append(&add_fs_row);
 
-        // D-Bus policies viewer
-        if !ep.bus_policies.is_empty() {
-            let bus_hdr = Label::new(Some(lang.pick(
-                "D-Bus Oturum ve Sistem Politikaları",
-                "D-Bus Session & System Policies",
+        // D-Bus policies viewer & restriction controls
+        let bus_hdr = Label::new(Some(lang.pick(
+            "D-Bus Oturum ve Sistem Politikaları",
+            "D-Bus Session & System Policies",
+        )));
+        bus_hdr.add_css_class("akrep-card-title");
+        bus_hdr.set_xalign(0.0);
+        perm_card.append(&bus_hdr);
+
+        if ep.bus_policies.is_empty() {
+            let empty_bus = Label::new(Some(lang.pick(
+                "Özel D-Bus oturum/sistem veriyolu izni yok (varsayılan portal izolasyonu aktif).",
+                "No custom D-Bus session/system bus grants (default portal isolation active).",
             )));
-            bus_hdr.add_css_class("akrep-card-title");
-            bus_hdr.set_xalign(0.0);
-            perm_card.append(&bus_hdr);
+            empty_bus.add_css_class("akrep-subtitle");
+            empty_bus.set_xalign(0.0);
+            perm_card.append(&empty_bus);
+        } else {
             for bp in &ep.bus_policies {
-                perm_card.append(&build_kv_row(
-                    &format!(
-                        "{}: {}",
-                        match bp.bus_kind {
-                            BusKind::Session => "Session Bus",
-                            BusKind::System => "System Bus",
-                        },
-                        bp.bus_name
-                    ),
-                    &format!(
-                        "{} ({})",
-                        bp.policy,
-                        source_layer_label(Some(bp.source), lang)
-                    ),
-                ));
+                let brow = GtkBox::new(Orientation::Horizontal, 8);
+                brow.add_css_class("akrep-diff-row");
+                let sec_name = match bp.bus_kind {
+                    BusKind::Session => "Session Bus Policy",
+                    BusKind::System => "System Bus Policy",
+                };
+                let blbl = Label::new(Some(&format!(
+                    "[{}].{} = {} ({})",
+                    sec_name,
+                    bp.bus_name,
+                    bp.policy,
+                    source_layer_label(Some(bp.source), lang)
+                )));
+                blbl.add_css_class("akrep-mono");
+                blbl.set_xalign(0.0);
+                blbl.set_wrap(true);
+                blbl.set_hexpand(true);
+                brow.append(&blbl);
+
+                if bp.is_sensitive_warning {
+                    let wb = Label::new(Some(lang.pick("Hassas Veriyolu", "Sensitive Bus")));
+                    wb.add_css_class("akrep-badge");
+                    wb.add_css_class("akrep-sev-critical");
+                    brow.append(&wb);
+                }
+
+                if matches!(bp.policy.to_ascii_lowercase().as_str(), "talk" | "own") {
+                    let restrict_bus_btn =
+                        Button::with_label(lang.pick("Kısıtla (none)", "Restrict (none)"));
+                    restrict_bus_btn.add_css_class("akrep-danger-btn");
+                    let app_clone = app.clone();
+                    let cmd_b = cmd_tx.clone();
+                    let spec = format!("[{}].{}", sec_name, bp.bus_name);
+                    let old_pol = bp.policy.clone();
+                    restrict_bus_btn.connect_clicked(move |_| {
+                        dispatch_override(
+                            &app_clone,
+                            vec![(spec.clone(), "none".to_string())],
+                            vec![(spec.clone(), old_pol.clone())],
+                            &cmd_b,
+                        );
+                    });
+                    brow.append(&restrict_bus_btn);
+                }
+
+                perm_card.append(&brow);
             }
         }
 
@@ -600,8 +656,10 @@ pub fn build_applications_page(
                 let cmd_rb = cmd_tx.clone();
                 let tid = utx.tx_id.clone();
                 rb.connect_clicked(move |_| {
-                    let _ = cmd_rb
-                        .send_blocking(UiCommand::RollbackUserFlatpakTx { tx_id: tid.clone() });
+                    dispatch_cmd(
+                        &cmd_rb,
+                        UiCommand::RollbackUserFlatpakTx { tx_id: tid.clone() },
+                    );
                 });
                 trow.append(&rb);
             }

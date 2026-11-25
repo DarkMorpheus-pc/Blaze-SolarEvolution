@@ -1,9 +1,10 @@
+use crate::components::plan_dialog::present_plan_preview_dialog;
 use crate::components::{risk_css_class, risk_label};
-use crate::dbus_client::UiCommand;
+use crate::dbus_client::{dispatch_cmd, UiCommand};
 use crate::state::AppUiState;
 use blaze_akrep_common::{ActionRequest, TransactionState};
 use gtk4::prelude::*;
-use gtk4::{Align, Box as GtkBox, Button, Label, Orientation};
+use gtk4::{Align, ApplicationWindow, Box as GtkBox, Button, Label, Orientation};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -64,11 +65,12 @@ const BUILTIN_PROFILES: &[StaticProfileMeta] = &[
 pub fn build_profiles_page(
     state: &Rc<RefCell<AppUiState>>,
     cmd_tx: &async_channel::Sender<UiCommand>,
+    window: &ApplicationWindow,
+    on_rerender: Rc<dyn Fn()>,
 ) -> GtkBox {
     let st = state.borrow();
     let lang = st.lang;
-    let snap = st.snapshot.clone();
-    let catalog = st.profile_catalog.clone();
+    let (active_id, _, _) = st.effective_active_profile();
     let preview = st.last_profile_preview.clone();
     let history = st.history_records.clone();
     drop(st);
@@ -92,16 +94,10 @@ pub fn build_profiles_page(
     load_btn.add_css_class("akrep-ghost-btn");
     let cmd_l = cmd_tx.clone();
     load_btn.connect_clicked(move |_| {
-        let _ = cmd_l.send_blocking(UiCommand::ListProfiles);
+        dispatch_cmd(&cmd_l, UiCommand::ListProfiles);
     });
     hdr_row.append(&load_btn);
     root.append(&hdr_row);
-
-    let active_id = catalog
-        .as_ref()
-        .and_then(|c| c.active_profile_id.clone())
-        .or_else(|| snap.as_ref().map(|s| s.active_profile_id.clone()))
-        .unwrap_or_else(|| "balanced".to_string());
 
     let inv_banner = GtkBox::new(Orientation::Horizontal, 10);
     inv_banner.add_css_class("akrep-detail-box");
@@ -128,13 +124,15 @@ pub fn build_profiles_page(
         let cmd_rb = cmd_tx.clone();
         let tid = last_prof_tx.tx_id.clone();
         rb_btn.connect_clicked(move |_| {
-            let _ = cmd_rb.send_blocking(UiCommand::RollbackTransaction { tx_id: tid.clone() });
+            dispatch_cmd(
+                &cmd_rb,
+                UiCommand::RollbackTransaction { tx_id: tid.clone() },
+            );
         });
         inv_banner.append(&rb_btn);
     }
     root.append(&inv_banner);
 
-    // 4 Interactive Profile Cards
     for meta in BUILTIN_PROFILES {
         let is_active = active_id == meta.id;
         let pcard = GtkBox::new(Orientation::Vertical, 8);
@@ -164,9 +162,12 @@ pub fn build_profiles_page(
         let cmd_pv = cmd_tx.clone();
         let pid = meta.id.to_string();
         prev_btn.connect_clicked(move |_| {
-            let _ = cmd_pv.send_blocking(UiCommand::PreviewProfile {
-                profile_id: pid.clone(),
-            });
+            dispatch_cmd(
+                &cmd_pv,
+                UiCommand::PreviewProfile {
+                    profile_id: pid.clone(),
+                },
+            );
         });
         top.append(&prev_btn);
         pcard.append(&top);
@@ -185,7 +186,7 @@ pub fn build_profiles_page(
         root.append(&pcard);
     }
 
-    // Inline Profile Diff Card when a preview was recently generated
+    // Inline Profile Diff Card — re-opens PlanPreviewDialog so user always sees SHA-256 & warnings
     if let Some(plan) = &preview {
         let diff_card = GtkBox::new(Orientation::Vertical, 8);
         diff_card.add_css_class("akrep-detail-box");
@@ -193,7 +194,10 @@ pub fn build_profiles_page(
         let dhdr = GtkBox::new(Orientation::Horizontal, 8);
         let dtitle = Label::new(Some(&format!(
             "{} (Plan {})",
-            lang.pick("Son Profil Geçiş Fark Özeti", "Profile Switch Diff Summary"),
+            lang.pick(
+                "Hazırlanan Profil Geçiş Özeti",
+                "Staged Profile Switch Summary"
+            ),
             plan.plan_id
         )));
         dtitle.add_css_class("akrep-section-hdr");
@@ -206,21 +210,37 @@ pub fn build_profiles_page(
         rbadge.add_css_class(risk_css_class(plan.risk));
         dhdr.append(&rbadge);
 
-        let commit_btn = Button::with_label(lang.pick(
-            "Profili Uygula (Polkit Commit)",
-            "Apply Profile (Polkit Commit)",
-        ));
-        commit_btn.add_css_class("akrep-primary-btn");
-        let cmd_cm = cmd_tx.clone();
-        let pid = plan.plan_id.clone();
-        let sha = plan.plan_sha256.clone();
-        commit_btn.connect_clicked(move |_| {
-            let _ = cmd_cm.send_blocking(UiCommand::CommitPlan {
-                plan_id: pid.clone(),
-                plan_sha256: sha.clone(),
-            });
+        let clear_btn = Button::with_label(lang.pick("İptal / Temizle", "Dismiss Preview"));
+        clear_btn.add_css_class("akrep-ghost-btn");
+        let st_clr = Rc::clone(state);
+        let rr_clr = Rc::clone(&on_rerender);
+        clear_btn.connect_clicked(move |_| {
+            st_clr.borrow_mut().last_profile_preview = None;
+            rr_clr();
         });
-        dhdr.append(&commit_btn);
+        dhdr.append(&clear_btn);
+
+        let review_btn = Button::with_label(lang.pick(
+            "Plan Onay Penceresini Aç (Polkit)",
+            "Review & Approve Plan (Polkit)",
+        ));
+        review_btn.add_css_class("akrep-primary-btn");
+        let win_rev = window.clone();
+        let st_rev = Rc::clone(state);
+        let cmd_rev = cmd_tx.clone();
+        let plan_clone = plan.clone();
+        let rr_rev = Rc::clone(&on_rerender);
+        review_btn.connect_clicked(move |_| {
+            present_plan_preview_dialog(
+                &win_rev,
+                &st_rev,
+                &plan_clone,
+                lang,
+                cmd_rev.clone(),
+                Some(Rc::clone(&rr_rev)),
+            );
+        });
+        dhdr.append(&review_btn);
         diff_card.append(&dhdr);
 
         for d in &plan.diffs {

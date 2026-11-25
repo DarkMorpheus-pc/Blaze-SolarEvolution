@@ -1,5 +1,5 @@
 use crate::components::{build_kv_row, risk_css_class, risk_label, severity_css_class};
-use crate::dbus_client::UiCommand;
+use crate::dbus_client::{dispatch_cmd, UiCommand};
 use crate::i18n::Lang;
 use crate::state::AppUiState;
 use blaze_akrep_common::{
@@ -122,13 +122,16 @@ fn populate_boolean_rows(
         let bname = b.name.clone();
         toggle_btn.connect_clicked(move |_| {
             let persistent = st_b.borrow().selinux_draft.persistent_toggle;
-            let _ = cmd_b.send_blocking(UiCommand::CreatePlan {
-                request: ActionRequest::SelinuxSetBoolean {
-                    name: bname.clone(),
-                    value: target_val,
-                    persistent,
+            dispatch_cmd(
+                &cmd_b,
+                UiCommand::CreatePlan {
+                    request: ActionRequest::SelinuxSetBoolean {
+                        name: bname.clone(),
+                        value: target_val,
+                        persistent,
+                    },
                 },
-            });
+            );
         });
         row.append(&toggle_btn);
 
@@ -236,9 +239,12 @@ pub fn build_system_protection_page(
     diag_btn.add_css_class("akrep-primary-btn");
     let cmd_diag = cmd_tx.clone();
     diag_btn.connect_clicked(move |_| {
-        let _ = cmd_diag.send_blocking(UiCommand::DiagnoseSelinux {
-            query: SelinuxDiagnoseQuery::default(),
-        });
+        dispatch_cmd(
+            &cmd_diag,
+            UiCommand::DiagnoseSelinux {
+                query: SelinuxDiagnoseQuery::default(),
+            },
+        );
     });
     b_hdr.append(&diag_btn);
     bool_card.append(&b_hdr);
@@ -351,12 +357,15 @@ pub fn build_system_protection_page(
                         let tp = target_path.clone();
                         let rec = *recursive;
                         fix_btn.connect_clicked(move |_| {
-                            let _ = cmd_f.send_blocking(UiCommand::CreatePlan {
-                                request: ActionRequest::SelinuxRestorecon {
-                                    target_path: tp.clone(),
-                                    recursive: rec,
+                            dispatch_cmd(
+                                &cmd_f,
+                                UiCommand::CreatePlan {
+                                    request: ActionRequest::SelinuxRestorecon {
+                                        target_path: tp.clone(),
+                                        recursive: rec,
+                                    },
                                 },
-                            });
+                            );
                         });
                         grow.append(&fix_btn);
                     }
@@ -374,16 +383,21 @@ pub fn build_system_protection_page(
                         fix_btn.add_css_class("akrep-primary-btn");
                         fix_btn.set_halign(Align::Start);
                         let cmd_f = cmd_tx.clone();
+                        let st_f = Rc::clone(state);
                         let bn = boolean_name.clone();
                         let rv = *recommended_value;
                         fix_btn.connect_clicked(move |_| {
-                            let _ = cmd_f.send_blocking(UiCommand::CreatePlan {
-                                request: ActionRequest::SelinuxSetBoolean {
-                                    name: bn.clone(),
-                                    value: rv,
-                                    persistent: false,
+                            let persistent = st_f.borrow().selinux_draft.persistent_toggle;
+                            dispatch_cmd(
+                                &cmd_f,
+                                UiCommand::CreatePlan {
+                                    request: ActionRequest::SelinuxSetBoolean {
+                                        name: bn.clone(),
+                                        value: rv,
+                                        persistent,
+                                    },
                                 },
-                            });
+                            );
                         });
                         grow.append(&fix_btn);
                     }
@@ -460,16 +474,19 @@ pub fn build_system_protection_page(
     let st_ic = Rc::clone(state);
     inspect_ctx_btn.connect_clicked(move |_| {
         let d = st_ic.borrow().selinux_draft.clone();
-        let _ = cmd_ic.send_blocking(UiCommand::DiagnoseSelinux {
-            query: SelinuxDiagnoseQuery {
-                include_booleans: true,
-                include_avc: false,
-                boolean_filter: None,
-                inspect_path: Some(d.restorecon_path.trim().to_string()),
-                recursive: d.restorecon_recursive,
-                action: Some("inspect_path".to_string()),
+        dispatch_cmd(
+            &cmd_ic,
+            UiCommand::DiagnoseSelinux {
+                query: SelinuxDiagnoseQuery {
+                    include_booleans: true,
+                    include_avc: false,
+                    boolean_filter: None,
+                    inspect_path: Some(d.restorecon_path.trim().to_string()),
+                    recursive: d.restorecon_recursive,
+                    action: Some("inspect_path".to_string()),
+                },
             },
-        });
+        );
     });
     ctx_row.append(&inspect_ctx_btn);
 
@@ -482,12 +499,15 @@ pub fn build_system_protection_page(
     let st_fc = Rc::clone(state);
     fix_ctx_btn.connect_clicked(move |_| {
         let d = st_fc.borrow().selinux_draft.clone();
-        let _ = cmd_fc.send_blocking(UiCommand::CreatePlan {
-            request: ActionRequest::SelinuxRestorecon {
-                target_path: d.restorecon_path.trim().to_string(),
-                recursive: d.restorecon_recursive,
+        dispatch_cmd(
+            &cmd_fc,
+            UiCommand::CreatePlan {
+                request: ActionRequest::SelinuxRestorecon {
+                    target_path: d.restorecon_path.trim().to_string(),
+                    recursive: d.restorecon_recursive,
+                },
             },
-        });
+        );
     });
     ctx_row.append(&fix_ctx_btn);
     ctx_card.append(&ctx_row);

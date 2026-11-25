@@ -1,8 +1,8 @@
 use crate::i18n::Lang;
 use blaze_akrep_common::{
-    ActionPlan, DeviceSecurityStatus, FirewallProto, FirewallStateSnapshot, FlatpakScope,
-    PrivacySessionSnapshot, ProfileCatalogResponse, QuarantineInventory, RulePersistence,
-    ScanProgress, ScannerStatusReport, SelinuxDiagnoseResponse, TransactionRecord,
+    ActionPlan, DeviceSecurityStatus, FirewallProto, FirewallStateSnapshot, FlatpakAppRecord,
+    FlatpakScope, PrivacySessionSnapshot, ProfileCatalogResponse, QuarantineInventory,
+    RulePersistence, ScanProgress, ScannerStatusReport, SelinuxDiagnoseResponse, TransactionRecord,
     UnifiedAppInventory, UserOverrideTransaction,
 };
 use blaze_sentinel_core::AkrepSnapshot;
@@ -25,7 +25,6 @@ pub struct NoticeBanner {
 pub struct ThreatFormDraft {
     pub scan_path: String,
     pub recursive: bool,
-    pub confirm_permanent_delete: bool,
 }
 
 impl Default for ThreatFormDraft {
@@ -38,7 +37,6 @@ impl Default for ThreatFormDraft {
         Self {
             scan_path: default_path,
             recursive: true,
-            confirm_permanent_delete: false,
         }
     }
 }
@@ -126,6 +124,15 @@ impl Default for ApplicationsFormDraft {
     }
 }
 
+pub fn localized_profile_names(profile_id: &str) -> (&'static str, &'static str) {
+    match profile_id {
+        "developer" => ("Geliştirici", "Developer"),
+        "gaming" => ("Oyun", "Gaming"),
+        "public-network" => ("Açık Ağ", "Public Network"),
+        _ => ("Dengeli", "Balanced"),
+    }
+}
+
 pub struct AppUiState {
     pub snapshot: Option<AkrepSnapshot>,
     pub offline_reason: Option<String>,
@@ -141,6 +148,8 @@ pub struct AppUiState {
     pub firewall_state: Option<FirewallStateSnapshot>,
 
     pub app_inventory: Option<UnifiedAppInventory>,
+    pub privileged_system_apps: Option<Vec<FlatpakAppRecord>>,
+    pub privileged_system_global_tokens: Option<Vec<(String, String)>>,
     pub user_flatpak_txs: Vec<UserOverrideTransaction>,
 
     pub device_security: Option<DeviceSecurityStatus>,
@@ -156,6 +165,10 @@ pub struct AppUiState {
     pub selinux_draft: SelinuxFormDraft,
     pub firewall_draft: FirewallFormDraft,
     pub apps_draft: ApplicationsFormDraft,
+
+    pub live_scan_widgets: Option<(gtk4::ProgressBar, gtk4::Label)>,
+    pub live_scan_path_entry: Option<gtk4::Entry>,
+    pub active_plan_dialog: Option<gtk4::Window>,
 }
 
 impl AppUiState {
@@ -172,6 +185,8 @@ impl AppUiState {
             selinux_diag: None,
             firewall_state: None,
             app_inventory: None,
+            privileged_system_apps: None,
+            privileged_system_global_tokens: None,
             user_flatpak_txs: Vec::new(),
             device_security: None,
             privacy_snapshot: None,
@@ -183,6 +198,56 @@ impl AppUiState {
             selinux_draft: SelinuxFormDraft::default(),
             firewall_draft: FirewallFormDraft::default(),
             apps_draft: ApplicationsFormDraft::default(),
+            live_scan_widgets: None,
+            live_scan_path_entry: None,
+            active_plan_dialog: None,
+        }
+    }
+
+    pub fn effective_active_profile(&self) -> (String, String, String) {
+        if let Some(cat) = &self.profile_catalog {
+            let pid = cat
+                .active_profile_id
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "balanced".to_string());
+            let (tr, en) = localized_profile_names(&pid);
+            return (pid, tr.to_string(), en.to_string());
+        }
+        if let Some(s) = &self.snapshot {
+            return (
+                s.active_profile_id.clone(),
+                s.active_profile_tr.clone(),
+                s.active_profile_en.clone(),
+            );
+        }
+        (
+            "balanced".to_string(),
+            "Dengeli".to_string(),
+            "Balanced".to_string(),
+        )
+    }
+
+    pub fn merge_privileged_system_apps_into_inventory(&mut self) {
+        let Some(ref priv_apps) = self.privileged_system_apps else {
+            return;
+        };
+        if let Some(ref mut inv) = self.app_inventory {
+            inv.system_apps = priv_apps.clone();
+            if let Some(ref gtoks) = self.privileged_system_global_tokens {
+                inv.system_global_override_tokens = gtoks.clone();
+            }
+        } else {
+            self.app_inventory = Some(UnifiedAppInventory {
+                user_apps: Vec::new(),
+                system_apps: priv_apps.clone(),
+                native_apps: Vec::new(),
+                user_global_override_tokens: Vec::new(),
+                system_global_override_tokens: self
+                    .privileged_system_global_tokens
+                    .clone()
+                    .unwrap_or_default(),
+            });
         }
     }
 }

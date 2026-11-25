@@ -1,5 +1,5 @@
 use crate::components::{build_kv_row, tx_state_css_class, tx_state_label};
-use crate::dbus_client::UiCommand;
+use crate::dbus_client::{dispatch_cmd, UiCommand};
 use crate::i18n::Lang;
 use crate::state::AppUiState;
 use blaze_akrep_common::{ActionRequest, TransactionState};
@@ -126,12 +126,11 @@ pub fn build_history_page(
     load_btn.add_css_class("akrep-primary-btn");
     let cmd_ld = cmd_tx.clone();
     load_btn.connect_clicked(move |_| {
-        let _ = cmd_ld.send_blocking(UiCommand::LoadHistory { limit: 100 });
+        dispatch_cmd(&cmd_ld, UiCommand::LoadHistory { limit: 100 });
     });
     hdr_row.append(&load_btn);
     root.append(&hdr_row);
 
-    // 1. Privileged System Transactions (Committed, RolledBack, RollbackFailed, Interrupted)
     let sys_card = GtkBox::new(Orientation::Vertical, 10);
     sys_card.add_css_class("akrep-detail-box");
     let sys_hdr = Label::new(Some(&format!(
@@ -184,8 +183,10 @@ pub fn build_history_page(
                 let cmd_rb = cmd_tx.clone();
                 let tid = rec.tx_id.clone();
                 rb_btn.connect_clicked(move |_| {
-                    let _ =
-                        cmd_rb.send_blocking(UiCommand::RollbackTransaction { tx_id: tid.clone() });
+                    dispatch_cmd(
+                        &cmd_rb,
+                        UiCommand::RollbackTransaction { tx_id: tid.clone() },
+                    );
                 });
                 top.append(&rb_btn);
             }
@@ -234,7 +235,6 @@ pub fn build_history_page(
     }
     root.append(&sys_card);
 
-    // 2. User-Scope Flatpak Override Transactions
     let usr_card = GtkBox::new(Orientation::Vertical, 8);
     usr_card.add_css_class("akrep-detail-box");
     let usr_hdr = Label::new(Some(&format!(
@@ -285,8 +285,10 @@ pub fn build_history_page(
                 let cmd_rb = cmd_tx.clone();
                 let tid = utx.tx_id.clone();
                 rb.connect_clicked(move |_| {
-                    let _ = cmd_rb
-                        .send_blocking(UiCommand::RollbackUserFlatpakTx { tx_id: tid.clone() });
+                    dispatch_cmd(
+                        &cmd_rb,
+                        UiCommand::RollbackUserFlatpakTx { tx_id: tid.clone() },
+                    );
                 });
                 urow.append(&rb);
             }
@@ -295,7 +297,6 @@ pub fn build_history_page(
     }
     root.append(&usr_card);
 
-    // 3. Scan & Recovery Event Summary
     let log_card = GtkBox::new(Orientation::Vertical, 8);
     log_card.add_css_class("akrep-detail-box");
     let l_hdr = Label::new(Some(lang.pick(

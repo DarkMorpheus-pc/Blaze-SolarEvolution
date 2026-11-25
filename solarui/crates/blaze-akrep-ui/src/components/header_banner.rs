@@ -14,6 +14,7 @@ pub struct HeaderBannerCallbacks {
 
 pub fn build_header_banner(
     snap: Option<&AkrepSnapshot>,
+    active_profile_tr_en: (&str, &str),
     offline_reason: Option<&str>,
     notice: Option<&NoticeBanner>,
     lang: Lang,
@@ -31,7 +32,13 @@ pub fn build_header_banner(
     card.add_css_class("akrep-banner");
     card.set_valign(Align::Center);
 
-    let (sev, avail, headline, subline, profile_lbl) = match snap {
+    let profile_lbl = format!(
+        "{}: {}",
+        lang.pick("Profil", "Profile"),
+        lang.pick(active_profile_tr_en.0, active_profile_tr_en.1)
+    );
+
+    let (sev, avail, headline, subline) = match snap {
         Some(s) => (
             s.overall_status,
             Availability::Available,
@@ -44,11 +51,6 @@ pub fn build_header_banner(
                 lang.pick("Çekirdek Kontrol", "Core Controls"),
                 s.posture.passed,
                 s.posture.total
-            ),
-            format!(
-                "{}: {}",
-                lang.pick("Profil", "Profile"),
-                lang.pick(&s.active_profile_tr, &s.active_profile_en)
             ),
         ),
         None => (
@@ -64,7 +66,6 @@ pub fn build_header_banner(
                 "akrepd is unreachable; local user-session and Polkit transaction channels remain independently available.",
             )
             .to_string(),
-            format!("{}: {}", lang.pick("Profil", "Profile"), lang.pick("Dengeli", "Balanced")),
         ),
     };
 

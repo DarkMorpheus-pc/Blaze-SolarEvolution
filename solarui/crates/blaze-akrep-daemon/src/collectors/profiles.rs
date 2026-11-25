@@ -31,31 +31,45 @@ pub fn profile_labels_for_id(id: &str) -> (&'static str, &'static str) {
 }
 
 pub fn collect_profiles() -> ProfilesSection {
-    collect_profiles_at(
-        Path::new("/var/lib/akrep/active_profile.json"),
+    collect_profiles_from_candidates(
+        &[
+            Path::new("/var/cache/akrep/active_profile.json"),
+            Path::new("/var/lib/akrep/active_profile.json"),
+        ],
         Path::new("/usr/share/akrep/profiles"),
     )
 }
 
+#[cfg(test)]
 pub fn collect_profiles_at(active_state_path: &Path, profiles_dir: &Path) -> ProfilesSection {
+    collect_profiles_from_candidates(&[active_state_path], profiles_dir)
+}
+
+pub fn collect_profiles_from_candidates(
+    candidate_paths: &[&Path],
+    profiles_dir: &Path,
+) -> ProfilesSection {
     let mut active_id = "balanced".to_string();
     let mut effective_zone = "Varsayılan (FedoraWorkstation / public)".to_string();
     let mut state_source = "Varsayılan temel profil (Balanced)".to_string();
 
-    if let Ok(raw) = fs::read_to_string(active_state_path) {
-        if let Ok(parsed) = serde_json::from_str::<PartialManagedState>(&raw) {
-            if let Some(pid) = parsed.active_profile_id.filter(|s| !s.trim().is_empty()) {
-                active_id = pid;
-                state_source = match parsed.updated_at {
-                    Some(ts) => format!(
-                        "Etkin durum kaydı ({})",
-                        ts.chars().take(19).collect::<String>()
-                    ),
-                    None => "Etkin durum kaydı (active_profile.json)".to_string(),
-                };
-            }
-            if let Some(z) = parsed.effective_zone.filter(|s| !s.trim().is_empty()) {
-                effective_zone = z;
+    for candidate in candidate_paths {
+        if let Ok(raw) = fs::read_to_string(candidate) {
+            if let Ok(parsed) = serde_json::from_str::<PartialManagedState>(&raw) {
+                if let Some(pid) = parsed.active_profile_id.filter(|s| !s.trim().is_empty()) {
+                    active_id = pid;
+                    state_source = match parsed.updated_at {
+                        Some(ts) => format!(
+                            "Etkin durum kaydı ({})",
+                            ts.chars().take(19).collect::<String>()
+                        ),
+                        None => "Etkin durum kaydı (active_profile.json)".to_string(),
+                    };
+                    if let Some(z) = parsed.effective_zone.filter(|s| !s.trim().is_empty()) {
+                        effective_zone = z;
+                    }
+                    break;
+                }
             }
         }
     }
