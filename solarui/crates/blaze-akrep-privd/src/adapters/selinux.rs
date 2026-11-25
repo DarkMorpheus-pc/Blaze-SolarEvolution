@@ -12,7 +12,7 @@ use blaze_sentinel_core::sha256_hex;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::fs::MetadataExt;
@@ -449,6 +449,21 @@ pub fn resolve_and_validate_restorecon_target(
     Ok(resolved)
 }
 
+pub fn build_restorecon_args(preview_only: bool, recursive: bool, target: &Path) -> Vec<OsString> {
+    let mut args = Vec::new();
+    if preview_only {
+        args.push(OsString::from("-n"));
+    }
+    args.push(OsString::from("-v"));
+    if recursive {
+        args.push(OsString::from("-R"));
+        args.push(OsString::from("-x"));
+    }
+    args.push(OsString::from("--"));
+    args.push(target.as_os_str().to_os_string());
+    args
+}
+
 pub fn walk_restorecon_paths_bounded(
     path: &Path,
     recursive: bool,
@@ -483,18 +498,20 @@ pub fn walk_restorecon_paths_bounded(
         children.sort();
 
         for child in children.into_iter().rev() {
-            let Some(child_str) = child.to_str() else {
-                continue;
-            };
-            if validate_restorecon_path(child_str).is_err() {
+            let child_meta = fs::symlink_metadata(&child)?;
+            // Skip foreign mount boundaries (matching `restorecon -R -x`) before validating child path
+            if child_meta.dev() != root_dev {
                 continue;
             }
-            let child_meta = fs::symlink_metadata(&child)?;
-            // Never traverse directory symlinks or cross filesystem mount boundaries into pseudo-mounts
+            let child_str = child.to_str().ok_or_else(|| {
+                AkrepError::InvalidInput(
+                    "Child path inside restorecon directory is not valid UTF-8".to_string(),
+                )
+            })?;
+            validate_restorecon_path(child_str)?;
+
+            // Never traverse directory symlinks (`restorecon` uses FTW_PHYS / lsetfilecon)
             if child_meta.file_type().is_dir() {
-                if child_meta.dev() != root_dev {
-                    continue;
-                }
                 stack.push(child);
             } else {
                 if collected.len() >= max_entries {
@@ -961,11 +978,7 @@ impl SelinuxSysOps for LinuxSelinuxOps {
         })?;
 
         let mut cmd = command_c_locale(bin);
-        cmd.args(["-n", "-v", "-h"]);
-        if recursive {
-            cmd.arg("-R");
-        }
-        cmd.arg("--").arg(&resolved);
+        cmd.args(build_restorecon_args(true, recursive, &resolved));
         let out = cmd.output()?;
         if !out.status.success() {
             return Err(AkrepError::IoError(format!(
@@ -1015,11 +1028,7 @@ impl SelinuxSysOps for LinuxSelinuxOps {
         })?;
 
         let mut cmd = command_c_locale(bin);
-        cmd.args(["-v", "-h"]);
-        if recursive {
-            cmd.arg("-R");
-        }
-        cmd.arg("--").arg(&resolved);
+        cmd.args(build_restorecon_args(false, recursive, &resolved));
         let out = cmd.output()?;
         if !out.status.success() {
             return Err(AkrepError::ApplyFailed(format!(
@@ -2486,12 +2495,15 @@ impl SelinuxSysOps for MockSelinuxOps {
         let mut out = Vec::new();
         for (p, lbl) in &g.files {
             let matched = p == &target || (recursive && p.starts_with(&prefix));
-            if matched && lbl.current_context != lbl.policy_default_context {
-                out.push(RestoreconPreviewEntry {
-                    path: p.clone(),
-                    from_context: lbl.current_context.clone(),
-                    to_context: lbl.policy_default_context.clone(),
-                });
+            if matched {
+                validate_restorecon_path(p)?;
+                if lbl.current_context != lbl.policy_default_context {
+                    out.push(RestoreconPreviewEntry {
+                        path: p.clone(),
+                        from_context: lbl.current_context.clone(),
+                        to_context: lbl.policy_default_context.clone(),
+                    });
+                }
             }
         }
         Ok(out)
@@ -2509,6 +2521,7 @@ impl SelinuxSysOps for MockSelinuxOps {
         let mut out = Vec::new();
         for (p, lbl) in &g.files {
             if p == &target || (recursive && p.starts_with(&prefix)) {
+                validate_restorecon_path(p)?;
                 out.push(FileContextEntry {
                     path: p.clone(),
                     context: lbl.current_context.clone(),
@@ -2537,21 +2550,22 @@ impl SelinuxSysOps for MockSelinuxOps {
     ) -> Result<Vec<RestoreconPreviewEntry>, AkrepError> {
         let target = path.to_string_lossy().to_string();
         validate_restorecon_path(&target)?;
+        let prefix = format!("{}/", target.trim_end_matches('/'));
         let mut g = self.inner.lock().expect("mock selinux mutex");
-        let mut argv = vec![
-            "/sbin/restorecon".to_string(),
-            "-v".to_string(),
-            "-h".to_string(),
-        ];
-        if recursive {
-            argv.push("-R".to_string());
+        for p in g.files.keys() {
+            if p == &target || (recursive && p.starts_with(&prefix)) {
+                validate_restorecon_path(p)?;
+            }
         }
-        argv.push("--".to_string());
-        argv.push(target.clone());
+        let mut argv = vec!["/sbin/restorecon".to_string()];
+        argv.extend(
+            build_restorecon_args(false, recursive, Path::new(&target))
+                .into_iter()
+                .map(|a| a.to_string_lossy().into_owned()),
+        );
         g.recorded_commands.push(argv);
 
         let stale = g.simulate_stale_verify;
-        let prefix = format!("{}/", target.trim_end_matches('/'));
         let mut changed = Vec::new();
         for (p, lbl) in &mut g.files {
             let matched = p == &target || (recursive && p.starts_with(&prefix));
@@ -2705,6 +2719,67 @@ container_manage_cgroup        (on   ,  off)  Allow container cgroups
         assert!(matches!(max_err, AkrepError::InvalidInput(_)));
         let ok_walk = walk_restorecon_paths_bounded(&many_dir, true, 20).unwrap();
         assert_eq!(ok_walk.len(), 7); // directory + 6 files
+
+        // Recursive walk on a directory containing a forbidden child must fail closed with ForbiddenOperation
+        let forbidden_parent = tmp.path().join("forbidden_parent");
+        fs::create_dir_all(&forbidden_parent).unwrap();
+        fs::write(forbidden_parent.join("normal.txt"), b"ok").unwrap();
+        fs::write(forbidden_parent.join("audit2allow_generated.te"), b"bad").unwrap();
+        let child_err = walk_restorecon_paths_bounded(&forbidden_parent, true, 100).unwrap_err();
+        assert!(matches!(child_err, AkrepError::ForbiddenOperation(_)));
+        if Path::new("/etc/shadow").exists() {
+            let etc_err =
+                walk_restorecon_paths_bounded(Path::new("/etc"), true, 50_000).unwrap_err();
+            assert!(matches!(etc_err, AkrepError::ForbiddenOperation(_)));
+        }
+    }
+
+    #[test]
+    fn test_restorecon_argv_excludes_help_flag_and_uses_no_xdev_when_recursive() {
+        let preview_single: Vec<String> =
+            build_restorecon_args(true, false, Path::new("/srv/www/index.html"))
+                .into_iter()
+                .map(|s| s.to_string_lossy().into_owned())
+                .collect();
+        assert!(!preview_single.contains(&"-h".to_string()));
+        assert_eq!(
+            preview_single,
+            vec!["-n", "-v", "--", "/srv/www/index.html"]
+        );
+
+        let apply_recursive: Vec<String> =
+            build_restorecon_args(false, true, Path::new("/srv/www"))
+                .into_iter()
+                .map(|s| s.to_string_lossy().into_owned())
+                .collect();
+        assert!(!apply_recursive.contains(&"-h".to_string()));
+        assert_eq!(apply_recursive, vec!["-v", "-R", "-x", "--", "/srv/www"]);
+
+        let mock = MockSelinuxOps::new_fedora_enforcing();
+        mock.apply_restorecon(Path::new("/srv/www"), true).unwrap();
+        let recorded = mock.recorded_commands();
+        assert_eq!(
+            recorded,
+            vec![vec![
+                "/sbin/restorecon".to_string(),
+                "-v".to_string(),
+                "-R".to_string(),
+                "-x".to_string(),
+                "--".to_string(),
+                "/srv/www".to_string(),
+            ]]
+        );
+
+        // Also confirm recursive mock restorecon on /etc with /etc/shadow seeded fails closed
+        mock.insert_file_context(
+            "/etc/shadow",
+            "system_u:object_r:shadow_t:s0",
+            "system_u:object_r:shadow_t:s0",
+        );
+        let mock_etc_err = mock
+            .read_file_contexts(Path::new("/etc"), true)
+            .unwrap_err();
+        assert!(matches!(mock_etc_err, AkrepError::ForbiddenOperation(_)));
     }
 
     #[test]
