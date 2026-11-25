@@ -6,12 +6,96 @@
   <vendor>BlazeOS</vendor>
   <vendor_url>https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution</vendor_url>
 
-  <!-- Unused in Akrep v0.1 (strictly read-only). Reserved for future admin-authenticated controls. -->
+  <!-- Legacy umbrella action retained for backward compatibility -->
   <action id="tr.com.blazeos.Akrep1.manage">
-    <description>Manage Akrep system security configuration (disabled in v0.1)</description>
-    <description xml:lang="tr">Akrep sistem güvenlik yapılandırmasını yönet (v0.1 sürümünde devre dışı)</description>
+    <description>Manage Akrep system security configuration</description>
+    <description xml:lang="tr">Akrep sistem güvenlik yapılandırmasını yönet</description>
     <message>Administrator authentication is required to modify Akrep security settings.</message>
     <message xml:lang="tr">Akrep güvenlik ayarlarını değiştirmek için yönetici kimlik doğrulaması gereklidir.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="tr.com.blazeos.Akrep1.selinux.diagnose">
+    <description>Inspect privileged SELinux AVC denial audit logs</description>
+    <description xml:lang="tr">Ayrıcalıklı SELinux AVC engelleme denetim kayıtlarını incele</description>
+    <message>Administrator authentication is required to inspect SELinux audit denial records.</message>
+    <message xml:lang="tr">SELinux denetim engelleme kayıtlarını incelemek için yönetici kimlik doğrulaması gereklidir.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="tr.com.blazeos.Akrep1.selinux.manage">
+    <description>Modify SELinux booleans or restore file security contexts</description>
+    <description xml:lang="tr">SELinux mantıksal anahtarlarını değiştir veya dosya güvenlik bağlamlarını onar</description>
+    <message>Administrator authentication is required to modify SELinux booleans or file contexts.</message>
+    <message xml:lang="tr">SELinux anahtarlarını veya dosya bağlamlarını değiştirmek için yönetici kimlik doğrulaması gereklidir.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="tr.com.blazeos.Akrep1.firewall.manage">
+    <description>Modify Firewalld zones, ports, services, and network interface bindings</description>
+    <description xml:lang="tr">Firewalld bölgelerini, portlarını, servislerini ve ağ arayüzü bağlamalarını yönet</description>
+    <message>Administrator authentication is required to modify firewall rules.</message>
+    <message xml:lang="tr">Güvenlik duvarı kurallarını değiştirmek için yönetici kimlik doğrulaması gereklidir.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="tr.com.blazeos.Akrep1.flatpak.system-manage">
+    <description>Manage system-wide Flatpak sandbox permission overrides</description>
+    <description xml:lang="tr">Sistem genelindeki Flatpak kum havuzu izin geçersiz kılmalarını yönet</description>
+    <message>Administrator authentication is required to change system Flatpak sandbox overrides.</message>
+    <message xml:lang="tr">Sistem Flatpak kum havuzu izinlerini değiştirmek için yönetici kimlik doğrulaması gereklidir.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="tr.com.blazeos.Akrep1.quarantine.manage">
+    <description>Quarantine, restore, or permanently delete flagged threat files</description>
+    <description xml:lang="tr">İşaretlenen tehdit dosyalarını karantinaya al, geri yükle veya kalıcı olarak sil</description>
+    <message>Administrator authentication is required to manage quarantined files.</message>
+    <message xml:lang="tr">Karantinadaki dosyaları yönetmek için yönetici kimlik doğrulaması gereklidir.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="tr.com.blazeos.Akrep1.profile.apply">
+    <description>Apply an Akrep security posture profile or view privileged transaction history</description>
+    <description xml:lang="tr">Akrep güvenlik duruşu profili uygula veya ayrıcalıklı işlem geçmişini görüntüle</description>
+    <message>Administrator authentication is required to apply a security profile or inspect transaction history.</message>
+    <message xml:lang="tr">Güvenlik profili uygulamak veya işlem geçmişini incelemek için yönetici kimlik doğrulaması gereklidir.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="tr.com.blazeos.Akrep1.packages.install-optional">
+    <description>Install optional BlazeOS security scanner components</description>
+    <description xml:lang="tr">İsteğe bağlı BlazeOS güvenlik tarayıcı bileşenlerini kur</description>
+    <message>Administrator authentication is required to install optional security components.</message>
+    <message xml:lang="tr">İsteğe bağlı güvenlik bileşenlerini kurmak için yönetici kimlik doğrulaması gereklidir.</message>
     <defaults>
       <allow_any>auth_admin</allow_any>
       <allow_inactive>auth_admin</allow_inactive>

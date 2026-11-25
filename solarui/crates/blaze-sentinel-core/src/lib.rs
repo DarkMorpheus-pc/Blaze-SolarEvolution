@@ -18,7 +18,9 @@ mod tests {
     fn test_core_default_config_uses_root_only_canary() {
         let cfg = SentinelConfig::default();
         assert!(cfg.canary_paths.contains(&PathBuf::from(ROOT_CANARY_PATH)));
-        assert!(!cfg.canary_paths.contains(&PathBuf::from("/var/tmp/.blaze_canary")));
+        assert!(!cfg
+            .canary_paths
+            .contains(&PathBuf::from("/var/tmp/.blaze_canary")));
     }
 
     #[test]
@@ -56,8 +58,43 @@ mod tests {
 
     #[test]
     fn test_severity_ordering_and_findings_from_posture() {
-        assert_eq!(AkrepSeverity::Normal.combine(AkrepSeverity::Warning), AkrepSeverity::Warning);
-        assert_eq!(AkrepSeverity::Warning.combine(AkrepSeverity::Critical), AkrepSeverity::Critical);
+        assert_eq!(
+            AkrepSeverity::Protected.combine(AkrepSeverity::Attention),
+            AkrepSeverity::Attention
+        );
+        assert_eq!(
+            AkrepSeverity::Attention.combine(AkrepSeverity::Critical),
+            AkrepSeverity::Critical
+        );
+        assert_eq!(
+            AkrepSeverity::Protected.combine(AkrepSeverity::Unavailable),
+            AkrepSeverity::Unavailable
+        );
+        assert_eq!(
+            AkrepSeverity::Protected.combine(AkrepSeverity::Unknown),
+            AkrepSeverity::Unknown
+        );
+        assert_eq!(
+            AkrepSeverity::Unavailable.combine(AkrepSeverity::Unknown),
+            AkrepSeverity::Unknown
+        );
+        assert!(AkrepSeverity::Protected.is_protected());
+        assert!(!AkrepSeverity::Unavailable.is_protected());
+        assert!(!AkrepSeverity::Unknown.is_protected());
+        assert_eq!(AkrepSeverity::NORMAL, AkrepSeverity::Protected);
+        assert_eq!(AkrepSeverity::WARNING, AkrepSeverity::Attention);
+        assert_eq!(Availability::Unavailable.label_tr(), "Kullanılamıyor");
+        assert_eq!(Availability::Unavailable.label_en(), "Unavailable");
+
+        let from_legacy_normal: AkrepSeverity = serde_json::from_str("\"normal\"").unwrap();
+        let from_legacy_warning: AkrepSeverity = serde_json::from_str("\"warning\"").unwrap();
+        let from_protected: AkrepSeverity = serde_json::from_str("\"protected\"").unwrap();
+        let from_attention: AkrepSeverity = serde_json::from_str("\"attention\"").unwrap();
+        assert_eq!(from_legacy_normal, AkrepSeverity::Protected);
+        assert_eq!(from_legacy_warning, AkrepSeverity::Attention);
+        assert_eq!(from_protected, AkrepSeverity::Protected);
+        assert_eq!(from_attention, AkrepSeverity::Attention);
+
         let report = PostureReport {
             passed: 6,
             total: 7,

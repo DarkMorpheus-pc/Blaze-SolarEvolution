@@ -9,6 +9,8 @@ members = [
     "crates/solar-session",
     "crates/blaze-sentinel-core",
     "crates/blaze-recovery",
+    "crates/blaze-akrep-common",
+    "crates/blaze-akrep-privd",
     "crates/blaze-akrep-daemon",
     "crates/blaze-akrep-ui",
 ]
@@ -37,9 +39,13 @@ chrono = "0.4"
 freedesktop-desktop-entry = "0.7"
 walkdir = "2.5"
 toml = "0.8"
+libc = "0.2"
+regex = "1.10"
+tempfile = "3.10"
 
 # Local crates
 solar-common = { path = "crates/solar-common" }
 solar-niri = { path = "crates/solar-niri" }
 solar-adapter = { path = "crates/solar-adapter" }
 blaze-sentinel-core = { path = "crates/blaze-sentinel-core" }
+blaze-akrep-common = { path = "crates/blaze-akrep-common" }

@@ -1,0 +1,5 @@
+[D-BUS Service]
+Name=tr.com.blazeos.Akrep1.Privileged
+Exec=/usr/bin/akrep-privd --idle-timeout-secs 60
+User=root
+SystemdService=akrep-privd.service

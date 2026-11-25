@@ -3,22 +3,35 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AkrepSeverity {
-    Normal,
-    Warning,
+    #[serde(alias = "normal")]
+    Protected,
+    #[serde(alias = "warning")]
+    Attention,
     Critical,
     Unknown,
     Unavailable,
 }
 
 impl AkrepSeverity {
+    #[allow(non_upper_case_globals)]
+    pub const Normal: Self = Self::Protected;
+    #[allow(non_upper_case_globals)]
+    pub const Warning: Self = Self::Attention;
+    pub const NORMAL: Self = Self::Protected;
+    pub const WARNING: Self = Self::Attention;
+
     pub fn rank(self) -> u8 {
         match self {
             Self::Critical => 4,
-            Self::Warning => 3,
+            Self::Attention => 3,
             Self::Unknown => 2,
             Self::Unavailable => 1,
-            Self::Normal => 0,
+            Self::Protected => 0,
         }
+    }
+
+    pub fn is_protected(self) -> bool {
+        matches!(self, Self::Protected)
     }
 
     pub fn combine(self, other: Self) -> Self {
@@ -31,8 +44,8 @@ impl AkrepSeverity {
 
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Normal => "normal",
-            Self::Warning => "warning",
+            Self::Protected => "protected",
+            Self::Attention => "attention",
             Self::Critical => "critical",
             Self::Unknown => "unknown",
             Self::Unavailable => "unavailable",
@@ -41,18 +54,18 @@ impl AkrepSeverity {
 
     pub fn label_tr(self) -> &'static str {
         match self {
-            Self::Normal => "Normal",
-            Self::Warning => "Uyarı",
+            Self::Protected => "Korunuyor",
+            Self::Attention => "Dikkat",
             Self::Critical => "Kritik",
             Self::Unknown => "Bilinmiyor",
-            Self::Unavailable => "Erişilemiyor",
+            Self::Unavailable => "Kullanılamıyor",
         }
     }
 
     pub fn label_en(self) -> &'static str {
         match self {
-            Self::Normal => "Normal",
-            Self::Warning => "Warning",
+            Self::Protected => "Protected",
+            Self::Attention => "Attention",
             Self::Critical => "Critical",
             Self::Unknown => "Unknown",
             Self::Unavailable => "Unavailable",
@@ -72,7 +85,7 @@ impl Availability {
     pub fn label_tr(self) -> &'static str {
         match self {
             Self::Available => "Kullanılabilir",
-            Self::Unavailable => "Erişilemiyor (Salt Okunur)",
+            Self::Unavailable => "Kullanılamıyor",
             Self::Unknown => "Bilinmiyor",
         }
     }
@@ -80,7 +93,7 @@ impl Availability {
     pub fn label_en(self) -> &'static str {
         match self {
             Self::Available => "Available",
-            Self::Unavailable => "Unavailable (Read-Only)",
+            Self::Unavailable => "Unavailable",
             Self::Unknown => "Unknown",
         }
     }

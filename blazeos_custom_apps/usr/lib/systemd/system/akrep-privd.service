@@ -1,0 +1,20 @@
+[Unit]
+Description=BlazeOS Akrep Privileged Security Transaction Daemon
+Documentation=https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
+After=dbus.service polkit.service
+Wants=dbus.service polkit.service
+
+[Service]
+Type=dbus
+BusName=tr.com.blazeos.Akrep1.Privileged
+ExecStart=/usr/bin/akrep-privd --idle-timeout-secs 60
+User=root
+Group=root
+ProtectHome=yes
+PrivateTmp=yes
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+StateDirectory=akrep
+StateDirectoryMode=0700
+StandardOutput=journal
+StandardError=journal

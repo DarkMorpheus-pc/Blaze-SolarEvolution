@@ -25,7 +25,7 @@ pub fn build_header_banner(
             format!(
                 "{}: {} • Sentinel v{} • {} {}/{}",
                 lang.pick("Son denetim", "Last check"),
-                &s.generated_at.chars().take(19).collect::<String>(),
+                s.generated_at.chars().take(19).collect::<String>(),
                 s.sentinel_version,
                 lang.pick("Çekirdek Kontrol", "Core Controls"),
                 s.posture.passed,

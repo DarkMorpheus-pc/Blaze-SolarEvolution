@@ -16,7 +16,7 @@ pub fn findings_from_posture(report: &PostureReport) -> Vec<AkrepFinding> {
         let severity = if ctrl.critical {
             AkrepSeverity::Critical
         } else {
-            AkrepSeverity::Warning
+            AkrepSeverity::Attention
         };
         let (remedy_tr, remedy_en) = match ctrl.id.as_str() {
             "mac" => (
@@ -45,7 +45,8 @@ pub fn findings_from_posture(report: &PostureReport) -> Vec<AkrepFinding> {
             remediation_hint_tr: remedy_tr.to_string(),
             remediation_hint_en: remedy_en.to_string(),
             source: "blaze-sentinel-core".to_string(),
-            read_only_note: "Akrep v0.1 yalnızca teşhis sağlar; sistem ayarı değiştirmez.".to_string(),
+            read_only_note: "Akrep v0.1 yalnızca teşhis sağlar; sistem ayarı değiştirmez."
+                .to_string(),
         });
     }
 
@@ -59,10 +60,12 @@ pub fn findings_from_posture(report: &PostureReport) -> Vec<AkrepFinding> {
             title_en: "Runtime Integrity Alert".to_string(),
             description_tr: alert.clone(),
             description_en: alert.clone(),
-            remediation_hint_tr: "BERP kurtarma konsolunu ve /var/log/blaze-sentinel.log kayıtlarını inceleyin."
-                .to_string(),
-            remediation_hint_en: "Inspect BERP recovery logs and /var/log/blaze-sentinel.log as administrator."
-                .to_string(),
+            remediation_hint_tr:
+                "BERP kurtarma konsolunu ve /var/log/blaze-sentinel.log kayıtlarını inceleyin."
+                    .to_string(),
+            remediation_hint_en:
+                "Inspect BERP recovery logs and /var/log/blaze-sentinel.log as administrator."
+                    .to_string(),
             source: "blaze-sentinel-core".to_string(),
             read_only_note: "Akrep v0.1 yalnızca teşhis sağlar; müdahale etmez.".to_string(),
         });

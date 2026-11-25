@@ -1,0 +1,20 @@
+[package]
+name = "blaze-akrep-common"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Shared typed D-Bus protocol, Polkit constants, red-line validators, Flatpak INI parser, rich-rule builder, and transaction models for BlazeOS Akrep"
+
+[features]
+default = []
+test-support = []
+
+[dependencies]
+blaze-sentinel-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+regex = { workspace = true }

@@ -1,0 +1,35 @@
+[package]
+name = "blaze-akrep-privd"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "On-demand Polkit-authenticated privileged transaction daemon for BlazeOS Akrep"
+
+[lib]
+name = "blaze_akrep_privd"
+path = "src/lib.rs"
+
+[[bin]]
+name = "akrep-privd"
+path = "src/main.rs"
+
+[dependencies]
+blaze-sentinel-core = { workspace = true }
+blaze-akrep-common = { workspace = true }
+tokio = { workspace = true }
+zbus = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+libc = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+blaze-akrep-common = { workspace = true, features = ["test-support"] }
