@@ -34,10 +34,11 @@ pub fn collect_packages() -> PackagesSection {
         .get("PRETTY_NAME")
         .cloned()
         .unwrap_or_else(|| "Bilinmiyor".to_string());
-    let base_id = osr
-        .get("BLAZE_BASE_ID")
-        .cloned()
-        .unwrap_or_else(|| osr.get("ID_LIKE").cloned().unwrap_or_else(|| "unknown".to_string()));
+    let base_id = osr.get("BLAZE_BASE_ID").cloned().unwrap_or_else(|| {
+        osr.get("ID_LIKE")
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string())
+    });
     let base_ver = osr
         .get("BLAZE_BASE_VERSION_ID")
         .cloned()
@@ -53,14 +54,24 @@ pub fn collect_packages() -> PackagesSection {
             if pkg_gpg && meta_gpg {
                 (true, "gpgcheck=1 + repo_gpgcheck=1 aktif".to_string())
             } else {
-                (false, format!("gpgcheck={} repo_gpgcheck={}", pkg_gpg, meta_gpg))
+                (
+                    false,
+                    format!("gpgcheck={} repo_gpgcheck={}", pkg_gpg, meta_gpg),
+                )
             }
         }
         None => (false, "Blaze DNF5 repo tanımı bulunamadı".to_string()),
     };
 
-    let blaze_rel_rpm = Command::new("rpm")
-        .args(["-q", "--qf", "%{NAME}-%{VERSION}-%{RELEASE}", "blaze-release"])
+    let blaze_rel_rpm = Command::new("/bin/rpm")
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .args([
+            "-q",
+            "--qf",
+            "%{NAME}-%{VERSION}-%{RELEASE}",
+            "blaze-release",
+        ])
         .output()
         .ok()
         .and_then(|o| {
@@ -133,9 +144,25 @@ pub fn collect_packages() -> PackagesSection {
         title_en: "Supply Chain & Package Integrity".to_string(),
         status,
         availability: Availability::Available,
-        summary_tr: format!("{} ({}:{}) • GPG {}", pretty, base_id, base_ver, if gpg_ok { "Aktif" } else { "Uyarı" }),
-        summary_en: format!("{} ({}:{}) • GPG {}", pretty, base_id, base_ver, if gpg_ok { "Active" } else { "Warn" }),
-        metric: if gpg_ok { "GPG".to_string() } else { "WARN".to_string() },
+        summary_tr: format!(
+            "{} ({}:{}) • GPG {}",
+            pretty,
+            base_id,
+            base_ver,
+            if gpg_ok { "Aktif" } else { "Uyarı" }
+        ),
+        summary_en: format!(
+            "{} ({}:{}) • GPG {}",
+            pretty,
+            base_id,
+            base_ver,
+            if gpg_ok { "Active" } else { "Warn" }
+        ),
+        metric: if gpg_ok {
+            "GPG".to_string()
+        } else {
+            "WARN".to_string()
+        },
     };
 
     let detail = AkrepSectionDetail {
@@ -150,5 +177,9 @@ pub fn collect_packages() -> PackagesSection {
         findings: findings.clone(),
     };
 
-    PackagesSection { card, detail, findings }
+    PackagesSection {
+        card,
+        detail,
+        findings,
+    }
 }

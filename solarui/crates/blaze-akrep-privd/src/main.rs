@@ -99,7 +99,10 @@ async fn main() -> Result<()> {
     };
 
     let authorizer = Arc::new(SystemPolkitAuthorizer::new(conn.clone()));
-    let backend = Arc::new(CompositeMutationBackend::new_system(conn.clone()));
+    let backend = Arc::new(CompositeMutationBackend::new_system_with_state_dir(
+        conn.clone(),
+        cfg.state_dir.clone(),
+    ));
     let engine = Arc::new(
         TransactionEngine::new(cfg.state_dir.clone(), authorizer, backend)
             .map_err(|e| anyhow::anyhow!("{}", e.to_redacted_json()))?,

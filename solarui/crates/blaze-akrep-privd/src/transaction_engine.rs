@@ -4,10 +4,12 @@ use crate::authorization::Authorizer;
 use async_trait::async_trait;
 use blaze_akrep_common::{
     generate_uuid_v4, redact_secrets, reject_forbidden_selinux_directives_in_json_value,
-    validate_zone_name, ActionPlan, ActionRequest, AkrepError, FirewallStateSnapshot,
-    FlatpakInstallationSnapshot, FlatpakScope, PlanDiffItem, RiskLevel, SelinuxDiagnoseQuery,
-    SelinuxDiagnoseResponse, StateFingerprint, TransactionRecord, TransactionState,
-    ALL_POLKIT_ACTIONS, POLKIT_FIREWALL_MANAGE, POLKIT_FLATPAK_SYSTEM_MANAGE, POLKIT_PROFILE_APPLY,
+    validate_zone_name, ActionPlan, ActionRequest, AkrepError, DeviceSecurityStatus,
+    FirewallStateSnapshot, FlatpakInstallationSnapshot, FlatpakScope, PlanDiffItem,
+    ProfileCatalogResponse, QuarantineInventory, RiskLevel, ScanProgress, ScanRequest,
+    ScannerStatusReport, SelinuxDiagnoseQuery, SelinuxDiagnoseResponse, StateFingerprint,
+    TransactionRecord, TransactionState, ALL_POLKIT_ACTIONS, POLKIT_FIREWALL_MANAGE,
+    POLKIT_FLATPAK_SYSTEM_MANAGE, POLKIT_PROFILE_APPLY, POLKIT_QUARANTINE_MANAGE,
     POLKIT_SELINUX_DIAGNOSE,
 };
 use chrono::{DateTime, Utc};
@@ -84,6 +86,52 @@ pub trait MutationBackend: Send + Sync {
     async fn inspect_system_flatpaks(&self) -> Result<FlatpakInstallationSnapshot, AkrepError> {
         Err(AkrepError::BackendUnavailable(
             "System Flatpak inspection backend is not wired on this MutationBackend".to_string(),
+        ))
+    }
+
+    async fn inspect_device_security(&self) -> Result<DeviceSecurityStatus, AkrepError> {
+        Err(AkrepError::BackendUnavailable(
+            "Device security inspection backend is not wired on this MutationBackend".to_string(),
+        ))
+    }
+
+    async fn inspect_scanner(&self) -> Result<ScannerStatusReport, AkrepError> {
+        Err(AkrepError::BackendUnavailable(
+            "Threat scanner inspection backend is not wired on this MutationBackend".to_string(),
+        ))
+    }
+
+    async fn start_scan(
+        &self,
+        _req: ScanRequest,
+        _actor_uid: u32,
+    ) -> Result<ScanProgress, AkrepError> {
+        Err(AkrepError::BackendUnavailable(
+            "Threat scanner backend is not wired on this MutationBackend".to_string(),
+        ))
+    }
+
+    async fn get_scan_status(&self, _job_id: &str) -> Result<ScanProgress, AkrepError> {
+        Err(AkrepError::BackendUnavailable(
+            "Threat scanner backend is not wired on this MutationBackend".to_string(),
+        ))
+    }
+
+    async fn cancel_scan(&self, _job_id: &str) -> Result<ScanProgress, AkrepError> {
+        Err(AkrepError::BackendUnavailable(
+            "Threat scanner backend is not wired on this MutationBackend".to_string(),
+        ))
+    }
+
+    async fn list_quarantine(&self) -> Result<QuarantineInventory, AkrepError> {
+        Err(AkrepError::BackendUnavailable(
+            "Quarantine backend is not wired on this MutationBackend".to_string(),
+        ))
+    }
+
+    async fn list_profiles(&self) -> Result<ProfileCatalogResponse, AkrepError> {
+        Err(AkrepError::BackendUnavailable(
+            "Security profile backend is not wired on this MutationBackend".to_string(),
         ))
     }
 }
@@ -1410,5 +1458,333 @@ impl TransactionEngine {
         serde_json::to_string(&snapshot).map_err(|e| {
             AkrepError::Internal(format!("System Flatpak inspection serialize failed: {}", e))
         })
+    }
+
+    pub async fn inspect_device_security(
+        &self,
+        caller_bus_name: &str,
+    ) -> Result<String, AkrepError> {
+        let caller = match self
+            .authorizer
+            .verify_caller(caller_bus_name, POLKIT_QUARANTINE_MANAGE, false)
+            .await
+        {
+            Ok(c) => c,
+            Err(_) => match self
+                .authorizer
+                .verify_caller(caller_bus_name, POLKIT_SELINUX_DIAGNOSE, true)
+                .await
+            {
+                Ok(c) => c,
+                Err(err) => {
+                    self.audit_logged(
+                        "device_security_inspect_denied",
+                        None,
+                        None,
+                        None,
+                        Some(caller_bus_name),
+                        Some(POLKIT_SELINUX_DIAGNOSE),
+                        "denied",
+                        err.message(),
+                    );
+                    return Err(err.redacted());
+                }
+            },
+        };
+
+        let status = self
+            .backend
+            .inspect_device_security()
+            .await
+            .map_err(|e| e.redacted())?;
+
+        self.audit_logged(
+            "device_security_inspect_completed",
+            None,
+            None,
+            Some(caller.uid),
+            Some(&caller.bus_name),
+            Some(POLKIT_SELINUX_DIAGNOSE),
+            "ok",
+            "Device security posture inspection completed",
+        );
+
+        serde_json::to_string(&status).map_err(|e| {
+            AkrepError::Internal(format!("Device security status serialize failed: {}", e))
+        })
+    }
+
+    pub async fn inspect_scanner(&self, caller_bus_name: &str) -> Result<String, AkrepError> {
+        let caller = match self
+            .authorizer
+            .verify_caller(caller_bus_name, POLKIT_QUARANTINE_MANAGE, true)
+            .await
+        {
+            Ok(c) => c,
+            Err(err) => {
+                self.audit_logged(
+                    "scanner_inspect_denied",
+                    None,
+                    None,
+                    None,
+                    Some(caller_bus_name),
+                    Some(POLKIT_QUARANTINE_MANAGE),
+                    "denied",
+                    err.message(),
+                );
+                return Err(err.redacted());
+            }
+        };
+
+        let report = self
+            .backend
+            .inspect_scanner()
+            .await
+            .map_err(|e| e.redacted())?;
+
+        self.audit_logged(
+            "scanner_inspect_completed",
+            None,
+            None,
+            Some(caller.uid),
+            Some(&caller.bus_name),
+            Some(POLKIT_QUARANTINE_MANAGE),
+            "ok",
+            "Threat scanner engine status inspected",
+        );
+
+        serde_json::to_string(&report)
+            .map_err(|e| AkrepError::Internal(format!("Scanner status serialize failed: {}", e)))
+    }
+
+    pub async fn start_scan(
+        &self,
+        caller_bus_name: &str,
+        scan_req_json: &str,
+    ) -> Result<String, AkrepError> {
+        if scan_req_json.len() > 32_768 || scan_req_json.contains('\0') {
+            return Err(AkrepError::InvalidInput(
+                "Invalid ScanRequest JSON payload".to_string(),
+            ));
+        }
+
+        let caller = match self
+            .authorizer
+            .verify_caller(caller_bus_name, POLKIT_QUARANTINE_MANAGE, true)
+            .await
+        {
+            Ok(c) => c,
+            Err(err) => {
+                self.audit_logged(
+                    "scan_denied",
+                    None,
+                    None,
+                    None,
+                    Some(caller_bus_name),
+                    Some(POLKIT_QUARANTINE_MANAGE),
+                    "denied",
+                    err.message(),
+                );
+                return Err(err.redacted());
+            }
+        };
+
+        let req: ScanRequest = serde_json::from_str(scan_req_json).map_err(|e| {
+            AkrepError::InvalidInput(format!(
+                "Malformed ScanRequest JSON: {}",
+                redact_secrets(&e.to_string())
+            ))
+        })?;
+
+        if let Err(err) = req.validate_red_lines() {
+            self.audit_logged(
+                "scan_rejected_redline",
+                None,
+                None,
+                Some(caller.uid),
+                Some(&caller.bus_name),
+                Some(POLKIT_QUARANTINE_MANAGE),
+                "rejected",
+                err.message(),
+            );
+            return Err(err.redacted());
+        }
+
+        let progress = self
+            .backend
+            .start_scan(req, caller.uid)
+            .await
+            .map_err(|e| e.redacted())?;
+
+        self.audit_logged(
+            "scan_started",
+            None,
+            None,
+            Some(caller.uid),
+            Some(&caller.bus_name),
+            Some(POLKIT_QUARANTINE_MANAGE),
+            "ok",
+            &format!("Started scan job {}", progress.job_id),
+        );
+
+        serde_json::to_string(&progress)
+            .map_err(|e| AkrepError::Internal(format!("ScanProgress serialize failed: {}", e)))
+    }
+
+    pub async fn get_scan_status(
+        &self,
+        caller_bus_name: &str,
+        job_id: &str,
+    ) -> Result<String, AkrepError> {
+        validate_record_id("job_id", job_id)?;
+        self.authorizer
+            .verify_caller(caller_bus_name, POLKIT_QUARANTINE_MANAGE, true)
+            .await
+            .map_err(|e| e.redacted())?;
+
+        let progress = self
+            .backend
+            .get_scan_status(job_id)
+            .await
+            .map_err(|e| e.redacted())?;
+        serde_json::to_string(&progress)
+            .map_err(|e| AkrepError::Internal(format!("ScanProgress serialize failed: {}", e)))
+    }
+
+    pub async fn cancel_scan(
+        &self,
+        caller_bus_name: &str,
+        job_id: &str,
+    ) -> Result<String, AkrepError> {
+        validate_record_id("job_id", job_id)?;
+        let caller = self
+            .authorizer
+            .verify_caller(caller_bus_name, POLKIT_QUARANTINE_MANAGE, true)
+            .await
+            .map_err(|e| e.redacted())?;
+
+        let progress = self
+            .backend
+            .cancel_scan(job_id)
+            .await
+            .map_err(|e| e.redacted())?;
+
+        self.audit_logged(
+            "scan_cancelled",
+            None,
+            None,
+            Some(caller.uid),
+            Some(&caller.bus_name),
+            Some(POLKIT_QUARANTINE_MANAGE),
+            "cancelled",
+            &format!("Cancelled scan job {}", job_id),
+        );
+
+        serde_json::to_string(&progress)
+            .map_err(|e| AkrepError::Internal(format!("ScanProgress serialize failed: {}", e)))
+    }
+
+    pub async fn list_quarantine(&self, caller_bus_name: &str) -> Result<String, AkrepError> {
+        let caller = match self
+            .authorizer
+            .verify_caller(caller_bus_name, POLKIT_QUARANTINE_MANAGE, true)
+            .await
+        {
+            Ok(c) => c,
+            Err(err) => {
+                self.audit_logged(
+                    "quarantine_list_denied",
+                    None,
+                    None,
+                    None,
+                    Some(caller_bus_name),
+                    Some(POLKIT_QUARANTINE_MANAGE),
+                    "denied",
+                    err.message(),
+                );
+                return Err(err.redacted());
+            }
+        };
+
+        let inv = self
+            .backend
+            .list_quarantine()
+            .await
+            .map_err(|e| e.redacted())?;
+
+        self.audit_logged(
+            "quarantine_list_completed",
+            None,
+            None,
+            Some(caller.uid),
+            Some(&caller.bus_name),
+            Some(POLKIT_QUARANTINE_MANAGE),
+            "ok",
+            "Quarantine inventory listed",
+        );
+
+        serde_json::to_string(&inv).map_err(|e| {
+            AkrepError::Internal(format!("QuarantineInventory serialize failed: {}", e))
+        })
+    }
+
+    pub async fn list_profiles(&self, caller_bus_name: &str) -> Result<String, AkrepError> {
+        let caller = match self
+            .authorizer
+            .verify_caller(caller_bus_name, POLKIT_PROFILE_APPLY, true)
+            .await
+        {
+            Ok(c) => c,
+            Err(err) => {
+                self.audit_logged(
+                    "profiles_list_denied",
+                    None,
+                    None,
+                    None,
+                    Some(caller_bus_name),
+                    Some(POLKIT_PROFILE_APPLY),
+                    "denied",
+                    err.message(),
+                );
+                return Err(err.redacted());
+            }
+        };
+
+        let catalog = self
+            .backend
+            .list_profiles()
+            .await
+            .map_err(|e| e.redacted())?;
+
+        self.audit_logged(
+            "profiles_list_completed",
+            None,
+            None,
+            Some(caller.uid),
+            Some(&caller.bus_name),
+            Some(POLKIT_PROFILE_APPLY),
+            "ok",
+            "Security profile catalog listed",
+        );
+
+        serde_json::to_string(&catalog)
+            .map_err(|e| AkrepError::Internal(format!("ProfileCatalog serialize failed: {}", e)))
+    }
+
+    pub async fn preview_profile(
+        &self,
+        caller_bus_name: &str,
+        profile_id: &str,
+    ) -> Result<String, AkrepError> {
+        let plan = self
+            .create_plan(
+                caller_bus_name,
+                ActionRequest::ApplyProfile {
+                    profile_id: profile_id.to_string(),
+                },
+            )
+            .await?;
+        serde_json::to_string(&plan)
+            .map_err(|e| AkrepError::Internal(format!("ActionPlan serialize failed: {}", e)))
     }
 }

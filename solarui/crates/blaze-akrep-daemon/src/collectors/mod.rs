@@ -18,23 +18,18 @@ use zbus::Connection;
 
 pub async fn collect_snapshot(dbus_conn: Option<&Connection>) -> AkrepSnapshot {
     // Run CPU/blocking procfs & sysfs inspection off the tokio reactor cleanly
-    let (
-        posture,
-        selinux_sec,
-        flatpak_sec,
-        packages_sec,
-        history_sec,
-    ) = tokio::task::spawn_blocking(|| {
-        let engine = SentinelEngine::new();
-        let posture = evaluate_security_posture(&engine, false);
-        let selinux_sec = selinux::collect_selinux();
-        let flatpak_sec = flatpak::collect_flatpak();
-        let packages_sec = packages::collect_packages();
-        let history_sec = history::collect_history();
-        (posture, selinux_sec, flatpak_sec, packages_sec, history_sec)
-    })
-    .await
-    .expect("akrep collector blocking task should never panic");
+    let (posture, selinux_sec, flatpak_sec, packages_sec, history_sec) =
+        tokio::task::spawn_blocking(|| {
+            let engine = SentinelEngine::new();
+            let posture = evaluate_security_posture(&engine, false);
+            let selinux_sec = selinux::collect_selinux();
+            let flatpak_sec = flatpak::collect_flatpak();
+            let packages_sec = packages::collect_packages();
+            let history_sec = history::collect_history();
+            (posture, selinux_sec, flatpak_sec, packages_sec, history_sec)
+        })
+        .await
+        .expect("akrep collector blocking task should never panic");
 
     let fw_sec = firewalld::collect_firewalld(dbus_conn).await;
     let dev_sec = kernel::collect_device_and_kernel(&posture);
@@ -69,11 +64,21 @@ pub async fn collect_snapshot(dbus_conn: Option<&Connection>) -> AkrepSnapshot {
             format!("{} çalışma zamanı bütünlük alarmı!", posture.alerts.len())
         },
         summary_en: if posture.integrity_ok {
-            format!("Sentinel v{} integrity verified ({}/{})", SENTINEL_VERSION, posture.passed, posture.total)
+            format!(
+                "Sentinel v{} integrity verified ({}/{})",
+                SENTINEL_VERSION, posture.passed, posture.total
+            )
         } else {
-            format!("{} runtime integrity alert(s) detected", posture.alerts.len())
+            format!(
+                "{} runtime integrity alert(s) detected",
+                posture.alerts.len()
+            )
         },
-        metric: if posture.integrity_ok { "TEMİZ".to_string() } else { "ALARM".to_string() },
+        metric: if posture.integrity_ok {
+            "TEMİZ".to_string()
+        } else {
+            "ALARM".to_string()
+        },
     };
 
     let mut all_findings = findings_from_posture(&posture);
@@ -102,7 +107,10 @@ pub async fn collect_snapshot(dbus_conn: Option<&Connection>) -> AkrepSnapshot {
             AkrepKeyValue {
                 label_tr: "Sentinel Çekirdek Motoru".to_string(),
                 label_en: "Sentinel Core Engine".to_string(),
-                value: format!("v{} ({}/{} kontrol aktif)", SENTINEL_VERSION, posture.passed, posture.total),
+                value: format!(
+                    "v{} ({}/{} kontrol aktif)",
+                    SENTINEL_VERSION, posture.passed, posture.total
+                ),
             },
             AkrepKeyValue {
                 label_tr: "/etc/ld.so.preload Durumu".to_string(),
@@ -117,7 +125,20 @@ pub async fn collect_snapshot(dbus_conn: Option<&Connection>) -> AkrepSnapshot {
             AkrepKeyValue {
                 label_tr: "İsteğe Bağlı AV Tarama Motoru".to_string(),
                 label_en: "AV Scanning Engine".to_string(),
-                value: "Akrep v0.1 kapsamında devre dışı (Salt Okunur teşhis)".to_string(),
+                value: if Path::new("/run/clamd.scan/clamd.sock").exists()
+                    || Path::new("/var/run/clamd.scan/clamd.sock").exists()
+                {
+                    "ClamAV Unix Soketi Hazır (Talep Üzerine Tarama)".to_string()
+                } else if Path::new("/usr/bin/clamscan").is_file()
+                    && (Path::new("/var/lib/clamav/daily.cld").is_file()
+                        || Path::new("/var/lib/clamav/daily.cvd").is_file()
+                        || Path::new("/var/lib/clamav/main.cld").is_file()
+                        || Path::new("/var/lib/clamav/main.cvd").is_file())
+                {
+                    "ClamAV CLI Hazır (Talep Üzerine Tarama)".to_string()
+                } else {
+                    "Kullanılamıyor (İsteğe bağlı: clamav, clamd, clamav-freshclam)".to_string()
+                },
             },
         ],
         findings: threat_findings,

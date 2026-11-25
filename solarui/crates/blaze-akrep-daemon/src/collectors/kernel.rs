@@ -50,25 +50,50 @@ pub fn collect_device_and_kernel(posture: &PostureReport) -> DeviceSecuritySecti
     };
 
     let mut findings = Vec::new();
-    if sb.uefi_boot && sb.secure_boot_enabled == Some(false) {
-        status = status.combine(AkrepSeverity::Warning);
-        findings.push(AkrepFinding {
-            id: "device.secure_boot_off".to_string(),
-            section: "device_security".to_string(),
-            severity: AkrepSeverity::Warning,
-            availability: Availability::Available,
-            title_tr: "UEFI Secure Boot Devre Dışı".to_string(),
-            title_en: "UEFI Secure Boot Disabled".to_string(),
-            description_tr: "Önyükleme zinciri imzasız çekirdek/modüllere karşı donanım doğrulaması uygulamıyor.".to_string(),
-            description_en: "Boot firmware does not currently enforce UEFI Secure Boot signature verification.".to_string(),
-            remediation_hint_tr: "Üçüncü taraf imzasız sürücü gerekmiyorsa UEFI ayarlarından Secure Boot etkinleştirilebilir.".to_string(),
-            remediation_hint_en: "Enable Secure Boot in firmware settings when signed kernel/drivers are used.".to_string(),
-            source: "collectors/secureboot".to_string(),
-            read_only_note: "Salt Okunur v0.1 — UEFI değişkenleri değiştirilmez.".to_string(),
-        });
+    match (sb.uefi_boot, sb.secure_boot_enabled) {
+        (true, Some(true)) => {}
+        (true, Some(false)) => {
+            status = status.combine(AkrepSeverity::Warning);
+            findings.push(AkrepFinding {
+                id: "device.secure_boot_off".to_string(),
+                section: "device_security".to_string(),
+                severity: AkrepSeverity::Warning,
+                availability: Availability::Available,
+                title_tr: "UEFI Secure Boot Devre Dışı".to_string(),
+                title_en: "UEFI Secure Boot Disabled".to_string(),
+                description_tr: "Önyükleme zinciri imzasız çekirdek/modüllere karşı donanım doğrulaması uygulamıyor.".to_string(),
+                description_en: "Boot firmware does not currently enforce UEFI Secure Boot signature verification.".to_string(),
+                remediation_hint_tr: "Üçüncü taraf imzasız sürücü gerekmiyorsa UEFI ayarlarından Secure Boot etkinleştirilebilir.".to_string(),
+                remediation_hint_en: "Enable Secure Boot in firmware settings when signed kernel/drivers are used.".to_string(),
+                source: "collectors/secureboot".to_string(),
+                read_only_note: "Salt Okunur — UEFI değişkenleri değiştirilmez.".to_string(),
+            });
+        }
+        (false, _) | (true, None) => {
+            status = status.combine(AkrepSeverity::Unavailable);
+        }
     }
 
+    let cmdline = fs::read_to_string("/proc/cmdline").unwrap_or_default();
+    let sysfs_sig = fs::read_to_string("/sys/module/module/parameters/sig_enforce")
+        .ok()
+        .map(|s| matches!(s.trim(), "Y" | "y" | "1"))
+        .unwrap_or(false);
+    let mod_sig_enforced = cmdline
+        .split_whitespace()
+        .any(|t| t == "module.sig_enforce=1" || t == "module.sig_enforce=y")
+        || sysfs_sig;
+
     let mut metrics = sb.metrics;
+    metrics.push(AkrepKeyValue {
+        label_tr: "Kernel Modül İmza Zorunluluğu".to_string(),
+        label_en: "Module Signature Enforcement".to_string(),
+        value: if mod_sig_enforced {
+            "Aktif (sig_enforce=1)".to_string()
+        } else {
+            "Pasif".to_string()
+        },
+    });
     metrics.push(AkrepKeyValue {
         label_tr: "Kernel Lockdown".to_string(),
         label_en: "Kernel Lockdown".to_string(),
@@ -107,7 +132,10 @@ pub fn collect_device_and_kernel(posture: &PostureReport) -> DeviceSecuritySecti
         },
         sb.tpm_version_tr
     );
-    let summary_en = format!("Sysctl {}/{} • {}", sysctl_passed, sysctl_total, sb.tpm_version_en);
+    let summary_en = format!(
+        "Sysctl {}/{} • {}",
+        sysctl_passed, sysctl_total, sb.tpm_version_en
+    );
 
     let card = AkrepCardSummary {
         id: "device_security".to_string(),
@@ -132,5 +160,9 @@ pub fn collect_device_and_kernel(posture: &PostureReport) -> DeviceSecuritySecti
         findings: findings.clone(),
     };
 
-    DeviceSecuritySection { card, detail, findings }
+    DeviceSecuritySection {
+        card,
+        detail,
+        findings,
+    }
 }

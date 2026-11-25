@@ -251,4 +251,104 @@ impl PrivilegedManager {
             .await
             .map_err(map_akrep_error_to_fdo)
     }
+
+    async fn inspect_device_security(
+        &self,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<String> {
+        let _guard = self.idle.begin_call();
+        let caller = extract_caller_bus_name(&header)?;
+        self.engine
+            .inspect_device_security(&caller)
+            .await
+            .map_err(map_akrep_error_to_fdo)
+    }
+
+    async fn inspect_scanner(
+        &self,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<String> {
+        let _guard = self.idle.begin_call();
+        let caller = extract_caller_bus_name(&header)?;
+        self.engine
+            .inspect_scanner(&caller)
+            .await
+            .map_err(map_akrep_error_to_fdo)
+    }
+
+    async fn start_scan(
+        &self,
+        scan_req_json: &str,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<String> {
+        let _guard = self.idle.begin_call();
+        let caller = extract_caller_bus_name(&header)?;
+        self.engine
+            .start_scan(&caller, scan_req_json)
+            .await
+            .map_err(map_akrep_error_to_fdo)
+    }
+
+    async fn get_scan_status(
+        &self,
+        job_id: &str,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<String> {
+        let _guard = self.idle.begin_call();
+        let caller = extract_caller_bus_name(&header)?;
+        self.engine
+            .get_scan_status(&caller, job_id)
+            .await
+            .map_err(map_akrep_error_to_fdo)
+    }
+
+    async fn cancel_scan(
+        &self,
+        job_id: &str,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<String> {
+        let _guard = self.idle.begin_call();
+        let caller = extract_caller_bus_name(&header)?;
+        self.engine
+            .cancel_scan(&caller, job_id)
+            .await
+            .map_err(map_akrep_error_to_fdo)
+    }
+
+    async fn list_quarantine(
+        &self,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<String> {
+        let _guard = self.idle.begin_call();
+        let caller = extract_caller_bus_name(&header)?;
+        self.engine
+            .list_quarantine(&caller)
+            .await
+            .map_err(map_akrep_error_to_fdo)
+    }
+
+    async fn list_profiles(
+        &self,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<String> {
+        let _guard = self.idle.begin_call();
+        let caller = extract_caller_bus_name(&header)?;
+        self.engine
+            .list_profiles(&caller)
+            .await
+            .map_err(map_akrep_error_to_fdo)
+    }
+
+    async fn preview_profile(
+        &self,
+        profile_id: &str,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<String> {
+        let _guard = self.idle.begin_call();
+        let caller = extract_caller_bus_name(&header)?;
+        self.engine
+            .preview_profile(&caller, profile_id)
+            .await
+            .map_err(map_akrep_error_to_fdo)
+    }
 }

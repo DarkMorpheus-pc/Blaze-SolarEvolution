@@ -1,0 +1,56 @@
+id = "gaming"
+version = 1
+name_tr = "Oyun & Yerel Ag Aktarimi"
+name_en = "Gaming & Steam LAN"
+description_tr = "SELinux Enforcing ve bellek koruma anahtarlarini kapatmadan yalnizca RFC1918 ozel yerel ag alt aglari icin Steam LAN Transfer (27040/tcp) ve Remote Play (27031-27036/udp) kurallarini acar."
+description_en = "Opens Steam LAN Game Transfer (27040/tcp) and Remote Play (27031-27036/udp) strictly for RFC1918 private LAN subnets while keeping SELinux and W^X memory protections enforced."
+selinux_required = true
+firewalld_required = true
+target_zone = "FedoraWorkstation"
+fallback_zone = "public"
+allow_permanent_rules = false
+preserve_flatpak_sandbox = true
+preserve_portal_consent = true
+forbidden_booleans = ["selinuxuser_execheap", "selinuxuser_execstack"]
+
+[[lan_rich_rules]]
+cidr = "192.168.0.0/16"
+port = "27040"
+proto = "tcp"
+permanent = false
+description = "Steam LAN Game Transfer (RFC1918 192.168.0.0/16)"
+
+[[lan_rich_rules]]
+cidr = "10.0.0.0/8"
+port = "27040"
+proto = "tcp"
+permanent = false
+description = "Steam LAN Game Transfer (RFC1918 10.0.0.0/8)"
+
+[[lan_rich_rules]]
+cidr = "172.16.0.0/12"
+port = "27040"
+proto = "tcp"
+permanent = false
+description = "Steam LAN Game Transfer (RFC1918 172.16.0.0/12)"
+
+[[lan_rich_rules]]
+cidr = "192.168.0.0/16"
+port = "27031-27036"
+proto = "udp"
+permanent = false
+description = "Steam Remote Play Discovery & Streaming (RFC1918 192.168.0.0/16)"
+
+[[lan_rich_rules]]
+cidr = "10.0.0.0/8"
+port = "27031-27036"
+proto = "udp"
+permanent = false
+description = "Steam Remote Play Discovery & Streaming (RFC1918 10.0.0.0/8)"
+
+[[lan_rich_rules]]
+cidr = "172.16.0.0/12"
+port = "27031-27036"
+proto = "udp"
+permanent = false
+description = "Steam Remote Play Discovery & Streaming (RFC1918 172.16.0.0/12)"

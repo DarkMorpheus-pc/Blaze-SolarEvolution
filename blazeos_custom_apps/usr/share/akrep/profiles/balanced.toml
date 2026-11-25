@@ -1,0 +1,15 @@
+id = "balanced"
+version = 1
+name_tr = "Dengeli Masaustu (Varsayilan)"
+name_en = "Balanced Workstation (Default)"
+description_tr = "SELinux Enforcing ve FedoraWorkstation guvenlik duvari bolgesi ile Akrep tarafindan yonetilen ek kural/anahtarlari temel duruma dondurur; kullanici kurallarini korur."
+description_en = "Restores Akrep-managed booleans, LAN rich rules, and interface zone overrides back to the FedoraWorkstation baseline while preserving user-created rules."
+selinux_required = true
+firewalld_required = true
+target_zone = "FedoraWorkstation"
+fallback_zone = "public"
+allow_permanent_rules = false
+preserve_flatpak_sandbox = true
+preserve_portal_consent = true
+clear_managed_rules = true
+forbidden_booleans = ["selinuxuser_execheap", "selinuxuser_execstack"]

@@ -1,0 +1,15 @@
+id = "public-network"
+version = 1
+name_tr = "Herkese Acik Ag Kilidi"
+name_en = "Public Network Lockdown"
+description_tr = "Etkin ag arayuzlerini calisma zamaninda public bolgesine tasiyarak 1025-65535 yuksek port araligini, mdns, samba-client ve ssh gelen erisimini kapatir."
+description_en = "Switches active network interfaces to the runtime public zone, closing high ports (1025-65535/tcp,udp), mdns, samba-client, and runtime ssh access on untrusted networks."
+selinux_required = true
+firewalld_required = true
+target_zone = "public"
+allow_permanent_rules = false
+preserve_flatpak_sandbox = true
+preserve_portal_consent = true
+lock_interfaces_to_target_zone = true
+remove_runtime_services_in_target_zone = ["ssh", "mdns", "samba-client", "cockpit"]
+forbidden_booleans = ["selinuxuser_execheap", "selinuxuser_execstack"]

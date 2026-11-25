@@ -20,25 +20,29 @@ pub fn collect_secureboot_and_tpm() -> SecureBootTelemetry {
     let uefi_boot = Path::new("/sys/firmware/efi").exists();
     let secure_boot_enabled = if uefi_boot {
         fs::read(EFI_SECURE_BOOT_VAR).ok().and_then(|bytes| {
-            // efivarfs format: 4-byte attributes followed by 1-byte value
-            if bytes.len() >= 5 {
-                Some(bytes[4] == 1)
-            } else {
-                None
-            }
+            bytes.last().and_then(|b| match *b {
+                1 => Some(true),
+                0 => Some(false),
+                _ => None,
+            })
         })
     } else {
-        Some(false)
+        None
     };
 
     let tpm_ver_raw = fs::read_to_string("/sys/class/tpm/tpm0/tpm_version_major")
         .ok()
         .map(|s| s.trim().to_string());
-    let tpm_present = Path::new("/dev/tpmrm0").exists() || Path::new("/sys/class/tpm/tpm0").exists();
+    let tpm_present = tpm_ver_raw.as_deref() == Some("2")
+        || Path::new("/dev/tpmrm0").exists()
+        || Path::new("/sys/class/tpm/tpm0").exists();
     let (tpm_version_tr, tpm_version_en) = match tpm_ver_raw {
         Some(v) if !v.is_empty() => (format!("TPM {}.0", v), format!("TPM {}.0", v)),
         _ if tpm_present => ("TPM Mevcut".to_string(), "TPM Present".to_string()),
-        _ => ("TPM Yok / Devre Dışı".to_string(), "TPM None / Disabled".to_string()),
+        _ => (
+            "TPM Yok / Devre Dışı".to_string(),
+            "TPM None / Disabled".to_string(),
+        ),
     };
 
     let iommu_active = fs::read_dir("/sys/class/iommu")
@@ -56,7 +60,11 @@ pub fn collect_secureboot_and_tpm() -> SecureBootTelemetry {
         AkrepKeyValue {
             label_tr: "Önyükleme Aygıt Yazılımı".to_string(),
             label_en: "Boot Firmware".to_string(),
-            value: if uefi_boot { "UEFI".to_string() } else { "Legacy BIOS".to_string() },
+            value: if uefi_boot {
+                "UEFI".to_string()
+            } else {
+                "Legacy BIOS".to_string()
+            },
         },
         AkrepKeyValue {
             label_tr: "UEFI Secure Boot".to_string(),
@@ -71,7 +79,11 @@ pub fn collect_secureboot_and_tpm() -> SecureBootTelemetry {
         AkrepKeyValue {
             label_tr: "IOMMU DMA Koruması".to_string(),
             label_en: "IOMMU DMA Isolation".to_string(),
-            value: if iommu_active { "Aktif".to_string() } else { "Pasif / Sanal Donanım".to_string() },
+            value: if iommu_active {
+                "Aktif".to_string()
+            } else {
+                "Pasif / Sanal Donanım".to_string()
+            },
         },
     ];
 

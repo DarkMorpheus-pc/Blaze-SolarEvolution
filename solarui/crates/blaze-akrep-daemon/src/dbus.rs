@@ -31,7 +31,12 @@ impl AkrepManager {
         let known_findings = initial
             .findings
             .iter()
-            .map(|f| (f.id.clone(), (f.severity.as_str().to_string(), f.title_tr.clone())))
+            .map(|f| {
+                (
+                    f.id.clone(),
+                    (f.severity.as_str().to_string(), f.title_tr.clone()),
+                )
+            })
             .collect();
         Self {
             conn,
@@ -68,7 +73,12 @@ impl AkrepManager {
         let fresh_map: HashMap<String, (String, String)> = fresh
             .findings
             .iter()
-            .map(|f| (f.id.clone(), (f.severity.as_str().to_string(), f.title_tr.clone())))
+            .map(|f| {
+                (
+                    f.id.clone(),
+                    (f.severity.as_str().to_string(), f.title_tr.clone()),
+                )
+            })
             .collect();
 
         let (prev_overall, added, resolved) = {
@@ -93,12 +103,8 @@ impl AkrepManager {
 
         if let Some(em) = emitter {
             if prev_overall != fresh.overall_status {
-                let _ = Self::status_changed(
-                    em,
-                    fresh.overall_status.as_str(),
-                    &fresh.headline_tr,
-                )
-                .await;
+                let _ = Self::status_changed(em, fresh.overall_status.as_str(), &fresh.headline_tr)
+                    .await;
             }
             for (fid, sev, title) in added {
                 let _ = Self::finding_added(em, &fid, &sev, &title).await;

@@ -1,0 +1,19 @@
+id = "developer"
+version = 1
+name_tr = "Gelistirici & Kapsayici"
+name_en = "Developer & Container"
+description_tr = "SELinux Enforcing, Flatpak kum havuzlari ve XDG Portal izinlerini koruyarak kapsayici cgroup yonetimi (container_manage_cgroup) anahtarini etkinlestirir."
+description_en = "Enables container_manage_cgroup for Podman/systemd container workflows while keeping SELinux Enforcing, Flatpak sandboxes, and Portal consent intact."
+selinux_required = true
+firewalld_required = true
+target_zone = "FedoraWorkstation"
+fallback_zone = "public"
+allow_permanent_rules = false
+preserve_flatpak_sandbox = true
+preserve_portal_consent = true
+forbidden_booleans = ["selinuxuser_execheap", "selinuxuser_execstack"]
+
+[[managed_booleans]]
+name = "container_manage_cgroup"
+value = true
+persistent = true

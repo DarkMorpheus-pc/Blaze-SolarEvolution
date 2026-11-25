@@ -95,11 +95,15 @@ pub fn collect_history() -> HistorySection {
     }
 
     let summary_tr = match avail {
-        Availability::Available => "Kurtarma ve bütünlük günlükleri salt okunur denetlendi".to_string(),
+        Availability::Available => {
+            "Kurtarma ve bütünlük günlükleri salt okunur denetlendi".to_string()
+        }
         _ => "Kısıtlı denetim günlükleri root yetkisi gerektirir (Salt Okunur)".to_string(),
     };
     let summary_en = match avail {
-        Availability::Available => "Recovery and integrity event logs inspected read-only".to_string(),
+        Availability::Available => {
+            "Recovery and integrity event logs inspected read-only".to_string()
+        }
         _ => "Privileged audit logs restricted under least-privilege service".to_string(),
     };
 

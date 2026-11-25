@@ -111,6 +111,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "toml 0.8.23",
  "zbus",
 ]
 
@@ -145,8 +146,10 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "toml 0.8.23",
  "tracing",
  "tracing-subscriber",
+ "walkdir",
  "zbus",
 ]
 

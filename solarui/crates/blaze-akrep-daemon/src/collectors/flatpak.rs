@@ -39,7 +39,8 @@ fn classify_elevated_tokens(perms: &[(String, String)], source_label: &str) -> V
             }
             if (k == "filesystems" && (clean == "host" || clean == "host-os" || clean == "home"))
                 || (k == "devices" && clean == "all")
-                || (k == "sockets" && (clean == "x11" || clean == "system-bus" || clean == "session-bus"))
+                || (k == "sockets"
+                    && (clean == "x11" || clean == "system-bus" || clean == "session-bus"))
                 || (k == "shared" && clean == "network")
             {
                 alerts.push(format!("{}={} ({})", k, clean, source_label));
@@ -104,10 +105,20 @@ pub fn collect_flatpak() -> FlatpakSection {
             availability: Availability::Available,
             title_tr: "Genel Flatpak Sistem Override İzni".to_string(),
             title_en: "Global Flatpak System Override Detected".to_string(),
-            description_tr: format!("Tüm Flatpak uygulamalarına uygulanan yüksek izinler: {}", global_overrides.join(", ")),
-            description_en: format!("Elevated global Flatpak overrides: {}", global_overrides.join(", ")),
-            remediation_hint_tr: "`flatpak override --show` ile kapsamı inceleyin (Akrep v0.1 izni değiştirmez).".to_string(),
-            remediation_hint_en: "Inspect permissions using `flatpak override --show` (read-only in v0.1).".to_string(),
+            description_tr: format!(
+                "Tüm Flatpak uygulamalarına uygulanan yüksek izinler: {}",
+                global_overrides.join(", ")
+            ),
+            description_en: format!(
+                "Elevated global Flatpak overrides: {}",
+                global_overrides.join(", ")
+            ),
+            remediation_hint_tr:
+                "`flatpak override --show` ile kapsamı inceleyin (Akrep v0.1 izni değiştirmez)."
+                    .to_string(),
+            remediation_hint_en:
+                "Inspect permissions using `flatpak override --show` (read-only in v0.1)."
+                    .to_string(),
             source: "/var/lib/flatpak/overrides/global".to_string(),
             read_only_note: "Salt Okunur v0.1 — izin yazımı veya kısıtlama yapılmaz.".to_string(),
         });
@@ -115,7 +126,10 @@ pub fn collect_flatpak() -> FlatpakSection {
 
     let mut broad_host_apps = 0usize;
     for (app_id, elevated) in &apps {
-        if elevated.iter().any(|e| e.contains("filesystems=host") || e.contains("devices=all")) {
+        if elevated
+            .iter()
+            .any(|e| e.contains("filesystems=host") || e.contains("devices=all"))
+        {
             broad_host_apps += 1;
             status = status.combine(AkrepSeverity::Warning);
             findings.push(AkrepFinding {
@@ -127,8 +141,14 @@ pub fn collect_flatpak() -> FlatpakSection {
                 title_en: format!("Broad Sandbox Permission: {}", app_id),
                 description_tr: format!("Algılanan yetkiler: {}", elevated.join(", ")),
                 description_en: format!("Detected permissions: {}", elevated.join(", ")),
-                remediation_hint_tr: format!("Gerekirse `flatpak info --show-permissions {}` ile doğrulayın.", app_id),
-                remediation_hint_en: format!("Review with `flatpak info --show-permissions {}` if needed.", app_id),
+                remediation_hint_tr: format!(
+                    "Gerekirse `flatpak info --show-permissions {}` ile doğrulayın.",
+                    app_id
+                ),
+                remediation_hint_en: format!(
+                    "Review with `flatpak info --show-permissions {}` if needed.",
+                    app_id
+                ),
                 source: "collectors/flatpak".to_string(),
                 read_only_note: "Salt Okunur v0.1 — override uygulanmaz.".to_string(),
             });
@@ -160,7 +180,11 @@ pub fn collect_flatpak() -> FlatpakSection {
         value: "Sistem /var/lib/flatpak (Salt Okunur)".to_string(),
     });
 
-    let summary_tr = format!("{} uygulama • {} geniş yetkili", apps.len(), broad_host_apps);
+    let summary_tr = format!(
+        "{} uygulama • {} geniş yetkili",
+        apps.len(),
+        broad_host_apps
+    );
     let summary_en = format!("{} app(s) • {} broad access", apps.len(), broad_host_apps);
 
     let card = AkrepCardSummary {
@@ -186,5 +210,9 @@ pub fn collect_flatpak() -> FlatpakSection {
         findings: findings.clone(),
     };
 
-    FlatpakSection { card, detail, findings }
+    FlatpakSection {
+        card,
+        detail,
+        findings,
+    }
 }
