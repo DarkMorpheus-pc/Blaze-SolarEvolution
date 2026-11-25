@@ -239,4 +239,16 @@ impl PrivilegedManager {
             .await
             .map_err(map_akrep_error_to_fdo)
     }
+
+    async fn inspect_system_flatpaks(
+        &self,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<String> {
+        let _guard = self.idle.begin_call();
+        let caller = extract_caller_bus_name(&header)?;
+        self.engine
+            .inspect_system_flatpaks(&caller)
+            .await
+            .map_err(map_akrep_error_to_fdo)
+    }
 }

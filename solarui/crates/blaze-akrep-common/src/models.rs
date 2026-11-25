@@ -343,8 +343,13 @@ pub fn validate_network_interface(interface: &str) -> Result<(), AkrepError> {
     Ok(())
 }
 
-fn validate_flatpak_app_id(app_id: &str) -> Result<(), AkrepError> {
+pub fn validate_flatpak_app_id(app_id: &str) -> Result<(), AkrepError> {
     let trimmed = app_id.trim();
+    if trimmed != app_id {
+        return Err(AkrepError::InvalidInput(
+            "Flatpak app_id must not contain leading or trailing whitespace".to_string(),
+        ));
+    }
     if trimmed.eq_ignore_ascii_case("global") {
         return Err(AkrepError::ForbiddenOperation(
             "Global Flatpak overrides ('global') are strictly forbidden".to_string(),
@@ -360,6 +365,12 @@ fn validate_flatpak_app_id(app_id: &str) -> Result<(), AkrepError> {
         return Err(AkrepError::ForbiddenOperation(
             "Flatpak app_id must not contain path separators or '..'".to_string(),
         ));
+    }
+    if !trimmed.as_bytes()[0].is_ascii_alphabetic() {
+        return Err(AkrepError::InvalidInput(format!(
+            "Flatpak app_id '{}' must start with an ASCII letter",
+            trimmed
+        )));
     }
     let segments: Vec<&str> = trimmed.split('.').collect();
     if segments.len() < 3 {
@@ -383,7 +394,7 @@ fn validate_flatpak_app_id(app_id: &str) -> Result<(), AkrepError> {
     Ok(())
 }
 
-fn is_forbidden_blanket_filesystem_grant(token: &str) -> bool {
+pub fn is_forbidden_blanket_filesystem_grant(token: &str) -> bool {
     let trimmed = token.trim();
     if trimmed.starts_with('!') {
         return false;
@@ -445,7 +456,7 @@ fn bus_pattern_matches(pattern: &str, target: &str) -> bool {
     false
 }
 
-fn is_forbidden_bus_policy_grant(section: &str, bus_name: &str, policy: &str) -> bool {
+pub fn is_forbidden_bus_policy_grant(section: &str, bus_name: &str, policy: &str) -> bool {
     let norm_policy = policy.trim().to_ascii_lowercase();
     if !matches!(norm_policy.as_str(), "talk" | "own") {
         return false;
@@ -477,6 +488,66 @@ fn is_forbidden_bus_policy_grant(section: &str, bus_name: &str, policy: &str) ->
             .any(|b| bus_pattern_matches(bus_name, b)),
         _ => false,
     }
+}
+
+pub fn validate_flatpak_override_changes(
+    additions: &[(String, String)],
+    removals: &[(String, String)],
+) -> Result<(), AkrepError> {
+    if additions.is_empty() && removals.is_empty() {
+        return Err(AkrepError::InvalidInput(
+            "FlatpakSetOverride requires at least one addition or removal".to_string(),
+        ));
+    }
+
+    for (spec, tok) in additions {
+        reject_shell_metacharacters("flatpak.addition.key", spec)?;
+        reject_shell_metacharacters("flatpak.addition.token", tok)?;
+        if tok.contains("..") {
+            return Err(AkrepError::ForbiddenOperation(
+                "Path traversal '..' is forbidden in Flatpak override token".to_string(),
+            ));
+        }
+        let (sec, key) = resolve_override_spec(spec)?;
+        let trimmed_tok = tok.trim();
+        if sec == "Context"
+            && key == "filesystems"
+            && is_forbidden_blanket_filesystem_grant(trimmed_tok)
+        {
+            return Err(AkrepError::ForbiddenOperation(format!(
+                "Blanket Flatpak filesystem grant '{}' is forbidden",
+                trimmed_tok
+            )));
+        }
+        let dev_base = trimmed_tok.split(':').next().unwrap_or(trimmed_tok).trim();
+        if sec == "Context"
+            && key == "devices"
+            && !trimmed_tok.starts_with('!')
+            && dev_base.eq_ignore_ascii_case("all")
+        {
+            return Err(AkrepError::ForbiddenOperation(
+                "Blanket Flatpak device grant 'devices=all' is forbidden".to_string(),
+            ));
+        }
+        if is_forbidden_bus_policy_grant(&sec, &key, trimmed_tok) {
+            return Err(AkrepError::ForbiddenOperation(format!(
+                "Sandbox-escape D-Bus grant '[{}].{}={}' is forbidden",
+                sec, key, trimmed_tok
+            )));
+        }
+    }
+
+    for (spec, tok) in removals {
+        reject_shell_metacharacters("flatpak.removal.key", spec)?;
+        reject_shell_metacharacters("flatpak.removal.token", tok)?;
+        if tok.contains("..") {
+            return Err(AkrepError::ForbiddenOperation(
+                "Path traversal '..' is forbidden in Flatpak removal token".to_string(),
+            ));
+        }
+        let _ = resolve_override_spec(spec)?;
+    }
+    Ok(())
 }
 
 impl ActionRequest {
@@ -620,60 +691,7 @@ impl ActionRequest {
                 ..
             } => {
                 validate_flatpak_app_id(app_id)?;
-                if additions.is_empty() && removals.is_empty() {
-                    return Err(AkrepError::InvalidInput(
-                        "FlatpakSetOverride requires at least one addition or removal".to_string(),
-                    ));
-                }
-
-                for (spec, tok) in additions {
-                    reject_shell_metacharacters("flatpak.addition.key", spec)?;
-                    reject_shell_metacharacters("flatpak.addition.token", tok)?;
-                    if tok.contains("..") {
-                        return Err(AkrepError::ForbiddenOperation(
-                            "Path traversal '..' is forbidden in Flatpak override token"
-                                .to_string(),
-                        ));
-                    }
-                    let (sec, key) = resolve_override_spec(spec)?;
-                    let trimmed_tok = tok.trim();
-                    if sec == "Context"
-                        && key == "filesystems"
-                        && is_forbidden_blanket_filesystem_grant(trimmed_tok)
-                    {
-                        return Err(AkrepError::ForbiddenOperation(format!(
-                            "Blanket Flatpak filesystem grant '{}' is forbidden",
-                            trimmed_tok
-                        )));
-                    }
-                    if sec == "Context"
-                        && key == "devices"
-                        && !trimmed_tok.starts_with('!')
-                        && trimmed_tok == "all"
-                    {
-                        return Err(AkrepError::ForbiddenOperation(
-                            "Blanket Flatpak device grant 'devices=all' is forbidden".to_string(),
-                        ));
-                    }
-                    if is_forbidden_bus_policy_grant(&sec, &key, trimmed_tok) {
-                        return Err(AkrepError::ForbiddenOperation(format!(
-                            "Sandbox-escape D-Bus grant '[{}].{}={}' is forbidden",
-                            sec, key, trimmed_tok
-                        )));
-                    }
-                }
-
-                for (spec, tok) in removals {
-                    reject_shell_metacharacters("flatpak.removal.key", spec)?;
-                    reject_shell_metacharacters("flatpak.removal.token", tok)?;
-                    if tok.contains("..") {
-                        return Err(AkrepError::ForbiddenOperation(
-                            "Path traversal '..' is forbidden in Flatpak removal token".to_string(),
-                        ));
-                    }
-                    let _ = resolve_override_spec(spec)?;
-                }
-                Ok(())
+                validate_flatpak_override_changes(additions, removals)
             }
             Self::QuarantineFile { path, threat_name } => {
                 validate_safe_absolute_path("quarantine.path", path)?;

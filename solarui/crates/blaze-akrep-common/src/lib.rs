@@ -1,15 +1,19 @@
 pub mod domain_types;
 pub mod errors;
+pub mod flatpak_inventory;
 pub mod ini_override;
 pub mod models;
+pub mod privacy;
 pub mod protocol;
 pub mod rich_rule;
 pub mod transactions;
 
 pub use domain_types::*;
 pub use errors::*;
+pub use flatpak_inventory::*;
 pub use ini_override::*;
 pub use models::*;
+pub use privacy::*;
 pub use protocol::*;
 pub use rich_rule::*;
 pub use transactions::*;

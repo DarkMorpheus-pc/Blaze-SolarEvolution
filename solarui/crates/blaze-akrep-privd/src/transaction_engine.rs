@@ -1,11 +1,13 @@
+use crate::adapters::USER_SCOPE_PRIVD_REJECTION_MSG;
 use crate::audit::AuditLogger;
 use crate::authorization::Authorizer;
 use async_trait::async_trait;
 use blaze_akrep_common::{
     generate_uuid_v4, redact_secrets, reject_forbidden_selinux_directives_in_json_value,
-    validate_zone_name, ActionPlan, ActionRequest, AkrepError, FirewallStateSnapshot, PlanDiffItem,
-    RiskLevel, SelinuxDiagnoseQuery, SelinuxDiagnoseResponse, StateFingerprint, TransactionRecord,
-    TransactionState, ALL_POLKIT_ACTIONS, POLKIT_FIREWALL_MANAGE, POLKIT_PROFILE_APPLY,
+    validate_zone_name, ActionPlan, ActionRequest, AkrepError, FirewallStateSnapshot,
+    FlatpakInstallationSnapshot, FlatpakScope, PlanDiffItem, RiskLevel, SelinuxDiagnoseQuery,
+    SelinuxDiagnoseResponse, StateFingerprint, TransactionRecord, TransactionState,
+    ALL_POLKIT_ACTIONS, POLKIT_FIREWALL_MANAGE, POLKIT_FLATPAK_SYSTEM_MANAGE, POLKIT_PROFILE_APPLY,
     POLKIT_SELINUX_DIAGNOSE,
 };
 use chrono::{DateTime, Utc};
@@ -76,6 +78,12 @@ pub trait MutationBackend: Send + Sync {
     ) -> Result<FirewallStateSnapshot, AkrepError> {
         Err(AkrepError::BackendUnavailable(
             "Firewall inspection backend is not wired on this MutationBackend".to_string(),
+        ))
+    }
+
+    async fn inspect_system_flatpaks(&self) -> Result<FlatpakInstallationSnapshot, AkrepError> {
+        Err(AkrepError::BackendUnavailable(
+            "System Flatpak inspection backend is not wired on this MutationBackend".to_string(),
         ))
     }
 }
@@ -552,6 +560,27 @@ impl TransactionEngine {
             ));
         }
 
+        if matches!(
+            req,
+            ActionRequest::FlatpakSetOverride {
+                scope: FlatpakScope::User,
+                ..
+            }
+        ) {
+            let msg = USER_SCOPE_PRIVD_REJECTION_MSG.to_string();
+            self.audit_logged(
+                "plan_rejected_redline",
+                None,
+                None,
+                None,
+                Some(caller_bus_name),
+                Some(POLKIT_FLATPAK_SYSTEM_MANAGE),
+                "rejected",
+                &msg,
+            );
+            return Err(AkrepError::ForbiddenOperation(msg));
+        }
+
         let polkit_action = req.required_polkit_action();
         let caller = match self
             .authorizer
@@ -671,6 +700,18 @@ impl TransactionEngine {
         if plan.request.is_test_only() && !self.allow_test_actions {
             return Err(AkrepError::ForbiddenOperation(
                 "Test-only actions are disabled on production D-Bus".to_string(),
+            ));
+        }
+
+        if matches!(
+            plan.request,
+            ActionRequest::FlatpakSetOverride {
+                scope: FlatpakScope::User,
+                ..
+            }
+        ) {
+            return Err(AkrepError::ForbiddenOperation(
+                USER_SCOPE_PRIVD_REJECTION_MSG.to_string(),
             ));
         }
 
@@ -1321,6 +1362,53 @@ impl TransactionEngine {
 
         serde_json::to_string(&snapshot).map_err(|e| {
             AkrepError::Internal(format!("Firewall inspection serialize failed: {}", e))
+        })
+    }
+
+    pub async fn inspect_system_flatpaks(
+        &self,
+        caller_bus_name: &str,
+    ) -> Result<String, AkrepError> {
+        let caller = match self
+            .authorizer
+            .verify_caller(caller_bus_name, POLKIT_FLATPAK_SYSTEM_MANAGE, true)
+            .await
+        {
+            Ok(c) => c,
+            Err(err) => {
+                self.audit_logged(
+                    "flatpak_inspect_denied",
+                    None,
+                    None,
+                    None,
+                    Some(caller_bus_name),
+                    Some(POLKIT_FLATPAK_SYSTEM_MANAGE),
+                    "denied",
+                    err.message(),
+                );
+                return Err(err.redacted());
+            }
+        };
+
+        let snapshot = self
+            .backend
+            .inspect_system_flatpaks()
+            .await
+            .map_err(|e| e.redacted())?;
+
+        self.audit_logged(
+            "flatpak_inspect_completed",
+            None,
+            None,
+            Some(caller.uid),
+            Some(&caller.bus_name),
+            Some(POLKIT_FLATPAK_SYSTEM_MANAGE),
+            "ok",
+            "System Flatpak inventory inspection completed",
+        );
+
+        serde_json::to_string(&snapshot).map_err(|e| {
+            AkrepError::Internal(format!("System Flatpak inspection serialize failed: {}", e))
         })
     }
 }

@@ -1,14 +1,16 @@
 pub mod firewalld;
+pub mod flatpak;
 pub mod selinux;
 
 pub use firewalld::*;
+pub use flatpak::*;
 pub use selinux::*;
 
 use crate::transaction_engine::{ApplyOutcome, MutationBackend, PreviewOutcome};
 use async_trait::async_trait;
 use blaze_akrep_common::{
-    ActionRequest, AkrepError, FirewallStateSnapshot, SelinuxDiagnoseQuery,
-    SelinuxDiagnoseResponse, StateFingerprint, TransactionRecord,
+    ActionRequest, AkrepError, FirewallStateSnapshot, FlatpakInstallationSnapshot, FlatpakScope,
+    SelinuxDiagnoseQuery, SelinuxDiagnoseResponse, StateFingerprint, TransactionRecord,
 };
 use std::path::Path;
 use std::sync::Arc;
@@ -17,17 +19,35 @@ use zbus::Connection;
 pub struct CompositeMutationBackend {
     selinux: Arc<SelinuxAdapter>,
     firewall: Arc<FirewallAdapter>,
+    flatpak: Arc<SystemFlatpakAdapter>,
 }
 
 impl CompositeMutationBackend {
     pub fn new(selinux: Arc<SelinuxAdapter>, firewall: Arc<FirewallAdapter>) -> Self {
-        Self { selinux, firewall }
+        Self {
+            selinux,
+            firewall,
+            flatpak: Arc::new(SystemFlatpakAdapter::new_system()),
+        }
+    }
+
+    pub fn with_flatpak(
+        selinux: Arc<SelinuxAdapter>,
+        firewall: Arc<FirewallAdapter>,
+        flatpak: Arc<SystemFlatpakAdapter>,
+    ) -> Self {
+        Self {
+            selinux,
+            firewall,
+            flatpak,
+        }
     }
 
     pub fn new_system(conn: Connection) -> Self {
-        Self::new(
+        Self::with_flatpak(
             Arc::new(SelinuxAdapter::new_linux()),
             Arc::new(FirewallAdapter::new_dbus(conn)),
+            Arc::new(SystemFlatpakAdapter::new_system()),
         )
     }
 
@@ -37,6 +57,10 @@ impl CompositeMutationBackend {
 
     pub fn firewall(&self) -> &Arc<FirewallAdapter> {
         &self.firewall
+    }
+
+    pub fn flatpak(&self) -> &Arc<SystemFlatpakAdapter> {
+        &self.flatpak
     }
 }
 
@@ -67,8 +91,16 @@ impl MutationBackend for CompositeMutationBackend {
         if is_firewall_action(req) {
             return self.firewall.preview(req).await;
         }
+        if let ActionRequest::FlatpakSetOverride { scope, .. } = req {
+            if *scope == FlatpakScope::User {
+                return Err(AkrepError::ForbiddenOperation(
+                    USER_SCOPE_PRIVD_REJECTION_MSG.to_string(),
+                ));
+            }
+            return self.flatpak.preview(req).await;
+        }
         Err(AkrepError::BackendUnavailable(
-            "Requested security domain adapter is scheduled for Sprint 2-4".to_string(),
+            "Requested security domain adapter is scheduled for Sprint 3-4".to_string(),
         ))
     }
 
@@ -83,8 +115,16 @@ impl MutationBackend for CompositeMutationBackend {
         if is_firewall_action(req) {
             return self.firewall.apply(req, snapshot_dir).await;
         }
+        if let ActionRequest::FlatpakSetOverride { scope, .. } = req {
+            if *scope == FlatpakScope::User {
+                return Err(AkrepError::ForbiddenOperation(
+                    USER_SCOPE_PRIVD_REJECTION_MSG.to_string(),
+                ));
+            }
+            return self.flatpak.apply(req, snapshot_dir).await;
+        }
         Err(AkrepError::BackendUnavailable(
-            "Requested security domain adapter is scheduled for Sprint 2-4".to_string(),
+            "Requested security domain adapter is scheduled for Sprint 3-4".to_string(),
         ))
     }
 
@@ -99,8 +139,16 @@ impl MutationBackend for CompositeMutationBackend {
         if is_firewall_action(req) {
             return self.firewall.verify(req, expected).await;
         }
+        if let ActionRequest::FlatpakSetOverride { scope, .. } = req {
+            if *scope == FlatpakScope::User {
+                return Err(AkrepError::ForbiddenOperation(
+                    USER_SCOPE_PRIVD_REJECTION_MSG.to_string(),
+                ));
+            }
+            return self.flatpak.verify(req, expected).await;
+        }
         Err(AkrepError::BackendUnavailable(
-            "Requested security domain adapter is scheduled for Sprint 2-4".to_string(),
+            "Requested security domain adapter is scheduled for Sprint 3-4".to_string(),
         ))
     }
 
@@ -115,8 +163,16 @@ impl MutationBackend for CompositeMutationBackend {
         if is_firewall_action(req) {
             return self.firewall.current_fingerprints(req, post_fps).await;
         }
+        if let ActionRequest::FlatpakSetOverride { scope, .. } = req {
+            if *scope == FlatpakScope::User {
+                return Err(AkrepError::ForbiddenOperation(
+                    USER_SCOPE_PRIVD_REJECTION_MSG.to_string(),
+                ));
+            }
+            return self.flatpak.current_fingerprints(req, post_fps).await;
+        }
         Err(AkrepError::BackendUnavailable(
-            "Requested security domain adapter is scheduled for Sprint 2-4".to_string(),
+            "Requested security domain adapter is scheduled for Sprint 3-4".to_string(),
         ))
     }
 
@@ -131,8 +187,16 @@ impl MutationBackend for CompositeMutationBackend {
         if is_firewall_action(&record.request) {
             return self.firewall.rollback(record, snapshot_dir).await;
         }
+        if let ActionRequest::FlatpakSetOverride { scope, .. } = &record.request {
+            if *scope == FlatpakScope::User {
+                return Err(AkrepError::ForbiddenOperation(
+                    USER_SCOPE_PRIVD_REJECTION_MSG.to_string(),
+                ));
+            }
+            return self.flatpak.rollback(record, snapshot_dir).await;
+        }
         Err(AkrepError::BackendUnavailable(
-            "Requested security domain adapter is scheduled for Sprint 2-4".to_string(),
+            "Requested security domain adapter is scheduled for Sprint 3-4".to_string(),
         ))
     }
 
@@ -148,5 +212,9 @@ impl MutationBackend for CompositeMutationBackend {
         zone_filter: Option<&str>,
     ) -> Result<FirewallStateSnapshot, AkrepError> {
         self.firewall.inspect_firewall(zone_filter).await
+    }
+
+    async fn inspect_system_flatpaks(&self) -> Result<FlatpakInstallationSnapshot, AkrepError> {
+        self.flatpak.inspect_system_flatpaks().await
     }
 }

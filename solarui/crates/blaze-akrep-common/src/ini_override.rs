@@ -159,6 +159,27 @@ fn opposite_negation(token: &str) -> String {
     }
 }
 
+pub fn filesystem_token_base(token: &str) -> &str {
+    let trimmed = token.trim();
+    let without_bang = trimmed.strip_prefix('!').unwrap_or(trimmed);
+    for suffix in [":rw", ":ro", ":create"] {
+        if let Some(base) = without_bang.strip_suffix(suffix) {
+            let normalized = base.trim_end_matches('/');
+            return if normalized.is_empty() && base.starts_with('/') {
+                "/"
+            } else {
+                normalized
+            };
+        }
+    }
+    let normalized = without_bang.trim_end_matches('/');
+    if normalized.is_empty() && without_bang.starts_with('/') {
+        "/"
+    } else {
+        normalized
+    }
+}
+
 impl FlatpakOverrideDocument {
     pub fn parse(input: &str) -> Result<Self, AkrepError> {
         if input.contains('\0') {
@@ -166,18 +187,19 @@ impl FlatpakOverrideDocument {
                 "Flatpak override INI must not contain NUL bytes".to_string(),
             ));
         }
-        if input.is_empty() {
+        let cleaned = input.strip_prefix('\u{feff}').unwrap_or(input);
+        if cleaned.is_empty() {
             return Ok(Self {
                 lines: Vec::new(),
                 trailing_newline: true,
             });
         }
 
-        let trailing_newline = input.ends_with('\n');
+        let trailing_newline = cleaned.ends_with('\n');
         let mut lines = Vec::new();
         let mut current_section: Option<String> = None;
 
-        for raw_line in input.lines() {
+        for raw_line in cleaned.lines() {
             let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
             let trimmed = line.trim();
             if trimmed.is_empty() || trimmed.starts_with('#') {
@@ -215,6 +237,53 @@ impl FlatpakOverrideDocument {
             lines,
             trailing_newline,
         })
+    }
+
+    pub fn sections(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for line in &self.lines {
+            if let RawIniLine::SectionHeader { name, .. } = line {
+                if !out.contains(name) {
+                    out.push(name.clone());
+                }
+            }
+        }
+        out
+    }
+
+    pub fn section_entries(&self, section: &str) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        let mut active_sec = "";
+        for line in &self.lines {
+            match line {
+                RawIniLine::SectionHeader { name, .. } => active_sec = name.as_str(),
+                RawIniLine::Entry { key, value } if active_sec == section => {
+                    out.push((key.clone(), value.trim().to_string()));
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+
+    pub fn get_scalar(&self, section: &str, key: &str) -> Option<String> {
+        let mut active_sec = "";
+        for line in &self.lines {
+            match line {
+                RawIniLine::SectionHeader { name, .. } => active_sec = name.as_str(),
+                RawIniLine::Entry { key: k, value } if active_sec == section && k == key => {
+                    return Some(value.trim().to_string());
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    pub fn has_any_entries(&self) -> bool {
+        self.lines
+            .iter()
+            .any(|l| matches!(l, RawIniLine::Entry { .. }))
     }
 
     pub fn get_tokens(&self, section: &str, key: &str) -> Vec<String> {
@@ -345,7 +414,24 @@ impl FlatpakOverrideDocument {
             }
             if is_semicolon_list_entry(&section, &key) {
                 let mut tokens = self.get_tokens(&section, &key);
-                tokens.retain(|t| t != tok);
+                if section == SECTION_CONTEXT && key == "filesystems" {
+                    let target_base = filesystem_token_base(tok);
+                    let plain_base_removal = !tok.starts_with('!') && !tok.contains(':');
+                    tokens.retain(|t| {
+                        if t == tok {
+                            return false;
+                        }
+                        if plain_base_removal
+                            && !t.starts_with('!')
+                            && filesystem_token_base(t) == target_base
+                        {
+                            return false;
+                        }
+                        true
+                    });
+                } else {
+                    tokens.retain(|t| t != tok);
+                }
                 let new_val = if tokens.is_empty() {
                     None
                 } else {
@@ -371,8 +457,13 @@ impl FlatpakOverrideDocument {
             }
             if is_semicolon_list_entry(&section, &key) {
                 let mut tokens = self.get_tokens(&section, &key);
-                let opp = opposite_negation(tok);
-                tokens.retain(|t| t != &opp);
+                if section == SECTION_CONTEXT && key == "filesystems" {
+                    let new_base = filesystem_token_base(tok);
+                    tokens.retain(|t| t == tok || filesystem_token_base(t) != new_base);
+                } else {
+                    let opp = opposite_negation(tok);
+                    tokens.retain(|t| t != &opp);
+                }
                 if !tokens.iter().any(|t| t == tok) {
                     tokens.push(tok.to_string());
                 }
@@ -383,6 +474,70 @@ impl FlatpakOverrideDocument {
         }
 
         Ok(Self::diff(&before, self))
+    }
+
+    pub fn prune_empty_sections(&mut self, removable_sections: &[String]) {
+        for sec in removable_sections {
+            let Some((sec_start, sec_end)) = self.section_entry_bounds(sec) else {
+                continue;
+            };
+            let has_non_blank = self
+                .lines
+                .iter()
+                .take(sec_end)
+                .skip(sec_start + 1)
+                .any(|line| match line {
+                    RawIniLine::Entry { .. } => true,
+                    RawIniLine::Trivia(t) => !t.trim().is_empty(),
+                    RawIniLine::SectionHeader { .. } => true,
+                });
+            if !has_non_blank {
+                self.lines.drain(sec_start..sec_end);
+                while matches!(self.lines.last(), Some(RawIniLine::Trivia(s)) if s.is_empty()) {
+                    self.lines.pop();
+                }
+            }
+        }
+    }
+
+    pub fn revert_diffs(
+        &mut self,
+        diffs: &[OverrideTokenDiff],
+        pre_sections: &[String],
+    ) -> Result<(), AkrepError> {
+        let mut newly_added_sections = Vec::new();
+        for sec in self.sections() {
+            if !pre_sections.contains(&sec) {
+                newly_added_sections.push(sec);
+            }
+        }
+
+        for diff in diffs {
+            let section = &diff.section;
+            let key = &diff.key;
+            if is_semicolon_list_entry(section, key) {
+                let mut tokens = self.get_tokens(section, key);
+                tokens.retain(|t| !diff.added.contains(t));
+                for restored in &diff.removed {
+                    if !tokens.contains(restored) {
+                        tokens.push(restored.clone());
+                    }
+                }
+                let new_val = if tokens.is_empty() {
+                    None
+                } else {
+                    Some(join_semicolon_tokens(&tokens))
+                };
+                self.set_or_remove_entry(section, key, new_val);
+            } else if let Some(prev_val) = diff.removed.first() {
+                self.set_or_remove_entry(section, key, Some(prev_val.clone()));
+            } else if !diff.added.is_empty() {
+                self.set_or_remove_entry(section, key, None);
+            }
+        }
+
+        self.prune_empty_sections(&newly_added_sections);
+        Ok(())
     }
 
     pub fn diff(before: &Self, after: &Self) -> Vec<OverrideTokenDiff> {

@@ -13,8 +13,15 @@ test-support = []
 
 [dependencies]
 blaze-sentinel-core = { workspace = true }
+async-trait = { workspace = true }
+libc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
 regex = { workspace = true }
+tokio = { workspace = true }
+zbus = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
