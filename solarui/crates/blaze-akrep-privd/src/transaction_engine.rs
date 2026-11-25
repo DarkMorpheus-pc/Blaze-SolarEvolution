@@ -15,6 +15,7 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tracing::{error, warn};
 
 pub const DEFAULT_AKREP_STATE_DIR: &str = "/var/lib/akrep";
 
@@ -286,6 +287,7 @@ impl TransactionEngine {
             allow_test_actions,
         };
         let _ = engine.recover_interrupted_transactions()?;
+        engine.prune_expired_plans();
         Ok(engine)
     }
 
@@ -321,6 +323,128 @@ impl TransactionEngine {
         &self.authorizer
     }
 
+    fn persist_record_logged(&self, tx_path: &Path, record: &TransactionRecord, stage: &str) {
+        if let Err(err) = write_json_atomic_0600(tx_path, record) {
+            error!(
+                tx_id = %record.tx_id,
+                stage = %stage,
+                error = %redact_secrets(err.message()),
+                "Failed to persist transaction record"
+            );
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn audit_logged(
+        &self,
+        event: &str,
+        tx_id: Option<&str>,
+        plan_id: Option<&str>,
+        actor_uid: Option<u32>,
+        actor_bus_name: Option<&str>,
+        polkit_action: Option<&str>,
+        outcome: &str,
+        message: &str,
+    ) {
+        if let Err(err) = self.audit.log(
+            event,
+            tx_id,
+            plan_id,
+            actor_uid,
+            actor_bus_name,
+            polkit_action,
+            outcome,
+            message,
+        ) {
+            error!(
+                audit_event = %event,
+                error = %redact_secrets(err.message()),
+                "Failed to write audit log entry"
+            );
+        }
+    }
+
+    fn read_transaction_record_resilient(
+        &self,
+        path: &Path,
+        quarantine_corrupt: bool,
+    ) -> Option<TransactionRecord> {
+        match read_json_file::<TransactionRecord>(path) {
+            Ok(rec) => Some(rec),
+            Err(err) => {
+                let file_name = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                let clean_err = redact_secrets(err.message());
+                warn!(
+                    file = %file_name,
+                    error = %clean_err,
+                    "Skipping unreadable or corrupt transaction JSON file"
+                );
+                let note = format!(
+                    "Skipped corrupt transaction file '{}': {}",
+                    file_name, clean_err
+                );
+                self.audit_logged(
+                    "corrupt_transaction_skipped",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    "skipped",
+                    &note,
+                );
+                if quarantine_corrupt {
+                    let corrupt_path = path.with_extension("json.corrupt");
+                    if let Err(rename_err) = fs::rename(path, &corrupt_path) {
+                        warn!(
+                            file = %file_name,
+                            error = %redact_secrets(&rename_err.to_string()),
+                            "Failed to quarantine corrupt transaction JSON file"
+                        );
+                    }
+                }
+                None
+            }
+        }
+    }
+
+    pub fn prune_expired_plans(&self) -> usize {
+        let plans_dir = self.plans_dir();
+        let Ok(entries) = fs::read_dir(&plans_dir) else {
+            return 0;
+        };
+        let now = Utc::now();
+        let mut pruned = 0usize;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let should_remove = match read_json_file::<ActionPlan>(&path) {
+                Ok(plan) => match DateTime::parse_from_rfc3339(&plan.expires_at) {
+                    Ok(exp) => now > exp.with_timezone(&Utc),
+                    Err(_) => true,
+                },
+                Err(err) => {
+                    warn!(
+                        file = %path.file_name().unwrap_or_default().to_string_lossy(),
+                        error = %redact_secrets(err.message()),
+                        "Pruning unreadable or corrupt staged plan file"
+                    );
+                    true
+                }
+            };
+            if should_remove && fs::remove_file(&path).is_ok() {
+                pruned += 1;
+            }
+        }
+        pruned
+    }
+
     pub fn recover_interrupted_transactions(&self) -> Result<usize, AkrepError> {
         let _lock = FlockGuard::try_acquire_exclusive(&self.lock_path())?;
         let tx_dir = self.transactions_dir();
@@ -330,12 +454,23 @@ impl TransactionEngine {
 
         let mut recovered = 0usize;
         for entry in fs::read_dir(&tx_dir)? {
-            let entry = entry?;
+            let entry = match entry {
+                Ok(e) => e,
+                Err(io_err) => {
+                    warn!(
+                        error = %redact_secrets(&io_err.to_string()),
+                        "Skipping unreadable directory entry in transactions/"
+                    );
+                    continue;
+                }
+            };
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
-            let mut record: TransactionRecord = read_json_file(&path)?;
+            let Some(mut record) = self.read_transaction_record_resilient(&path, true) else {
+                continue;
+            };
             if record.state.is_in_flight() {
                 let prev_state = record.state;
                 let now = Utc::now().to_rfc3339();
@@ -405,7 +540,7 @@ impl TransactionEngine {
         {
             Ok(c) => c,
             Err(err) => {
-                let _ = self.audit.log(
+                self.audit_logged(
                     "plan_denied",
                     None,
                     None,
@@ -420,7 +555,7 @@ impl TransactionEngine {
         };
 
         if let Err(err) = req.validate_red_lines() {
-            let _ = self.audit.log(
+            self.audit_logged(
                 "plan_rejected_redline",
                 None,
                 None,
@@ -432,6 +567,8 @@ impl TransactionEngine {
             );
             return Err(err.redacted());
         }
+
+        self.prune_expired_plans();
 
         let preview = self.backend.preview(&req).await.map_err(|e| e.redacted())?;
         let plan = ActionPlan::new_signed(
@@ -466,12 +603,23 @@ impl TransactionEngine {
             return Ok(false);
         }
         for entry in fs::read_dir(&tx_dir)? {
-            let entry = entry?;
+            let entry = match entry {
+                Ok(e) => e,
+                Err(io_err) => {
+                    warn!(
+                        error = %redact_secrets(&io_err.to_string()),
+                        "Skipping unreadable directory entry in transactions/"
+                    );
+                    continue;
+                }
+            };
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
-            let rec: TransactionRecord = read_json_file(&path)?;
+            let Some(rec) = self.read_transaction_record_resilient(&path, true) else {
+                continue;
+            };
             if rec.plan_id == plan_id {
                 return Ok(true);
             }
@@ -515,7 +663,7 @@ impl TransactionEngine {
         {
             Ok(c) => c,
             Err(err) => {
-                let _ = self.audit.log(
+                self.audit_logged(
                     "commit_denied",
                     None,
                     Some(plan_id),
@@ -534,7 +682,7 @@ impl TransactionEngine {
                 "Plan '{}' was created by uid {} and cannot be committed by uid {}",
                 plan_id, plan.created_by_uid, caller.uid
             );
-            let _ = self.audit.log(
+            self.audit_logged(
                 "commit_uid_mismatch",
                 None,
                 Some(plan_id),
@@ -556,7 +704,14 @@ impl TransactionEngine {
             })?
             .with_timezone(&Utc);
         if Utc::now() > expires_at {
-            let _ = self.audit.log(
+            if let Err(rm_err) = fs::remove_file(&plan_path) {
+                warn!(
+                    plan_id = %plan_id,
+                    error = %redact_secrets(&rm_err.to_string()),
+                    "Failed to remove expired staged plan file"
+                );
+            }
+            self.audit_logged(
                 "commit_expired",
                 None,
                 Some(plan_id),
@@ -579,6 +734,31 @@ impl TransactionEngine {
                 "ActionPlan '{}' has already been consumed and cannot be replayed",
                 plan_id
             )));
+        }
+
+        if !plan.pre_fingerprints.is_empty() {
+            let live_pre_fps = self
+                .backend
+                .current_fingerprints(&plan.request, &plan.pre_fingerprints)
+                .await
+                .map_err(|e| e.redacted())?;
+            if !fingerprints_match_exactly(&plan.pre_fingerprints, &live_pre_fps) {
+                let msg = format!(
+                    "Underlying state changed after plan '{}' was previewed; please re-create plan",
+                    plan_id
+                );
+                self.audit_logged(
+                    "commit_pre_drift_detected",
+                    None,
+                    Some(plan_id),
+                    Some(caller.uid),
+                    Some(&caller.bus_name),
+                    Some(required_action),
+                    "blocked",
+                    &msg,
+                );
+                return Err(AkrepError::ExternalDriftDetected(msg));
+            }
         }
 
         let tx_id = generate_uuid_v4()?;
@@ -675,7 +855,7 @@ impl TransactionEngine {
         record.state = TransactionState::RollingBack;
         record.error_message = Some(redacted_cause.clone());
         record.updated_at = Utc::now().to_rfc3339();
-        let _ = write_json_atomic_0600(tx_path, record);
+        self.persist_record_logged(tx_path, record, "rolling_back");
 
         match self.backend.rollback(record, snapshot_dir).await {
             Ok(rb_summary) => {
@@ -685,8 +865,8 @@ impl TransactionEngine {
                 record.rollback_result = Some(clean_rb.clone());
                 record.updated_at = done_at.clone();
                 record.completed_at = Some(done_at);
-                let _ = write_json_atomic_0600(tx_path, record);
-                let _ = self.audit.log(
+                self.persist_record_logged(tx_path, record, "rolled_back");
+                self.audit_logged(
                     "transaction_rolled_back",
                     Some(&record.tx_id),
                     Some(&record.plan_id),
@@ -708,8 +888,8 @@ impl TransactionEngine {
                 record.rollback_result = Some(clean_rb_err.clone());
                 record.updated_at = done_at.clone();
                 record.completed_at = Some(done_at);
-                let _ = write_json_atomic_0600(tx_path, record);
-                let _ = self.audit.log(
+                self.persist_record_logged(tx_path, record, "rollback_failed");
+                self.audit_logged(
                     "transaction_rollback_failed",
                     Some(&record.tx_id),
                     Some(&record.plan_id),
@@ -758,6 +938,24 @@ impl TransactionEngine {
             )));
         }
 
+        if record.post_fingerprints.is_empty() {
+            let msg = format!(
+                "Transaction '{}' has no recorded post_fingerprints; refusing unverified rollback",
+                tx_id
+            );
+            self.audit_logged(
+                "rollback_missing_post_fingerprints",
+                Some(&record.tx_id),
+                Some(&record.plan_id),
+                Some(caller.uid),
+                Some(&caller.bus_name),
+                Some(&record.polkit_action),
+                "blocked",
+                &msg,
+            );
+            return Err(AkrepError::ExternalDriftDetected(msg));
+        }
+
         let current_fps = self
             .backend
             .current_fingerprints(&record.request, &record.post_fingerprints)
@@ -769,7 +967,7 @@ impl TransactionEngine {
                 "Underlying state for transaction '{}' has drifted since commit; refusing blind rollback",
                 tx_id
             );
-            let _ = self.audit.log(
+            self.audit_logged(
                 "external_drift_detected",
                 Some(&record.tx_id),
                 Some(&record.plan_id),
@@ -816,12 +1014,12 @@ impl TransactionEngine {
                 record.updated_at = done_at.clone();
                 record.completed_at = Some(done_at);
                 write_json_atomic_0600(&tx_path, &record)?;
-                let _ = self.audit.log(
+                self.audit_logged(
                     "transaction_rollback_failed_manual",
                     Some(&record.tx_id),
                     Some(&record.plan_id),
                     Some(caller.uid),
-                    Some(&caller.bus_name),
+                    Some(&record.actor_bus_name),
                     Some(&record.polkit_action),
                     "rollback_failed",
                     &clean_err,
@@ -886,12 +1084,23 @@ impl TransactionEngine {
         }
         let mut records = Vec::new();
         for entry in fs::read_dir(&tx_dir)? {
-            let entry = entry?;
+            let entry = match entry {
+                Ok(e) => e,
+                Err(io_err) => {
+                    warn!(
+                        error = %redact_secrets(&io_err.to_string()),
+                        "Skipping unreadable directory entry in transactions/"
+                    );
+                    continue;
+                }
+            };
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
-            records.push(read_json_file::<TransactionRecord>(&path)?);
+            if let Some(rec) = self.read_transaction_record_resilient(&path, false) {
+                records.push(rec);
+            }
         }
         records.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         records.truncate(limit.min(500));
@@ -921,7 +1130,7 @@ impl TransactionEngine {
             ))
         })?;
 
-        let _ = self.audit.log(
+        self.audit_logged(
             "selinux_diagnose_requested",
             None,
             None,

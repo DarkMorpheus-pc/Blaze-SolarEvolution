@@ -37,50 +37,97 @@ pub struct OverrideTokenDiff {
 }
 
 pub fn resolve_override_spec(spec: &str) -> Result<(String, String), AkrepError> {
-    let trimmed = spec.trim();
-    if trimmed.is_empty()
-        || trimmed.contains('\n')
-        || trimmed.contains('\r')
-        || trimmed.contains('\0')
-    {
+    if spec.chars().any(char::is_control) {
         return Err(AkrepError::InvalidInput(
-            "Invalid Flatpak override key specification".to_string(),
+            "Flatpak override key specification must not contain control characters".to_string(),
         ));
     }
 
-    if let Some(rest) = trimmed.strip_prefix('[') {
-        if let Some((sec, key_part)) = rest.split_once("].") {
-            if sec.is_empty() || key_part.is_empty() || key_part.contains('=') {
-                return Err(AkrepError::InvalidInput(format!(
-                    "Malformed bracketed override key '{}'",
-                    spec
-                )));
-            }
-            return Ok((sec.to_string(), key_part.to_string()));
-        }
+    let trimmed = spec.trim();
+    if trimmed.is_empty() {
+        return Err(AkrepError::InvalidInput(
+            "Flatpak override key specification must not be empty".to_string(),
+        ));
     }
 
-    for known_sec in [SECTION_CONTEXT, SECTION_SESSION_BUS, SECTION_SYSTEM_BUS] {
-        let prefix = format!("{}.", known_sec);
-        if let Some(key_part) = trimmed.strip_prefix(&prefix) {
-            if key_part.is_empty() || key_part.contains('=') {
-                return Err(AkrepError::InvalidInput(format!(
-                    "Malformed override key '{}'",
-                    spec
-                )));
-            }
-            return Ok((known_sec.to_string(), key_part.to_string()));
-        }
+    let (raw_sec, raw_key) = if let Some(rest) = trimmed.strip_prefix('[') {
+        let Some((sec_part, key_part)) = rest.split_once("].") else {
+            return Err(AkrepError::InvalidInput(format!(
+                "Malformed bracketed override key '{}'",
+                spec
+            )));
+        };
+        (sec_part, key_part)
+    } else if let Some((sec_part, key_part)) =
+        [SECTION_CONTEXT, SECTION_SESSION_BUS, SECTION_SYSTEM_BUS]
+            .into_iter()
+            .find_map(|known| {
+                let prefix = format!("{}.", known);
+                trimmed.strip_prefix(&prefix).map(|k| (known, k))
+            })
+    {
+        (sec_part, key_part)
+    } else if CONTEXT_LIST_KEYS.contains(&trimmed) {
+        (SECTION_CONTEXT, trimmed)
+    } else if let Some((other_sec, _)) = trimmed.split_once('.') {
+        return Err(AkrepError::ForbiddenOperation(format!(
+            "Unsupported or forbidden Flatpak override section '{}'",
+            other_sec.trim()
+        )));
+    } else {
+        return Err(AkrepError::InvalidInput(format!(
+            "Unsupported Flatpak override key '{}' (use Context.<key>, Session Bus Policy.<bus>, or System Bus Policy.<bus>)",
+            spec
+        )));
+    };
+
+    let sec = raw_sec.trim();
+    let key = raw_key.trim();
+
+    if sec.is_empty()
+        || key.is_empty()
+        || sec
+            .chars()
+            .any(|c| matches!(c, '[' | ']' | '=' | ';') || c.is_control())
+        || key
+            .chars()
+            .any(|c| matches!(c, '[' | ']' | '=' | ';') || c.is_control())
+    {
+        return Err(AkrepError::InvalidInput(format!(
+            "Malformed Flatpak override section or key in '{}'",
+            spec
+        )));
     }
 
-    if CONTEXT_LIST_KEYS.contains(&trimmed) {
-        return Ok((SECTION_CONTEXT.to_string(), trimmed.to_string()));
+    if !matches!(
+        sec,
+        SECTION_CONTEXT | SECTION_SESSION_BUS | SECTION_SYSTEM_BUS
+    ) {
+        return Err(AkrepError::ForbiddenOperation(format!(
+            "Unsupported or forbidden Flatpak override section '{}'",
+            sec
+        )));
     }
 
-    Err(AkrepError::InvalidInput(format!(
-        "Unsupported Flatpak override key '{}' (use Context.<key>, Session Bus Policy.<bus>, or System Bus Policy.<bus>)",
-        spec
-    )))
+    if sec == SECTION_CONTEXT && !CONTEXT_LIST_KEYS.contains(&key) {
+        return Err(AkrepError::InvalidInput(format!(
+            "Unsupported Flatpak [Context] key '{}'",
+            key
+        )));
+    }
+
+    if matches!(sec, SECTION_SESSION_BUS | SECTION_SYSTEM_BUS)
+        && !key
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'*'))
+    {
+        return Err(AkrepError::InvalidInput(format!(
+            "Invalid D-Bus name '{}' in Flatpak bus policy override",
+            key
+        )));
+    }
+
+    Ok((sec.to_string(), key.to_string()))
 }
 
 fn is_semicolon_list_entry(section: &str, key: &str) -> bool {
@@ -453,5 +500,26 @@ CUSTOM_VAR=keep_me
         assert!(serialized.contains("org.kde.StatusNotifierWatcher=talk\n"));
         assert!(serialized.contains("org.freedesktop.secrets=none\n"));
         assert!(serialized.contains("[Environment]\nGTK_THEME=Adwaita:dark\nCUSTOM_VAR=keep_me\n"));
+    }
+
+    #[test]
+    fn test_resolve_override_spec_normalizes_brackets_and_enforces_section_allowlist() {
+        assert_eq!(
+            resolve_override_spec("[ Context ].filesystems").unwrap(),
+            ("Context".to_string(), "filesystems".to_string())
+        );
+        assert_eq!(
+            resolve_override_spec("[System Bus Policy].org.freedesktop.NetworkManager").unwrap(),
+            (
+                "System Bus Policy".to_string(),
+                "org.freedesktop.NetworkManager".to_string()
+            )
+        );
+
+        assert!(resolve_override_spec("[Environment].LD_PRELOAD").is_err());
+        assert!(resolve_override_spec("Environment.LD_PRELOAD").is_err());
+        assert!(resolve_override_spec("[Context].unknown_key").is_err());
+        assert!(resolve_override_spec("[Context].[injected]").is_err());
+        assert!(resolve_override_spec("[Context].filesystems=host").is_err());
     }
 }

@@ -282,17 +282,14 @@ fn validate_flatpak_app_id(app_id: &str) -> Result<(), AkrepError> {
 }
 
 fn is_forbidden_blanket_filesystem_grant(token: &str) -> bool {
-    if token.starts_with('!') {
+    let trimmed = token.trim();
+    if trimmed.starts_with('!') {
         return false;
     }
-    let base = token
-        .strip_suffix(":rw")
-        .or_else(|| token.strip_suffix(":ro"))
-        .or_else(|| token.strip_suffix(":create"))
-        .unwrap_or(token)
-        .trim_end_matches('/');
+    let raw_base = trimmed.split(':').next().unwrap_or(trimmed).trim();
+    let base = raw_base.trim_end_matches('/');
 
-    matches!(
+    if matches!(
         base,
         "" | "/"
             | "~"
@@ -311,7 +308,73 @@ fn is_forbidden_blanket_filesystem_grant(token: &str) -> bool {
             | "/dev"
             | "xdg-run/flatpak"
             | "xdg-data/flatpak"
-    )
+    ) {
+        return true;
+    }
+
+    for sys_prefix in [
+        "/etc/",
+        "/usr/",
+        "/boot/",
+        "/root/",
+        "/proc/",
+        "/sys/",
+        "/dev/",
+        "/var/lib/akrep",
+    ] {
+        if base.starts_with(sys_prefix) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn bus_pattern_matches(pattern: &str, target: &str) -> bool {
+    if pattern == "*" || pattern == target {
+        return true;
+    }
+    if let Some(prefix) = pattern.strip_suffix(".*") {
+        return target == prefix || target.starts_with(&format!("{}.", prefix));
+    }
+    if let Some(prefix) = pattern.strip_suffix('*') {
+        return target.starts_with(prefix);
+    }
+    false
+}
+
+fn is_forbidden_bus_policy_grant(section: &str, bus_name: &str, policy: &str) -> bool {
+    let norm_policy = policy.trim().to_ascii_lowercase();
+    if !matches!(norm_policy.as_str(), "talk" | "own") {
+        return false;
+    }
+
+    const FORBIDDEN_SESSION_BUSES: &[&str] = &[
+        "org.freedesktop.Flatpak",
+        "org.freedesktop.impl.portal.PermissionStore",
+        "org.freedesktop.secrets",
+        "tr.com.blazeos.Akrep1",
+        "tr.com.blazeos.Akrep1.Privileged",
+    ];
+
+    const FORBIDDEN_SYSTEM_BUSES: &[&str] = &[
+        "org.freedesktop.PolicyKit1",
+        "org.freedesktop.systemd1",
+        "org.freedesktop.login1",
+        "org.freedesktop.Flatpak",
+        "tr.com.blazeos.Akrep1.Privileged",
+        "tr.com.blazeos.Akrep1",
+    ];
+
+    match section {
+        "Session Bus Policy" => FORBIDDEN_SESSION_BUSES
+            .iter()
+            .any(|b| bus_pattern_matches(bus_name, b)),
+        "System Bus Policy" => FORBIDDEN_SYSTEM_BUSES
+            .iter()
+            .any(|b| bus_pattern_matches(bus_name, b)),
+        _ => false,
+    }
 }
 
 impl ActionRequest {
@@ -551,14 +614,10 @@ impl ActionRequest {
                             "Blanket Flatpak device grant 'devices=all' is forbidden".to_string(),
                         ));
                     }
-                    if sec == "Session Bus Policy"
-                        && (key == "org.freedesktop.Flatpak"
-                            || key == "org.freedesktop.impl.portal.PermissionStore")
-                        && matches!(trimmed_tok, "talk" | "own")
-                    {
+                    if is_forbidden_bus_policy_grant(&sec, &key, trimmed_tok) {
                         return Err(AkrepError::ForbiddenOperation(format!(
-                            "Sandbox-escape D-Bus grant '{}={}' is forbidden",
-                            key, trimmed_tok
+                            "Sandbox-escape D-Bus grant '[{}].{}={}' is forbidden",
+                            sec, key, trimmed_tok
                         )));
                     }
                 }
@@ -829,6 +888,63 @@ mod tests {
             removals: vec![],
         };
         assert!(global_flatpak.validate_red_lines().is_err());
+
+        let bracketed_spaced_host = ActionRequest::FlatpakSetOverride {
+            app_id: "org.example.ChatApp".to_string(),
+            scope: FlatpakScope::System,
+            additions: vec![("[ Context ].filesystems".to_string(), "host".to_string())],
+            removals: vec![],
+        };
+        assert!(bracketed_spaced_host.validate_red_lines().is_err());
+
+        let env_ld_preload = ActionRequest::FlatpakSetOverride {
+            app_id: "org.example.ChatApp".to_string(),
+            scope: FlatpakScope::System,
+            additions: vec![(
+                "[Environment].LD_PRELOAD".to_string(),
+                "/tmp/x.so".to_string(),
+            )],
+            removals: vec![],
+        };
+        assert!(env_ld_preload.validate_red_lines().is_err());
+
+        let chained_suffix_host = ActionRequest::FlatpakSetOverride {
+            app_id: "org.example.ChatApp".to_string(),
+            scope: FlatpakScope::System,
+            additions: vec![("filesystems".to_string(), "host:ro:rw".to_string())],
+            removals: vec![],
+        };
+        assert!(chained_suffix_host.validate_red_lines().is_err());
+
+        let chained_suffix_home = ActionRequest::FlatpakSetOverride {
+            app_id: "org.example.ChatApp".to_string(),
+            scope: FlatpakScope::System,
+            additions: vec![("filesystems".to_string(), "/home:ro:rw".to_string())],
+            removals: vec![],
+        };
+        assert!(chained_suffix_home.validate_red_lines().is_err());
+
+        let system_bus_polkit = ActionRequest::FlatpakSetOverride {
+            app_id: "org.example.ChatApp".to_string(),
+            scope: FlatpakScope::System,
+            additions: vec![(
+                "[System Bus Policy].org.freedesktop.PolicyKit1".to_string(),
+                "talk".to_string(),
+            )],
+            removals: vec![],
+        };
+        assert!(system_bus_polkit.validate_red_lines().is_err());
+
+        let system_bus_akrep_priv = ActionRequest::FlatpakSetOverride {
+            app_id: "org.example.ChatApp".to_string(),
+            scope: FlatpakScope::System,
+            additions: vec![(
+                "System Bus Policy.tr.com.blazeos.Akrep1.Privileged".to_string(),
+                "own".to_string(),
+            )],
+            removals: vec![],
+        };
+        assert!(system_bus_akrep_priv.validate_red_lines().is_err());
 
         let port_zero = ActionRequest::FirewallAddPort {
             zone: "public".to_string(),

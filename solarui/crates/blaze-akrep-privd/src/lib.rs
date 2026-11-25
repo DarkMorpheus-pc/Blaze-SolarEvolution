@@ -617,6 +617,36 @@ mod tests {
                 additions: vec![("Context.filesystems".to_string(), "/home".to_string())],
                 removals: vec![],
             },
+            ActionRequest::FlatpakSetOverride {
+                app_id: "org.mozilla.firefox".to_string(),
+                scope: FlatpakScope::System,
+                additions: vec![("[ Context ].filesystems".to_string(), "host".to_string())],
+                removals: vec![],
+            },
+            ActionRequest::FlatpakSetOverride {
+                app_id: "org.mozilla.firefox".to_string(),
+                scope: FlatpakScope::System,
+                additions: vec![(
+                    "[Environment].LD_PRELOAD".to_string(),
+                    "/tmp/x.so".to_string(),
+                )],
+                removals: vec![],
+            },
+            ActionRequest::FlatpakSetOverride {
+                app_id: "org.mozilla.firefox".to_string(),
+                scope: FlatpakScope::System,
+                additions: vec![("filesystems".to_string(), "host:ro:rw".to_string())],
+                removals: vec![],
+            },
+            ActionRequest::FlatpakSetOverride {
+                app_id: "org.mozilla.firefox".to_string(),
+                scope: FlatpakScope::System,
+                additions: vec![(
+                    "[System Bus Policy].org.freedesktop.PolicyKit1".to_string(),
+                    "talk".to_string(),
+                )],
+                removals: vec![],
+            },
             ActionRequest::FirewallAddPort {
                 zone: "public".to_string(),
                 port: "0".to_string(),
@@ -789,5 +819,160 @@ mod tests {
             .mode()
             & 0o777;
         assert_eq!(audit_mode, 0o600);
+    }
+
+    #[tokio::test]
+    async fn corrupt_transaction_json_does_not_brick_startup_commit_or_history() {
+        let dir = TempDir::new().unwrap();
+        let tx_dir = dir.path().join("transactions");
+        fs::create_dir_all(&tx_dir).unwrap();
+
+        // Seed corrupt JSON before engine startup (containing a secret to verify redaction)
+        let startup_corrupt = tx_dir.join("00-corrupt-startup.json");
+        fs::write(
+            &startup_corrupt,
+            b"{ broken_json: password=leak_on_corrupt ",
+        )
+        .unwrap();
+
+        let auth = Arc::new(MockAuthorizer::new());
+        auth.allow_all_for_bus(":1.10", 1000);
+        let backend = Arc::new(TestKvBackend::new());
+
+        let engine =
+            TransactionEngine::new_with_options(dir.path().to_path_buf(), auth, backend, true)
+                .expect("startup must succeed despite corrupt transaction JSON");
+
+        assert!(!startup_corrupt.exists());
+        assert!(tx_dir.join("00-corrupt-startup.json.corrupt").is_file());
+
+        // Seed a second corrupt JSON at runtime and verify GetHistory + CommitPlan still succeed
+        let runtime_corrupt = tx_dir.join("01-corrupt-runtime.json");
+        fs::write(&runtime_corrupt, b"{\"tx_id\": 12345}").unwrap();
+
+        let hist_before = engine.get_history(":1.10", 10).await.unwrap();
+        assert!(hist_before.is_empty());
+
+        let plan = engine
+            .create_plan(
+                ":1.10",
+                ActionRequest::NoopTestAction {
+                    key: "firewall.zone".to_string(),
+                    target_value: "internal".to_string(),
+                    simulate_fail_step: None,
+                },
+            )
+            .await
+            .unwrap();
+        let rec = engine
+            .commit_plan(":1.10", &plan.plan_id, &plan.plan_sha256)
+            .await
+            .expect("commit_plan must succeed despite corrupt file in transactions/");
+        assert_eq!(rec.state, TransactionState::Committed);
+
+        let hist_after = engine.get_history(":1.10", 10).await.unwrap();
+        assert_eq!(hist_after.len(), 1);
+        assert_eq!(hist_after[0].tx_id, rec.tx_id);
+
+        let raw_audit = fs::read_to_string(engine.audit().path()).unwrap();
+        assert!(!raw_audit.contains("leak_on_corrupt"));
+        assert!(raw_audit.contains("corrupt_transaction_skipped"));
+    }
+
+    #[tokio::test]
+    async fn pre_commit_drift_empty_post_fingerprints_and_expired_plan_pruning() {
+        let (_dir, _auth, backend, engine) = setup_harness();
+
+        // 1. Pre-commit external drift blocks stale plan commit
+        let staged = engine
+            .create_plan(
+                ":1.10",
+                ActionRequest::NoopTestAction {
+                    key: "firewall.zone".to_string(),
+                    target_value: "drop".to_string(),
+                    simulate_fail_step: None,
+                },
+            )
+            .await
+            .unwrap();
+        backend.set_external_drift("firewall.zone", "out_of_band_zone");
+        let pre_drift_err = engine
+            .commit_plan(":1.10", &staged.plan_id, &staged.plan_sha256)
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            pre_drift_err,
+            AkrepError::ExternalDriftDetected(_)
+        ));
+
+        // 2. Empty post_fingerprints on a Committed record blocks unverified RollbackTransaction
+        let empty_fp_tx = TransactionRecord {
+            tx_id: "tx-empty-fp".to_string(),
+            plan_id: "plan-empty-fp".to_string(),
+            plan_sha256: "b".repeat(64),
+            actor_uid: 1000,
+            actor_bus_name: ":1.10".to_string(),
+            polkit_action: "tr.com.blazeos.Akrep1.profile.apply".to_string(),
+            polkit_authorized: true,
+            request: ActionRequest::ApplyProfile {
+                profile_id: "standard".to_string(),
+            },
+            state: TransactionState::Committed,
+            pre_snapshot: serde_json::json!({}),
+            target_state: serde_json::json!({}),
+            pre_fingerprints: vec![],
+            post_fingerprints: vec![],
+            apply_result: Some("ok".to_string()),
+            rollback_result: None,
+            error_message: None,
+            created_at: Utc::now().to_rfc3339(),
+            updated_at: Utc::now().to_rfc3339(),
+            completed_at: Some(Utc::now().to_rfc3339()),
+        };
+        write_json_atomic_0600(
+            &engine.transactions_dir().join("tx-empty-fp.json"),
+            &empty_fp_tx,
+        )
+        .unwrap();
+        let rb_err = engine
+            .rollback_transaction(":1.10", "tx-empty-fp")
+            .await
+            .unwrap_err();
+        assert!(matches!(rb_err, AkrepError::ExternalDriftDetected(_)));
+
+        // 3. Expired staged plan files are pruned automatically on subsequent create_plan
+        let mut stale_plan = engine
+            .create_plan(
+                ":1.10",
+                ActionRequest::NoopTestAction {
+                    key: "profile.active".to_string(),
+                    target_value: "gaming".to_string(),
+                    simulate_fail_step: None,
+                },
+            )
+            .await
+            .unwrap();
+        let stale_path = engine
+            .plans_dir()
+            .join(format!("{}.json", stale_plan.plan_id));
+        stale_plan.expires_at = (Utc::now() - ChronoDuration::seconds(30)).to_rfc3339();
+        write_json_atomic_0600(&stale_path, &stale_plan).unwrap();
+        assert!(stale_path.exists());
+
+        let _fresh_plan = engine
+            .create_plan(
+                ":1.10",
+                ActionRequest::NoopTestAction {
+                    key: "profile.active".to_string(),
+                    target_value: "daily".to_string(),
+                    simulate_fail_step: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(
+            !stale_path.exists(),
+            "expired plan JSON must be pruned from plans/"
+        );
     }
 }
