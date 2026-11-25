@@ -40,6 +40,8 @@ pub struct SelinuxBooleanEntry {
     pub current: bool,
     pub pending: bool,
     pub persistent: bool,
+    #[serde(default = "default_true")]
+    pub persistent_known: bool,
     pub cataloged: bool,
     pub category: String,
     pub risk: RiskLevel,
@@ -125,16 +127,52 @@ impl Default for SelinuxDiagnoseQuery {
     }
 }
 
+fn check_forbidden_selinux_directive_str(s: &str) -> Result<(), AkrepError> {
+    let lower = s.to_ascii_lowercase();
+    for forbidden in ["audit2allow", "semodule", "setenforce", "selinux=disabled"] {
+        if lower.contains(forbidden) {
+            return Err(AkrepError::ForbiddenOperation(format!(
+                "Forbidden SELinux directive '{}' in diagnosis query",
+                forbidden
+            )));
+        }
+    }
+    Ok(())
+}
+
+pub fn reject_forbidden_selinux_directives_in_json_value(
+    val: &serde_json::Value,
+) -> Result<(), AkrepError> {
+    match val {
+        serde_json::Value::String(s) => check_forbidden_selinux_directive_str(s),
+        serde_json::Value::Array(arr) => {
+            for item in arr {
+                reject_forbidden_selinux_directives_in_json_value(item)?;
+            }
+            Ok(())
+        }
+        serde_json::Value::Object(map) => {
+            for (k, v) in map {
+                check_forbidden_selinux_directive_str(k)?;
+                reject_forbidden_selinux_directives_in_json_value(v)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 impl SelinuxDiagnoseQuery {
     pub fn validate_red_lines(&self, raw_json: &str) -> Result<(), AkrepError> {
-        let lower_raw = raw_json.to_ascii_lowercase();
-        for forbidden in ["audit2allow", "semodule", "setenforce", "selinux=disabled"] {
-            if lower_raw.contains(forbidden) {
-                return Err(AkrepError::ForbiddenOperation(format!(
-                    "Forbidden SELinux directive '{}' in diagnosis query",
-                    forbidden
-                )));
-            }
+        check_forbidden_selinux_directive_str(raw_json)?;
+        if let Some(act) = &self.action {
+            check_forbidden_selinux_directive_str(act)?;
+        }
+        if let Some(filter) = &self.boolean_filter {
+            check_forbidden_selinux_directive_str(filter)?;
+        }
+        if let Some(path) = &self.inspect_path {
+            check_forbidden_selinux_directive_str(path)?;
         }
 
         if let Some(act) = &self.action {
@@ -149,6 +187,19 @@ impl SelinuxDiagnoseQuery {
                     "Unsupported SELinux diagnosis action '{}'",
                     act
                 )));
+            }
+            if norm == "inspect_path"
+                && self
+                    .inspect_path
+                    .as_deref()
+                    .map(str::trim)
+                    .unwrap_or_default()
+                    .is_empty()
+            {
+                return Err(AkrepError::InvalidInput(
+                    "SelinuxDiagnoseQuery action 'inspect_path' requires a non-empty inspect_path"
+                        .to_string(),
+                ));
             }
         }
 

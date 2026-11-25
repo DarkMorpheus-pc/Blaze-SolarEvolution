@@ -11,6 +11,27 @@ pub struct FirewallSection {
     pub findings: Vec<AkrepFinding>,
 }
 
+pub fn decode_zone_ports_message(msg: &zbus::message::Message) -> Option<Vec<(String, String)>> {
+    if let Ok(nested) = msg.body().deserialize::<Vec<Vec<String>>>() {
+        let mut out = Vec::new();
+        for item in nested {
+            if item.len() >= 2 {
+                out.push((item[0].clone(), item[1].to_ascii_lowercase()));
+            }
+        }
+        return Some(out);
+    }
+    if let Ok(pairs) = msg.body().deserialize::<Vec<(String, String)>>() {
+        return Some(
+            pairs
+                .into_iter()
+                .map(|(p, pr)| (p, pr.to_ascii_lowercase()))
+                .collect(),
+        );
+    }
+    None
+}
+
 pub async fn collect_firewalld(conn: Option<&Connection>) -> FirewallSection {
     let mut findings = Vec::new();
     let mut metrics = Vec::new();
@@ -82,19 +103,27 @@ pub async fn collect_firewalld(conn: Option<&Connection>) -> FirewallSection {
                         };
                     }
 
-                    if let Ok(ports) = zone_proxy
-                        .call::<_, _, Vec<(String, String)>>("getPorts", &(&dz,))
+                    if let Ok(ports_msg) = c
+                        .call_method(
+                            Some("org.fedoraproject.FirewallD1"),
+                            "/org/fedoraproject/FirewallD1",
+                            Some("org.fedoraproject.FirewallD1.zone"),
+                            "getPorts",
+                            &(&dz,),
+                        )
                         .await
                     {
-                        ports_summary = if ports.is_empty() {
-                            "Açık özel port yok".to_string()
-                        } else {
-                            ports
-                                .iter()
-                                .map(|(p, proto)| format!("{}/{}", p, proto))
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        };
+                        if let Some(ports) = decode_zone_ports_message(&ports_msg) {
+                            ports_summary = if ports.is_empty() {
+                                "Açık özel port yok".to_string()
+                            } else {
+                                ports
+                                    .iter()
+                                    .map(|(p, proto)| format!("{}/{}", p, proto))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            };
+                        }
                     }
 
                     if let Ok(rich_rules) = zone_proxy

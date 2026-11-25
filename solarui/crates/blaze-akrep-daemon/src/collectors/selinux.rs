@@ -1,9 +1,12 @@
 use blaze_sentinel_core::{
     AkrepCardSummary, AkrepFinding, AkrepKeyValue, AkrepSectionDetail, AkrepSeverity, Availability,
 };
-use std::fs;
+use std::fs::{self, File};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::process::Command;
+
+const MAX_READONLY_AUDIT_TAIL_BYTES: u64 = 8 * 1024 * 1024;
 
 pub struct SelinuxSection {
     pub card: AkrepCardSummary,
@@ -31,13 +34,29 @@ fn parse_selinux_config_kv() -> (Option<String>, Option<String>) {
     (mode, policy)
 }
 
+pub fn count_avc_denials_in_audit_file(path: &Path) -> std::io::Result<usize> {
+    let mut file = File::open(path)?;
+    let file_len = file.metadata()?.len();
+    let mut buf = Vec::new();
+    if file_len > MAX_READONLY_AUDIT_TAIL_BYTES {
+        file.seek(SeekFrom::Start(file_len - MAX_READONLY_AUDIT_TAIL_BYTES))?;
+        file.read_to_end(&mut buf)?;
+        if let Some(nl_pos) = buf.iter().position(|&b| b == b'\n') {
+            buf.drain(..=nl_pos);
+        }
+    } else {
+        file.read_to_end(&mut buf)?;
+    }
+    let raw = String::from_utf8_lossy(&buf);
+    Ok(raw
+        .lines()
+        .filter(|l| l.contains("avc:") && l.contains("denied"))
+        .count())
+}
+
 fn check_recent_avc_readonly() -> (Availability, Option<usize>, String) {
     // Try audit.log only if directly readable by current service account
-    if let Ok(raw) = fs::read_to_string("/var/log/audit/audit.log") {
-        let count = raw
-            .lines()
-            .filter(|l| l.contains("avc:") && l.contains("denied"))
-            .count();
+    if let Ok(count) = count_avc_denials_in_audit_file(Path::new("/var/log/audit/audit.log")) {
         return (
             Availability::Available,
             Some(count),
@@ -47,6 +66,8 @@ fn check_recent_avc_readonly() -> (Availability, Option<usize>, String) {
 
     // Try journalctl for setroubleshoot/audit entries if accessible (returns Err/permission error when restricted)
     if let Ok(out) = Command::new("journalctl")
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
         .args([
             "-t",
             "setroubleshoot",

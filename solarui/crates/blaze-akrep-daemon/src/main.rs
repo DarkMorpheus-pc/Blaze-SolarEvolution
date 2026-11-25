@@ -182,4 +182,47 @@ mod tests {
         assert_eq!(counts, Some((2, 3)));
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn test_audit_lossy_reader_and_firewalld_aas_getports_decoder() {
+        let dir = std::env::temp_dir().join(format!("akrep_audit_aas_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let audit_path = dir.join("audit.log");
+        let mut payload = b"type=PROCTITLE msg=audit(1.0:1): proctitle=".to_vec();
+        payload.extend_from_slice(&[0xff, 0xfe, b'\n']);
+        payload.extend_from_slice(
+            b"type=AVC msg=audit(2.0:2): avc:  denied  { read } for comm=\"httpd\"\n",
+        );
+        std::fs::write(&audit_path, &payload).unwrap();
+        assert_eq!(
+            crate::collectors::selinux::count_avc_denials_in_audit_file(&audit_path).unwrap(),
+            1
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // Verify org.fedoraproject.FirewallD1.zone.getPorts `aas` wire reply decodes cleanly
+        let call = zbus::message::Message::method_call("/org/fedoraproject/FirewallD1", "getPorts")
+            .unwrap()
+            .build(&("public",))
+            .unwrap();
+        let aas_body: Vec<Vec<String>> = vec![
+            vec!["8443".to_string(), "tcp".to_string()],
+            vec!["51820".to_string(), "udp".to_string()],
+        ];
+        let aas_reply = zbus::message::Message::method_return(&call.header())
+            .unwrap()
+            .build(&(aas_body,))
+            .unwrap();
+        assert_eq!(aas_reply.body().signature().to_string(), "aas");
+        let decoded = crate::collectors::firewalld::decode_zone_ports_message(&aas_reply).unwrap();
+        assert_eq!(
+            decoded,
+            vec![
+                ("8443".to_string(), "tcp".to_string()),
+                ("51820".to_string(), "udp".to_string()),
+            ]
+        );
+    }
 }

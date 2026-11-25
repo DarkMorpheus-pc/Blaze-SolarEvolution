@@ -2,10 +2,11 @@ use crate::audit::AuditLogger;
 use crate::authorization::Authorizer;
 use async_trait::async_trait;
 use blaze_akrep_common::{
-    generate_uuid_v4, redact_secrets, validate_zone_name, ActionPlan, ActionRequest, AkrepError,
-    FirewallStateSnapshot, PlanDiffItem, RiskLevel, SelinuxDiagnoseQuery, SelinuxDiagnoseResponse,
-    StateFingerprint, TransactionRecord, TransactionState, ALL_POLKIT_ACTIONS,
-    POLKIT_FIREWALL_MANAGE, POLKIT_PROFILE_APPLY, POLKIT_SELINUX_DIAGNOSE,
+    generate_uuid_v4, redact_secrets, reject_forbidden_selinux_directives_in_json_value,
+    validate_zone_name, ActionPlan, ActionRequest, AkrepError, FirewallStateSnapshot, PlanDiffItem,
+    RiskLevel, SelinuxDiagnoseQuery, SelinuxDiagnoseResponse, StateFingerprint, TransactionRecord,
+    TransactionState, ALL_POLKIT_ACTIONS, POLKIT_FIREWALL_MANAGE, POLKIT_PROFILE_APPLY,
+    POLKIT_SELINUX_DIAGNOSE,
 };
 use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
@@ -1196,7 +1197,26 @@ impl TransactionEngine {
         } else {
             query_json
         };
-        let query: SelinuxDiagnoseQuery = serde_json::from_str(normalized_json).map_err(|e| {
+        let raw_val: serde_json::Value = serde_json::from_str(normalized_json).map_err(|e| {
+            AkrepError::InvalidInput(format!(
+                "Malformed SELinux diagnosis query JSON: {}",
+                redact_secrets(&e.to_string())
+            ))
+        })?;
+        if let Err(err) = reject_forbidden_selinux_directives_in_json_value(&raw_val) {
+            self.audit_logged(
+                "selinux_diagnose_rejected_redline",
+                None,
+                None,
+                Some(caller.uid),
+                Some(&caller.bus_name),
+                Some(POLKIT_SELINUX_DIAGNOSE),
+                "rejected",
+                err.message(),
+            );
+            return Err(err.redacted());
+        }
+        let query: SelinuxDiagnoseQuery = serde_json::from_value(raw_val).map_err(|e| {
             AkrepError::InvalidInput(format!(
                 "Malformed SELinux diagnosis query JSON: {}",
                 redact_secrets(&e.to_string())

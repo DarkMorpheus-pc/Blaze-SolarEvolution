@@ -290,13 +290,32 @@ pub fn validate_restorecon_path(target_path: &str) -> Result<(), AkrepError> {
         ));
     }
     validate_safe_absolute_path("target_path", target_path)?;
-    for virtual_fs in ["/proc", "/sys", "/dev"] {
-        if target_path == virtual_fs || target_path.starts_with(&format!("{}/", virtual_fs)) {
+    for protected_prefix in [
+        "/proc",
+        "/sys",
+        "/dev",
+        "/run",
+        "/boot",
+        "/var/lib/akrep",
+        "/etc/sudoers.d",
+    ] {
+        if target_path == protected_prefix
+            || target_path.starts_with(&format!("{}/", protected_prefix))
+        {
             return Err(AkrepError::ForbiddenOperation(format!(
-                "restorecon on pseudo-filesystem '{}' is forbidden",
-                virtual_fs
+                "restorecon on protected path '{}' is forbidden",
+                protected_prefix
             )));
         }
+    }
+    if matches!(
+        target_path,
+        "/etc/shadow" | "/etc/gshadow" | "/etc/sudoers" | "/etc/selinux/config"
+    ) {
+        return Err(AkrepError::ForbiddenOperation(format!(
+            "restorecon on sensitive security file '{}' is forbidden",
+            target_path
+        )));
     }
     Ok(())
 }

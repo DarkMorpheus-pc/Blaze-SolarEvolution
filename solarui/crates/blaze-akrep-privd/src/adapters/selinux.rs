@@ -12,19 +12,55 @@ use blaze_sentinel_core::sha256_hex;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::fs;
+use std::ffi::OsStr;
+use std::fs::{self, File};
+use std::io::{Read, Seek, SeekFrom};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, SystemTime};
 
-const MAX_RESTORECON_WALK_ENTRIES: usize = 2_000;
+pub const MAX_RESTORECON_WALK_ENTRIES: usize = 2_000;
+pub const MAX_AUDIT_LOG_TAIL_BYTES: u64 = 8 * 1024 * 1024;
+const PERSISTENT_CACHE_TTL: Duration = Duration::from_secs(30);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PersistentSource {
+    Authoritative,
+    LocalOverridesOnly,
+}
+
+#[derive(Debug, Clone)]
+pub struct PersistentBooleanMap {
+    pub source: PersistentSource,
+    pub values: HashMap<String, bool>,
+}
+
+impl PersistentBooleanMap {
+    pub fn resolve_for(&self, name: &str, current: bool) -> Option<bool> {
+        match self.source {
+            PersistentSource::Authoritative => {
+                Some(self.values.get(name).copied().unwrap_or(current))
+            }
+            PersistentSource::LocalOverridesOnly => self.values.get(name).copied(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RawBooleanState {
     pub name: String,
     pub current: bool,
     pub pending: bool,
-    pub persistent: bool,
+    pub persistent: Option<bool>,
+}
+
+impl RawBooleanState {
+    pub fn is_persistent_enabled(&self) -> bool {
+        self.persistent == Some(true)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -329,6 +365,188 @@ fn resolve_binary(candidates: &[&str]) -> Option<PathBuf> {
     candidates.iter().map(PathBuf::from).find(|p| p.is_file())
 }
 
+pub fn command_c_locale<S: AsRef<OsStr>>(program: S) -> Command {
+    let mut cmd = Command::new(program);
+    cmd.env("LC_ALL", "C").env("LANG", "C");
+    cmd
+}
+
+pub fn validate_selinux_policy_type(policy: &str) -> Result<&str, AkrepError> {
+    let trimmed = policy.trim();
+    if trimmed.is_empty() || trimmed.len() > 64 || trimmed == "." || trimmed.contains("..") {
+        return Err(AkrepError::InvalidInput(format!(
+            "Invalid SELinux policy type '{}'",
+            policy
+        )));
+    }
+    if !trimmed
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
+    {
+        return Err(AkrepError::InvalidInput(format!(
+            "Invalid characters in SELinux policy type '{}'",
+            policy
+        )));
+    }
+    Ok(trimmed)
+}
+
+pub fn resolve_and_validate_restorecon_target(
+    path: &Path,
+    recursive: bool,
+) -> Result<PathBuf, AkrepError> {
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| AkrepError::InvalidInput("Target path must be valid UTF-8".to_string()))?;
+    validate_restorecon_path(path_str)?;
+
+    let leaf_meta = fs::symlink_metadata(path).map_err(|_| {
+        AkrepError::InvalidInput(format!("Target path '{}' does not exist", path_str))
+    })?;
+
+    if recursive && leaf_meta.file_type().is_symlink() {
+        return Err(AkrepError::ForbiddenOperation(format!(
+            "Recursive restorecon on symlink target '{}' is forbidden",
+            path_str
+        )));
+    }
+
+    let parent = path.parent().ok_or_else(|| {
+        AkrepError::ForbiddenOperation("Target path must have a valid parent directory".to_string())
+    })?;
+    let canon_parent = fs::canonicalize(parent).map_err(|e| {
+        AkrepError::InvalidInput(format!(
+            "Failed to canonicalize parent directory for '{}': {}",
+            path_str,
+            redact_secrets(&e.to_string())
+        ))
+    })?;
+
+    let resolved = match path.file_name() {
+        Some(name) => canon_parent.join(name),
+        None => canon_parent,
+    };
+    let resolved_str = resolved.to_str().ok_or_else(|| {
+        AkrepError::InvalidInput("Canonicalized target path is not valid UTF-8".to_string())
+    })?;
+    validate_restorecon_path(resolved_str)?;
+
+    if leaf_meta.file_type().is_dir() {
+        let canon_dir = fs::canonicalize(&resolved).map_err(|e| {
+            AkrepError::InvalidInput(format!(
+                "Failed to canonicalize target directory '{}': {}",
+                path_str,
+                redact_secrets(&e.to_string())
+            ))
+        })?;
+        let canon_dir_str = canon_dir.to_str().ok_or_else(|| {
+            AkrepError::InvalidInput("Canonicalized directory is not valid UTF-8".to_string())
+        })?;
+        validate_restorecon_path(canon_dir_str)?;
+        return Ok(canon_dir);
+    }
+
+    Ok(resolved)
+}
+
+pub fn walk_restorecon_paths_bounded(
+    path: &Path,
+    recursive: bool,
+    max_entries: usize,
+) -> Result<Vec<PathBuf>, AkrepError> {
+    let resolved = resolve_and_validate_restorecon_target(path, recursive)?;
+    let root_meta = fs::symlink_metadata(&resolved)?;
+
+    if !recursive || !root_meta.file_type().is_dir() {
+        return Ok(vec![resolved]);
+    }
+
+    let root_dev = root_meta.dev();
+    let mut collected = Vec::new();
+    let mut stack = vec![resolved.clone()];
+
+    while let Some(cur_dir) = stack.pop() {
+        if collected.len() >= max_entries {
+            return Err(AkrepError::InvalidInput(format!(
+                "Target directory '{}' exceeds maximum entry limit ({}) for transactional restorecon",
+                resolved.display(),
+                max_entries
+            )));
+        }
+        collected.push(cur_dir.clone());
+
+        let mut children: Vec<PathBuf> = fs::read_dir(&cur_dir)?
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .map(|e| e.path())
+            .collect();
+        children.sort();
+
+        for child in children.into_iter().rev() {
+            let Some(child_str) = child.to_str() else {
+                continue;
+            };
+            if validate_restorecon_path(child_str).is_err() {
+                continue;
+            }
+            let child_meta = fs::symlink_metadata(&child)?;
+            // Never traverse directory symlinks or cross filesystem mount boundaries into pseudo-mounts
+            if child_meta.file_type().is_dir() {
+                if child_meta.dev() != root_dev {
+                    continue;
+                }
+                stack.push(child);
+            } else {
+                if collected.len() >= max_entries {
+                    return Err(AkrepError::InvalidInput(format!(
+                        "Target directory '{}' exceeds maximum entry limit ({}) for transactional restorecon",
+                        resolved.display(),
+                        max_entries
+                    )));
+                }
+                collected.push(child);
+            }
+        }
+    }
+
+    collected.sort();
+    Ok(collected)
+}
+
+pub fn read_tail_lossy_string(path: &Path, max_bytes: u64) -> std::io::Result<String> {
+    let mut file = File::open(path)?;
+    let file_len = file.metadata()?.len();
+    let mut buf = Vec::new();
+    if file_len > max_bytes {
+        file.seek(SeekFrom::Start(file_len - max_bytes))?;
+        file.read_to_end(&mut buf)?;
+        if let Some(nl_pos) = buf.iter().position(|&b| b == b'\n') {
+            buf.drain(..=nl_pos);
+        }
+    } else {
+        file.read_to_end(&mut buf)?;
+    }
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
+pub fn extract_avc_lines_from_audit_file(path: &Path) -> Result<Vec<String>, AkrepError> {
+    if !path.is_file() {
+        return Ok(Vec::new());
+    }
+    let Ok(raw) = read_tail_lossy_string(path, MAX_AUDIT_LOG_TAIL_BYTES) else {
+        return Ok(Vec::new());
+    };
+    let mut lines: Vec<String> = raw
+        .lines()
+        .filter(|l| is_avc_denied_line(l))
+        .map(ToString::to_string)
+        .collect();
+    if lines.len() > 1_000 {
+        lines = lines.split_off(lines.len() - 1_000);
+    }
+    Ok(lines)
+}
+
 pub fn parse_semanage_boolean_output(raw: &str) -> HashMap<String, bool> {
     let mut map = HashMap::new();
     for line in raw.lines() {
@@ -393,7 +611,6 @@ pub fn parse_booleans_local_file(raw: &str) -> HashMap<String, bool> {
 }
 
 pub fn parse_restorecon_output(raw: &str) -> Vec<RestoreconPreviewEntry> {
-    // Matches both Fedora `Would relabel /path from ctxA to ctxB` and `Relabeled /path from ctxA to ctxB`
     let mut entries = Vec::new();
     for line in raw.lines() {
         let trimmed = line.trim();
@@ -430,40 +647,117 @@ fn is_avc_denied_line(line: &str) -> bool {
         || line.contains("avc:")
 }
 
-pub struct LinuxSelinuxOps;
+#[derive(Debug, Clone)]
+struct CachedPersistentBooleans {
+    policy_type: String,
+    stamp: Option<(u64, SystemTime)>,
+    loaded_at: Instant,
+    map: PersistentBooleanMap,
+}
+
+pub struct LinuxSelinuxOps {
+    persistent_cache: Mutex<Option<CachedPersistentBooleans>>,
+}
 
 impl LinuxSelinuxOps {
     pub fn new() -> Self {
-        Self
+        Self {
+            persistent_cache: Mutex::new(None),
+        }
     }
 
-    fn read_persistent_map(&self, policy_type: &str) -> HashMap<String, bool> {
-        if let Some(semanage) =
-            resolve_binary(&["/usr/sbin/semanage", "/sbin/semanage", "/usr/bin/semanage"])
-        {
-            if let Ok(out) = Command::new(semanage)
-                .args(["boolean", "-l", "-n"])
-                .output()
-            {
-                if out.status.success() {
-                    let parsed =
-                        parse_semanage_boolean_output(&String::from_utf8_lossy(&out.stdout));
-                    if !parsed.is_empty() {
-                        return parsed;
-                    }
-                }
-            }
-        }
-
+    fn policy_store_stamp(policy_type: &str) -> Option<(u64, SystemTime)> {
+        let commit_path = PathBuf::from(format!(
+            "/var/lib/selinux/{}/active/commit_num",
+            policy_type
+        ));
         let local_path = PathBuf::from(format!(
             "/var/lib/selinux/{}/active/booleans.local",
             policy_type
         ));
-        if let Ok(raw) = fs::read_to_string(local_path) {
-            return parse_booleans_local_file(&raw);
+        let meta = fs::metadata(&commit_path)
+            .or_else(|_| fs::metadata(&local_path))
+            .ok()?;
+        let mtime = meta.modified().ok()?;
+        Some((meta.len(), mtime))
+    }
+
+    fn invalidate_persistent_cache(&self) {
+        if let Ok(mut guard) = self.persistent_cache.lock() {
+            *guard = None;
+        }
+    }
+
+    fn read_persistent_map(
+        &self,
+        raw_policy_type: &str,
+    ) -> Result<PersistentBooleanMap, AkrepError> {
+        let policy_type = validate_selinux_policy_type(raw_policy_type)?;
+        let current_stamp = Self::policy_store_stamp(policy_type);
+
+        if let Ok(guard) = self.persistent_cache.lock() {
+            if let Some(cached) = guard.as_ref() {
+                if cached.policy_type == policy_type
+                    && cached.stamp == current_stamp
+                    && cached.loaded_at.elapsed() < PERSISTENT_CACHE_TTL
+                {
+                    return Ok(cached.map.clone());
+                }
+            }
         }
 
-        HashMap::new()
+        let loaded = if let Some(semanage) =
+            resolve_binary(&["/usr/sbin/semanage", "/sbin/semanage", "/usr/bin/semanage"])
+        {
+            match command_c_locale(semanage)
+                .args(["boolean", "-l", "-n"])
+                .output()
+            {
+                Ok(out) if out.status.success() => {
+                    let parsed =
+                        parse_semanage_boolean_output(&String::from_utf8_lossy(&out.stdout));
+                    if !parsed.is_empty() {
+                        Some(PersistentBooleanMap {
+                            source: PersistentSource::Authoritative,
+                            values: parsed,
+                        })
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+
+        let map = match loaded {
+            Some(authoritative) => authoritative,
+            None => {
+                let local_path = PathBuf::from(format!(
+                    "/var/lib/selinux/{}/active/booleans.local",
+                    policy_type
+                ));
+                let local_vals = fs::read_to_string(local_path)
+                    .map(|raw| parse_booleans_local_file(&raw))
+                    .unwrap_or_default();
+                PersistentBooleanMap {
+                    source: PersistentSource::LocalOverridesOnly,
+                    values: local_vals,
+                }
+            }
+        };
+
+        if let Ok(mut guard) = self.persistent_cache.lock() {
+            *guard = Some(CachedPersistentBooleans {
+                policy_type: policy_type.to_string(),
+                stamp: current_stamp,
+                loaded_at: Instant::now(),
+                map: map.clone(),
+            });
+        }
+
+        Ok(map)
     }
 
     fn parse_sysfs_bool_file(path: &Path) -> Result<(bool, bool), AkrepError> {
@@ -478,7 +772,7 @@ impl LinuxSelinuxOps {
 
     fn read_single_file_context(path: &Path) -> Result<String, AkrepError> {
         if let Some(getfattr) = resolve_binary(&["/usr/bin/getfattr", "/bin/getfattr"]) {
-            if let Ok(out) = Command::new(getfattr)
+            if let Ok(out) = command_c_locale(getfattr)
                 .args([
                     "-h",
                     "-n",
@@ -506,7 +800,7 @@ impl LinuxSelinuxOps {
                 "Missing 'stat' utility for SELinux context inspection".to_string(),
             )
         })?;
-        let out = Command::new(stat_bin)
+        let out = command_c_locale(stat_bin)
             .args(["-c", "%C", "--"])
             .arg(path)
             .output()?;
@@ -561,7 +855,9 @@ impl SelinuxSysOps for LinuxSelinuxOps {
             if let Some(v) = trimmed.strip_prefix("SELINUX=") {
                 configured_mode = Some(v.trim().to_string());
             } else if let Some(v) = trimmed.strip_prefix("SELINUXTYPE=") {
-                policy_type = Some(v.trim().to_string());
+                let candidate = v.trim();
+                validate_selinux_policy_type(candidate)?;
+                policy_type = Some(candidate.to_string());
             }
         }
         Ok(SelinuxConfigState {
@@ -577,7 +873,7 @@ impl SelinuxSysOps for LinuxSelinuxOps {
         }
         let cfg = self.read_config()?;
         let policy = cfg.policy_type.as_deref().unwrap_or("targeted");
-        let persistent_map = self.read_persistent_map(policy);
+        let persistent_map = self.read_persistent_map(policy)?;
 
         let mut list = Vec::new();
         for entry in fs::read_dir(bool_dir)? {
@@ -586,7 +882,7 @@ impl SelinuxSysOps for LinuxSelinuxOps {
             let Ok((current, pending)) = Self::parse_sysfs_bool_file(&entry.path()) else {
                 continue;
             };
-            let persistent = persistent_map.get(&name).copied().unwrap_or(current);
+            let persistent = persistent_map.resolve_for(&name, current);
             list.push(RawBooleanState {
                 name,
                 current,
@@ -607,8 +903,8 @@ impl SelinuxSysOps for LinuxSelinuxOps {
         let (current, pending) = Self::parse_sysfs_bool_file(&path)?;
         let cfg = self.read_config()?;
         let policy = cfg.policy_type.as_deref().unwrap_or("targeted");
-        let persistent_map = self.read_persistent_map(policy);
-        let persistent = persistent_map.get(name).copied().unwrap_or(current);
+        let persistent_map = self.read_persistent_map(policy)?;
+        let persistent = persistent_map.resolve_for(name, current);
         Ok(Some(RawBooleanState {
             name: name.to_string(),
             current,
@@ -629,7 +925,7 @@ impl SelinuxSysOps for LinuxSelinuxOps {
         })?;
 
         let val_arg = if value { "on" } else { "off" };
-        let mut cmd = Command::new(bin);
+        let mut cmd = command_c_locale(bin);
         if persistent {
             cmd.args(["-P", name, val_arg]);
         } else {
@@ -643,6 +939,9 @@ impl SelinuxSysOps for LinuxSelinuxOps {
                 redact_secrets(String::from_utf8_lossy(&out.stderr).trim())
             )));
         }
+        if persistent {
+            self.invalidate_persistent_cache();
+        }
         Ok(())
     }
 
@@ -651,10 +950,7 @@ impl SelinuxSysOps for LinuxSelinuxOps {
         path: &Path,
         recursive: bool,
     ) -> Result<Vec<RestoreconPreviewEntry>, AkrepError> {
-        let path_str = path.to_str().ok_or_else(|| {
-            AkrepError::InvalidInput("Target path must be valid UTF-8".to_string())
-        })?;
-        validate_restorecon_path(path_str)?;
+        let resolved = resolve_and_validate_restorecon_target(path, recursive)?;
         let bin = resolve_binary(&[
             "/sbin/restorecon",
             "/usr/sbin/restorecon",
@@ -664,12 +960,12 @@ impl SelinuxSysOps for LinuxSelinuxOps {
             AkrepError::BackendUnavailable("restorecon binary is not installed".to_string())
         })?;
 
-        let mut cmd = Command::new(bin);
-        cmd.arg("-nv");
+        let mut cmd = command_c_locale(bin);
+        cmd.args(["-n", "-v", "-h"]);
         if recursive {
             cmd.arg("-R");
         }
-        cmd.arg("--").arg(path);
+        cmd.arg("--").arg(&resolved);
         let out = cmd.output()?;
         if !out.status.success() {
             return Err(AkrepError::IoError(format!(
@@ -690,50 +986,12 @@ impl SelinuxSysOps for LinuxSelinuxOps {
         path: &Path,
         recursive: bool,
     ) -> Result<Vec<FileContextEntry>, AkrepError> {
-        let path_str = path.to_str().ok_or_else(|| {
-            AkrepError::InvalidInput("Target path must be valid UTF-8".to_string())
-        })?;
-        validate_restorecon_path(path_str)?;
-        let meta = fs::symlink_metadata(path).map_err(|_| {
-            AkrepError::InvalidInput(format!("Target path '{}' does not exist", path_str))
-        })?;
-
-        let mut results = Vec::new();
-        if recursive && meta.file_type().is_dir() {
-            let mut stack = vec![path.to_path_buf()];
-            while let Some(cur_dir) = stack.pop() {
-                if results.len() >= MAX_RESTORECON_WALK_ENTRIES {
-                    break;
-                }
-                let ctx = Self::read_single_file_context(&cur_dir)?;
-                results.push(FileContextEntry {
-                    path: cur_dir.to_string_lossy().to_string(),
-                    context: ctx,
-                });
-                let mut children: Vec<PathBuf> = fs::read_dir(&cur_dir)?
-                    .filter_map(|e| e.ok().map(|x| x.path()))
-                    .collect();
-                children.sort();
-                for child in children.into_iter().rev() {
-                    if results.len() >= MAX_RESTORECON_WALK_ENTRIES {
-                        break;
-                    }
-                    let child_meta = fs::symlink_metadata(&child)?;
-                    if child_meta.file_type().is_dir() {
-                        stack.push(child);
-                    } else {
-                        let c_ctx = Self::read_single_file_context(&child)?;
-                        results.push(FileContextEntry {
-                            path: child.to_string_lossy().to_string(),
-                            context: c_ctx,
-                        });
-                    }
-                }
-            }
-        } else {
-            let ctx = Self::read_single_file_context(path)?;
+        let paths = walk_restorecon_paths_bounded(path, recursive, MAX_RESTORECON_WALK_ENTRIES)?;
+        let mut results = Vec::with_capacity(paths.len());
+        for p in paths {
+            let ctx = Self::read_single_file_context(&p)?;
             results.push(FileContextEntry {
-                path: path_str.to_string(),
+                path: p.to_string_lossy().to_string(),
                 context: ctx,
             });
         }
@@ -746,10 +1004,7 @@ impl SelinuxSysOps for LinuxSelinuxOps {
         path: &Path,
         recursive: bool,
     ) -> Result<Vec<RestoreconPreviewEntry>, AkrepError> {
-        let path_str = path.to_str().ok_or_else(|| {
-            AkrepError::InvalidInput("Target path must be valid UTF-8".to_string())
-        })?;
-        validate_restorecon_path(path_str)?;
+        let resolved = resolve_and_validate_restorecon_target(path, recursive)?;
         let bin = resolve_binary(&[
             "/sbin/restorecon",
             "/usr/sbin/restorecon",
@@ -759,12 +1014,12 @@ impl SelinuxSysOps for LinuxSelinuxOps {
             AkrepError::BackendUnavailable("restorecon binary is not installed".to_string())
         })?;
 
-        let mut cmd = Command::new(bin);
-        cmd.arg("-v");
+        let mut cmd = command_c_locale(bin);
+        cmd.args(["-v", "-h"]);
         if recursive {
             cmd.arg("-R");
         }
-        cmd.arg("--").arg(path);
+        cmd.arg("--").arg(&resolved);
         let out = cmd.output()?;
         if !out.status.success() {
             return Err(AkrepError::ApplyFailed(format!(
@@ -781,10 +1036,7 @@ impl SelinuxSysOps for LinuxSelinuxOps {
     }
 
     fn restore_file_context(&self, path: &Path, context: &str) -> Result<(), AkrepError> {
-        let path_str = path.to_str().ok_or_else(|| {
-            AkrepError::InvalidInput("Target path must be valid UTF-8".to_string())
-        })?;
-        validate_restorecon_path(path_str)?;
+        let resolved = resolve_and_validate_restorecon_target(path, false)?;
         if context.trim().is_empty() || context.chars().any(|c| c.is_whitespace() || c.is_control())
         {
             return Err(AkrepError::InvalidInput(
@@ -794,14 +1046,14 @@ impl SelinuxSysOps for LinuxSelinuxOps {
         let bin = resolve_binary(&["/usr/bin/chcon", "/bin/chcon", "/usr/sbin/chcon"]).ok_or_else(
             || AkrepError::BackendUnavailable("chcon binary is not installed".to_string()),
         )?;
-        let out = Command::new(bin)
+        let out = command_c_locale(bin)
             .args(["-h", context, "--"])
-            .arg(path)
+            .arg(&resolved)
             .output()?;
         if !out.status.success() {
             return Err(AkrepError::RollbackFailed(format!(
                 "chcon rollback failed on '{}': {}",
-                path_str,
+                resolved.display(),
                 redact_secrets(String::from_utf8_lossy(&out.stderr).trim())
             )));
         }
@@ -809,22 +1061,7 @@ impl SelinuxSysOps for LinuxSelinuxOps {
     }
 
     fn read_audit_avc_lines(&self) -> Result<Vec<String>, AkrepError> {
-        let audit_path = Path::new("/var/log/audit/audit.log");
-        if !audit_path.is_file() {
-            return Ok(Vec::new());
-        }
-        let Ok(raw) = fs::read_to_string(audit_path) else {
-            return Ok(Vec::new());
-        };
-        let mut lines: Vec<String> = raw
-            .lines()
-            .filter(|l| is_avc_denied_line(l))
-            .map(ToString::to_string)
-            .collect();
-        if lines.len() > 1_000 {
-            lines = lines.split_off(lines.len() - 1_000);
-        }
-        Ok(lines)
+        extract_avc_lines_from_audit_file(Path::new("/var/log/audit/audit.log"))
     }
 
     fn read_journal_avc_lines(&self) -> Result<Vec<String>, AkrepError> {
@@ -834,7 +1071,7 @@ impl SelinuxSysOps for LinuxSelinuxOps {
 
         let mut collected = Vec::new();
         for transport in ["_TRANSPORT=audit", "_TRANSPORT=kernel"] {
-            if let Ok(out) = Command::new(&journalctl)
+            if let Ok(out) = command_c_locale(&journalctl)
                 .args([
                     "--output=json",
                     "--no-pager",
@@ -1093,7 +1330,6 @@ fn match_safe_boolean_for_denial(
         return None;
     }
     let (_, meta) = lookup_boolean_meta(bool_name);
-    // Never auto-suggest High/Critical booleans
     if matches!(meta.risk, RiskLevel::High | RiskLevel::Critical) {
         return None;
     }
@@ -1128,7 +1364,7 @@ fn classify_avc_severity(target_class: &str, permissions: &[String]) -> RiskLeve
 struct BooleanSnapshotFile {
     name: String,
     prev_runtime: bool,
-    prev_persistent: bool,
+    prev_persistent: Option<bool>,
     was_persistent_op: bool,
 }
 
@@ -1139,6 +1375,15 @@ struct RestoreconSnapshotFile {
     previous_contexts: Vec<FileContextEntry>,
 }
 
+fn format_opt_persistent(p: Option<bool>) -> &'static str {
+    match p {
+        Some(true) => "on",
+        Some(false) => "off",
+        None => "policy_default",
+    }
+}
+
+#[derive(Clone)]
 pub struct SelinuxAdapter {
     ops: Arc<dyn SelinuxSysOps>,
 }
@@ -1167,7 +1412,12 @@ impl SelinuxAdapter {
     }
 
     fn boolean_fingerprint(state: &RawBooleanState) -> StateFingerprint {
-        let canonical = format!("{}|{}", state.current, state.persistent);
+        let p_str = match state.persistent {
+            Some(true) => "some_true",
+            Some(false) => "some_false",
+            None => "unknown_default",
+        };
+        let canonical = format!("{}|{}", state.current, p_str);
         StateFingerprint {
             target: format!("selinux.boolean.{}", state.name),
             sha256: sha256_hex(canonical.as_bytes()),
@@ -1261,10 +1511,6 @@ impl SelinuxAdapter {
             let signature_id = sha256_hex(sig_seed.as_bytes())[..16].to_string();
             let severity = classify_avc_severity(&target_class, &permissions);
 
-            // Strict Remediation Priority Order:
-            // 1. Inspect file context mismatch via `restorecon -nv <path>`
-            // 2. Match known safe SELinux boolean
-            // 3. Advise manual administrator policy review (never automatic policy module compilation)
             let mut suggested_fix = None;
             if let Some(ref p_str) = acc.sample_path {
                 if matches!(
@@ -1345,18 +1591,44 @@ impl SelinuxAdapter {
         &self,
         query: &SelinuxDiagnoseQuery,
     ) -> Result<SelinuxDiagnoseResponse, AkrepError> {
+        query.validate_red_lines("{}")?;
+
+        let action_mode = query
+            .action
+            .as_deref()
+            .map(|s| s.trim().to_ascii_lowercase())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "full".to_string());
+
+        let want_booleans = match action_mode.as_str() {
+            "status" | "avc" | "inspect_path" => false,
+            "booleans" => true,
+            _ => query.include_booleans,
+        };
+        let want_avc = match action_mode.as_str() {
+            "status" | "booleans" | "inspect_path" => false,
+            "avc" => true,
+            _ => query.include_avc,
+        };
+        let want_inspect_path = match action_mode.as_str() {
+            "status" | "booleans" | "avc" => false,
+            "inspect_path" => true,
+            _ => query.inspect_path.is_some(),
+        };
+
         let runtime_mode = self.ops.read_runtime_mode()?;
         let cfg = self.ops.read_config()?;
 
-        let raw_bools = if runtime_mode == SelinuxRuntimeMode::Disabled {
-            Vec::new()
-        } else {
-            self.ops.list_booleans()?
-        };
+        let raw_bools =
+            if runtime_mode == SelinuxRuntimeMode::Disabled || (!want_booleans && !want_avc) {
+                Vec::new()
+            } else {
+                self.ops.list_booleans()?
+            };
 
         let known_bool_names: HashSet<String> = raw_bools.iter().map(|b| b.name.clone()).collect();
 
-        let booleans = if query.include_booleans {
+        let booleans = if want_booleans {
             let filter = query
                 .boolean_filter
                 .as_deref()
@@ -1374,7 +1646,8 @@ impl SelinuxAdapter {
                         name: b.name,
                         current: b.current,
                         pending: b.pending,
-                        persistent: b.persistent,
+                        persistent: b.persistent.unwrap_or(b.current),
+                        persistent_known: b.persistent.is_some(),
                         cataloged,
                         category: meta.category,
                         risk: meta.risk,
@@ -1387,13 +1660,18 @@ impl SelinuxAdapter {
             Vec::new()
         };
 
-        let avc_groups = if query.include_avc {
+        let avc_groups = if want_avc {
             self.collect_grouped_avc_denials(&known_bool_names)?
         } else {
             Vec::new()
         };
 
-        let (current_contexts, restorecon_preview) = if let Some(ref target) = query.inspect_path {
+        let (current_contexts, restorecon_preview) = if want_inspect_path {
+            let target = query.inspect_path.as_deref().ok_or_else(|| {
+                AkrepError::InvalidInput(
+                    "inspect_path must be provided for action 'inspect_path'".to_string(),
+                )
+            })?;
             validate_restorecon_path(target)?;
             let path = Path::new(target);
             let cur = self.ops.read_file_contexts(path, query.recursive)?;
@@ -1413,27 +1691,8 @@ impl SelinuxAdapter {
             current_contexts,
         })
     }
-}
 
-fn combine_risk(a: RiskLevel, b: RiskLevel) -> RiskLevel {
-    let rank = |r: RiskLevel| -> u8 {
-        match r {
-            RiskLevel::Low => 0,
-            RiskLevel::Medium => 1,
-            RiskLevel::High => 2,
-            RiskLevel::Critical => 3,
-        }
-    };
-    if rank(a) >= rank(b) {
-        a
-    } else {
-        b
-    }
-}
-
-#[async_trait]
-impl MutationBackend for SelinuxAdapter {
-    async fn preview(&self, req: &ActionRequest) -> Result<PreviewOutcome, AkrepError> {
+    fn preview_sync(&self, req: &ActionRequest) -> Result<PreviewOutcome, AkrepError> {
         req.validate_red_lines()?;
         self.ensure_selinux_enabled()?;
 
@@ -1482,7 +1741,7 @@ impl MutationBackend for SelinuxAdapter {
                 }
 
                 let desired_persistent = if *persistent {
-                    *value
+                    Some(*value)
                 } else {
                     state.persistent
                 };
@@ -1491,12 +1750,12 @@ impl MutationBackend for SelinuxAdapter {
                     current_value: format!(
                         "runtime={}, persistent={}",
                         if state.current { "on" } else { "off" },
-                        if state.persistent { "on" } else { "off" }
+                        format_opt_persistent(state.persistent)
                     ),
                     desired_value: format!(
                         "runtime={}, persistent={}",
                         if *value { "on" } else { "off" },
-                        if desired_persistent { "on" } else { "off" }
+                        format_opt_persistent(desired_persistent)
                     ),
                     description_tr: meta.summary_tr,
                     description_en: meta.summary_en,
@@ -1566,7 +1825,7 @@ impl MutationBackend for SelinuxAdapter {
         }
     }
 
-    async fn apply(
+    fn apply_sync(
         &self,
         req: &ActionRequest,
         snapshot_dir: &Path,
@@ -1598,8 +1857,8 @@ impl MutationBackend for SelinuxAdapter {
 
                 self.ops.set_boolean(name, *value, *persistent)?;
 
-                let desired_persistent = if *persistent {
-                    *value
+                let desired_persistent: Option<bool> = if *persistent {
+                    Some(*value)
                 } else {
                     before.persistent
                 };
@@ -1655,7 +1914,7 @@ impl MutationBackend for SelinuxAdapter {
         }
     }
 
-    async fn verify(
+    fn verify_sync(
         &self,
         req: &ActionRequest,
         expected: &ApplyOutcome,
@@ -1678,21 +1937,20 @@ impl MutationBackend for SelinuxAdapter {
                         name, value, after.current, after.pending
                     )));
                 }
-                let expected_persistent = expected
+                let expected_persistent: Option<bool> = expected
                     .target_state
                     .get("desired_persistent")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(*value);
-                if *persistent && after.persistent != *value {
+                    .and_then(|v| v.as_bool());
+                if *persistent && after.persistent != Some(*value) {
                     return Err(AkrepError::VerifyFailed(format!(
-                        "SELinux boolean '{}' persistent state mismatch (expected {}, got {})",
+                        "SELinux boolean '{}' persistent state mismatch (expected Some({}), got {:?})",
                         name, value, after.persistent
                     )));
                 }
                 if !*persistent && after.persistent != expected_persistent {
                     return Err(AkrepError::VerifyFailed(format!(
-                        "SELinux boolean '{}' unexpected persistent policy mutation",
-                        name
+                        "SELinux boolean '{}' unexpected persistent policy mutation (expected {:?}, got {:?})",
+                        name, expected_persistent, after.persistent
                     )));
                 }
                 Ok(vec![Self::boolean_fingerprint(&after)])
@@ -1721,10 +1979,9 @@ impl MutationBackend for SelinuxAdapter {
         }
     }
 
-    async fn current_fingerprints(
+    fn current_fingerprints_sync(
         &self,
         req: &ActionRequest,
-        _post_fps: &[StateFingerprint],
     ) -> Result<Vec<StateFingerprint>, AkrepError> {
         self.ensure_selinux_enabled()?;
         match req {
@@ -1749,7 +2006,7 @@ impl MutationBackend for SelinuxAdapter {
         }
     }
 
-    async fn rollback(
+    fn rollback_sync(
         &self,
         record: &TransactionRecord,
         snapshot_dir: &Path,
@@ -1771,9 +2028,9 @@ impl MutationBackend for SelinuxAdapter {
                 };
 
                 if snap.was_persistent_op {
-                    self.ops
-                        .set_boolean(&snap.name, snap.prev_persistent, true)?;
-                    if snap.prev_runtime != snap.prev_persistent {
+                    let target_p = snap.prev_persistent.unwrap_or(snap.prev_runtime);
+                    self.ops.set_boolean(&snap.name, target_p, true)?;
+                    if snap.prev_runtime != target_p {
                         self.ops.set_boolean(&snap.name, snap.prev_runtime, false)?;
                     }
                 } else {
@@ -1786,8 +2043,13 @@ impl MutationBackend for SelinuxAdapter {
                         snap.name
                     ))
                 })?;
+                let expected_restored_p = if snap.was_persistent_op {
+                    Some(snap.prev_persistent.unwrap_or(snap.prev_runtime))
+                } else {
+                    snap.prev_persistent
+                };
                 if restored.current != snap.prev_runtime
-                    || restored.persistent != snap.prev_persistent
+                    || restored.persistent != expected_restored_p
                 {
                     return Err(AkrepError::RollbackFailed(format!(
                         "SELinux boolean '{}' rollback state verification failed",
@@ -1799,7 +2061,7 @@ impl MutationBackend for SelinuxAdapter {
                     "Restored SELinux boolean '{}' to runtime={}, persistent={}",
                     snap.name,
                     if snap.prev_runtime { "on" } else { "off" },
-                    if snap.prev_persistent { "on" } else { "off" }
+                    format_opt_persistent(expected_restored_p)
                 ))
             }
             ActionRequest::SelinuxRestorecon { target_path, .. } => {
@@ -1821,6 +2083,26 @@ impl MutationBackend for SelinuxAdapter {
                     self.ops
                         .restore_file_context(Path::new(&item.path), &item.context)?;
                 }
+
+                // Re-verify restored file contexts match pre-apply snapshot
+                let restored_contexts = self
+                    .ops
+                    .read_file_contexts(Path::new(&snap.target_path), snap.recursive)?;
+                let restored_map: HashMap<&str, &str> = restored_contexts
+                    .iter()
+                    .map(|c| (c.path.as_str(), c.context.as_str()))
+                    .collect();
+                for expected_item in &snap.previous_contexts {
+                    if restored_map.get(expected_item.path.as_str()).copied()
+                        != Some(expected_item.context.as_str())
+                    {
+                        return Err(AkrepError::RollbackFailed(format!(
+                            "File context on '{}' did not match pre-snapshot after rollback",
+                            expected_item.path
+                        )));
+                    }
+                }
+
                 Ok(format!(
                     "Restored {} SELinux file context(s) under '{}'",
                     snap.previous_contexts.len(),
@@ -1832,12 +2114,117 @@ impl MutationBackend for SelinuxAdapter {
             )),
         }
     }
+}
+
+fn combine_risk(a: RiskLevel, b: RiskLevel) -> RiskLevel {
+    let rank = |r: RiskLevel| -> u8 {
+        match r {
+            RiskLevel::Low => 0,
+            RiskLevel::Medium => 1,
+            RiskLevel::High => 2,
+            RiskLevel::Critical => 3,
+        }
+    };
+    if rank(a) >= rank(b) {
+        a
+    } else {
+        b
+    }
+}
+
+async fn run_blocking<F, T>(f: F) -> Result<T, AkrepError>
+where
+    F: FnOnce() -> Result<T, AkrepError> + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| AkrepError::Internal(format!("blocking SELinux task panicked: {}", e)))?
+}
+
+#[async_trait]
+impl MutationBackend for SelinuxAdapter {
+    async fn preview(&self, req: &ActionRequest) -> Result<PreviewOutcome, AkrepError> {
+        let this = self.clone();
+        let req_cloned = req.clone();
+        run_blocking(move || this.preview_sync(&req_cloned)).await
+    }
+
+    async fn apply(
+        &self,
+        req: &ActionRequest,
+        snapshot_dir: &Path,
+    ) -> Result<ApplyOutcome, AkrepError> {
+        let this = self.clone();
+        let req_cloned = req.clone();
+        let dir_cloned = snapshot_dir.to_path_buf();
+        run_blocking(move || this.apply_sync(&req_cloned, &dir_cloned)).await
+    }
+
+    async fn verify(
+        &self,
+        req: &ActionRequest,
+        expected: &ApplyOutcome,
+    ) -> Result<Vec<StateFingerprint>, AkrepError> {
+        let this = self.clone();
+        let req_cloned = req.clone();
+        let exp_cloned = expected.clone();
+        run_blocking(move || this.verify_sync(&req_cloned, &exp_cloned)).await
+    }
+
+    async fn current_fingerprints(
+        &self,
+        req: &ActionRequest,
+        _post_fps: &[StateFingerprint],
+    ) -> Result<Vec<StateFingerprint>, AkrepError> {
+        let this = self.clone();
+        let req_cloned = req.clone();
+        run_blocking(move || this.current_fingerprints_sync(&req_cloned)).await
+    }
+
+    async fn rollback(
+        &self,
+        record: &TransactionRecord,
+        snapshot_dir: &Path,
+    ) -> Result<String, AkrepError> {
+        let this = self.clone();
+        let rec_cloned = record.clone();
+        let dir_cloned = snapshot_dir.to_path_buf();
+        run_blocking(move || this.rollback_sync(&rec_cloned, &dir_cloned)).await
+    }
 
     async fn diagnose_selinux(
         &self,
         query: &SelinuxDiagnoseQuery,
     ) -> Result<SelinuxDiagnoseResponse, AkrepError> {
-        self.diagnose(query)
+        let this = self.clone();
+        let q_cloned = query.clone();
+        run_blocking(move || this.diagnose(&q_cloned)).await
+    }
+}
+
+#[derive(Debug, Clone)]
+struct MockBooleanData {
+    name: String,
+    current: bool,
+    pending: bool,
+    base_default: bool,
+    local_override: Option<bool>,
+}
+
+impl MockBooleanData {
+    fn to_raw_state(&self, local_overrides_only: bool) -> RawBooleanState {
+        let persistent = if local_overrides_only {
+            self.local_override
+        } else {
+            Some(self.local_override.unwrap_or(self.base_default))
+        };
+        RawBooleanState {
+            name: self.name.clone(),
+            current: self.current,
+            pending: self.pending,
+            persistent,
+        }
     }
 }
 
@@ -1852,7 +2239,8 @@ struct MockSelinuxInner {
     runtime_mode: SelinuxRuntimeMode,
     configured_mode: Option<String>,
     policy_type: Option<String>,
-    booleans: BTreeMap<String, RawBooleanState>,
+    local_overrides_only: bool,
+    booleans: BTreeMap<String, MockBooleanData>,
     files: BTreeMap<String, MockFileLabel>,
     audit_avc_lines: Vec<String>,
     journal_avc_lines: Vec<String>,
@@ -1877,11 +2265,12 @@ impl MockSelinuxOps {
             let default_on = matches!(entry.name, "virt_use_kvm" | "selinuxuser_rw_noexattrfile");
             booleans.insert(
                 entry.name.to_string(),
-                RawBooleanState {
+                MockBooleanData {
                     name: entry.name.to_string(),
                     current: default_on,
                     pending: default_on,
-                    persistent: default_on,
+                    base_default: default_on,
+                    local_override: None,
                 },
             );
         }
@@ -1900,6 +2289,7 @@ impl MockSelinuxOps {
                 runtime_mode: SelinuxRuntimeMode::Enforcing,
                 configured_mode: Some("enforcing".to_string()),
                 policy_type: Some("targeted".to_string()),
+                local_overrides_only: false,
                 booleans,
                 files,
                 audit_avc_lines: Vec::new(),
@@ -1920,6 +2310,13 @@ impl MockSelinuxOps {
         g.policy_type = policy_type.map(ToString::to_string);
     }
 
+    pub fn set_local_overrides_only_mode(&self, enabled: bool) {
+        self.inner
+            .lock()
+            .expect("mock selinux mutex")
+            .local_overrides_only = enabled;
+    }
+
     pub fn insert_boolean(&self, name: &str, current: bool, persistent: bool) {
         self.inner
             .lock()
@@ -1927,17 +2324,34 @@ impl MockSelinuxOps {
             .booleans
             .insert(
                 name.to_string(),
-                RawBooleanState {
+                MockBooleanData {
                     name: name.to_string(),
                     current,
                     pending: current,
-                    persistent,
+                    base_default: persistent,
+                    local_override: None,
                 },
             );
     }
 
     pub fn set_external_boolean_drift(&self, name: &str, current: bool, persistent: bool) {
-        self.insert_boolean(name, current, persistent);
+        let mut g = self.inner.lock().expect("mock selinux mutex");
+        if let Some(entry) = g.booleans.get_mut(name) {
+            entry.current = current;
+            entry.pending = current;
+            entry.local_override = Some(persistent);
+        } else {
+            g.booleans.insert(
+                name.to_string(),
+                MockBooleanData {
+                    name: name.to_string(),
+                    current,
+                    pending: current,
+                    base_default: persistent,
+                    local_override: Some(persistent),
+                },
+            );
+        }
     }
 
     pub fn insert_file_context(
@@ -1971,8 +2385,9 @@ impl MockSelinuxOps {
     pub fn simulate_reboot(&self) {
         let mut g = self.inner.lock().expect("mock selinux mutex");
         for b in g.booleans.values_mut() {
-            b.current = b.persistent;
-            b.pending = b.persistent;
+            let boot_val = b.local_override.unwrap_or(b.base_default);
+            b.current = boot_val;
+            b.pending = boot_val;
         }
         if let Some(ref cfg_m) = g.configured_mode {
             g.runtime_mode = match cfg_m.as_str() {
@@ -2000,6 +2415,9 @@ impl SelinuxSysOps for MockSelinuxOps {
 
     fn read_config(&self) -> Result<SelinuxConfigState, AkrepError> {
         let g = self.inner.lock().expect("mock selinux mutex");
+        if let Some(ref pt) = g.policy_type {
+            validate_selinux_policy_type(pt)?;
+        }
         Ok(SelinuxConfigState {
             configured_mode: g.configured_mode.clone(),
             policy_type: g.policy_type.clone(),
@@ -2008,13 +2426,18 @@ impl SelinuxSysOps for MockSelinuxOps {
 
     fn list_booleans(&self) -> Result<Vec<RawBooleanState>, AkrepError> {
         let g = self.inner.lock().expect("mock selinux mutex");
-        Ok(g.booleans.values().cloned().collect())
+        let local_only = g.local_overrides_only;
+        Ok(g.booleans
+            .values()
+            .map(|b| b.to_raw_state(local_only))
+            .collect())
     }
 
     fn read_boolean(&self, name: &str) -> Result<Option<RawBooleanState>, AkrepError> {
         validate_selinux_boolean_name(name)?;
         let g = self.inner.lock().expect("mock selinux mutex");
-        Ok(g.booleans.get(name).cloned())
+        let local_only = g.local_overrides_only;
+        Ok(g.booleans.get(name).map(|b| b.to_raw_state(local_only)))
     }
 
     fn set_boolean(&self, name: &str, value: bool, persistent: bool) -> Result<(), AkrepError> {
@@ -2045,7 +2468,7 @@ impl SelinuxSysOps for MockSelinuxOps {
             entry.current = value;
             entry.pending = value;
             if persistent {
-                entry.persistent = value;
+                entry.local_override = Some(value);
             }
         }
         Ok(())
@@ -2098,6 +2521,12 @@ impl SelinuxSysOps for MockSelinuxOps {
                 target
             )));
         }
+        if out.len() > MAX_RESTORECON_WALK_ENTRIES {
+            return Err(AkrepError::InvalidInput(format!(
+                "Target path '{}' exceeds maximum entry limit ({})",
+                target, MAX_RESTORECON_WALK_ENTRIES
+            )));
+        }
         Ok(out)
     }
 
@@ -2109,7 +2538,11 @@ impl SelinuxSysOps for MockSelinuxOps {
         let target = path.to_string_lossy().to_string();
         validate_restorecon_path(&target)?;
         let mut g = self.inner.lock().expect("mock selinux mutex");
-        let mut argv = vec!["/sbin/restorecon".to_string(), "-v".to_string()];
+        let mut argv = vec![
+            "/sbin/restorecon".to_string(),
+            "-v".to_string(),
+            "-h".to_string(),
+        ];
         if recursive {
             argv.push("-R".to_string());
         }
@@ -2176,9 +2609,25 @@ impl SelinuxSysOps for MockSelinuxOps {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use std::os::unix::fs::symlink;
+    use tempfile::TempDir;
 
     #[test]
-    fn test_semanage_and_booleans_local_parsers() {
+    fn test_semanage_and_booleans_local_parsers_and_c_locale() {
+        let cmd = command_c_locale("/usr/bin/true");
+        let envs: HashMap<_, _> = cmd
+            .get_envs()
+            .filter_map(|(k, v)| {
+                Some((
+                    k.to_string_lossy().into_owned(),
+                    v?.to_string_lossy().into_owned(),
+                ))
+            })
+            .collect();
+        assert_eq!(envs.get("LC_ALL").map(String::as_str), Some("C"));
+        assert_eq!(envs.get("LANG").map(String::as_str), Some("C"));
+
         let semanage_sample = "\
 httpd_can_network_connect      (off  ,  off)  Allow HTTPD scripts to connect
 virt_use_usb                   (on   ,   on)  Allow virt to use USB
@@ -2194,6 +2643,13 @@ container_manage_cgroup        (on   ,  off)  Allow container cgroups
         let ml = parse_booleans_local_file(local_sample);
         assert_eq!(ml.get("virt_use_usb"), Some(&true));
         assert_eq!(ml.get("httpd_can_network_connect"), Some(&false));
+
+        let local_map = PersistentBooleanMap {
+            source: PersistentSource::LocalOverridesOnly,
+            values: ml,
+        };
+        assert_eq!(local_map.resolve_for("virt_use_usb", false), Some(true));
+        assert_eq!(local_map.resolve_for("uncustomized_bool", true), None);
     }
 
     #[test]
@@ -2210,5 +2666,77 @@ container_manage_cgroup        (on   ,  off)  Allow container cgroups
             parsed[0].to_context,
             "system_u:object_r:httpd_sys_content_t:s0"
         );
+    }
+
+    #[test]
+    fn test_restorecon_canonicalization_blocks_symlink_escape_and_enforces_max_entries() {
+        let tmp = TempDir::new().unwrap();
+        let proc_link = tmp.path().join("proc_escape");
+        symlink("/proc", &proc_link).unwrap();
+
+        // Ancestor symlink escaping into /proc must be rejected
+        let escaped_file = proc_link.join("version");
+        let err_anc = resolve_and_validate_restorecon_target(&escaped_file, false).unwrap_err();
+        assert!(matches!(err_anc, AkrepError::ForbiddenOperation(_)));
+
+        // Directory symlink with recursive=true must be rejected
+        let root_link = tmp.path().join("root_escape");
+        symlink("/", &root_link).unwrap();
+        let err_rec = resolve_and_validate_restorecon_target(&root_link, true).unwrap_err();
+        assert!(matches!(err_rec, AkrepError::ForbiddenOperation(_)));
+
+        // Symlink ancestor pointing to /etc/shadow must be rejected
+        let etc_link = tmp.path().join("etc_link");
+        symlink("/etc", &etc_link).unwrap();
+        let shadow_via_link = etc_link.join("shadow");
+        if Path::new("/etc/shadow").exists() {
+            let err_sh =
+                resolve_and_validate_restorecon_target(&shadow_via_link, false).unwrap_err();
+            assert!(matches!(err_sh, AkrepError::ForbiddenOperation(_)));
+        }
+
+        // Bounded walk returns InvalidInput instead of silent truncation above max_entries
+        let many_dir = tmp.path().join("many");
+        fs::create_dir_all(&many_dir).unwrap();
+        for idx in 0..6 {
+            fs::write(many_dir.join(format!("f_{}.txt", idx)), b"ok").unwrap();
+        }
+        let max_err = walk_restorecon_paths_bounded(&many_dir, true, 4).unwrap_err();
+        assert!(matches!(max_err, AkrepError::InvalidInput(_)));
+        let ok_walk = walk_restorecon_paths_bounded(&many_dir, true, 20).unwrap();
+        assert_eq!(ok_walk.len(), 7); // directory + 6 files
+    }
+
+    #[test]
+    fn test_lossy_audit_log_reader_handles_non_utf8_bytes_and_tail_bound() {
+        let tmp = TempDir::new().unwrap();
+        let log_path = tmp.path().join("audit.log");
+        let mut raw_bytes = Vec::new();
+        raw_bytes.extend_from_slice(b"type=PROCTITLE msg=audit(1732550000.050:199): proctitle=");
+        raw_bytes.extend_from_slice(&[0xff, 0xfe, 0xfd]);
+        raw_bytes.extend_from_slice(b"\n");
+        raw_bytes.extend_from_slice(
+            br#"type=AVC msg=audit(1732550001.100:200): avc:  denied  { read } for  pid=900 comm="nginx" path="/srv/www/index.html" scontext=system_u:system_r:httpd_t:s0 tcontext=unconfined_u:object_r:user_tmp_t:s0 tclass=file permissive=0"#,
+        );
+        raw_bytes.extend_from_slice(b"\n");
+
+        let mut f = File::create(&log_path).unwrap();
+        f.write_all(&raw_bytes).unwrap();
+        f.sync_all().unwrap();
+
+        let lines = extract_avc_lines_from_audit_file(&log_path).unwrap();
+        assert_eq!(lines.len(), 1);
+        let parsed = parse_single_avc_message(&lines[0], None, None).expect("parsed avc");
+        assert_eq!(parsed.app_comm, "nginx");
+        assert_eq!(parsed.permissions, vec!["read".to_string()]);
+    }
+
+    #[test]
+    fn test_policy_type_validation_blocks_path_traversal() {
+        assert!(validate_selinux_policy_type("targeted").is_ok());
+        assert!(validate_selinux_policy_type("mls").is_ok());
+        assert!(validate_selinux_policy_type("../etc").is_err());
+        assert!(validate_selinux_policy_type("targeted/evil").is_err());
+        assert!(validate_selinux_policy_type("").is_err());
     }
 }

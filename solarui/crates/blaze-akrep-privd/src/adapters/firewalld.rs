@@ -182,26 +182,26 @@ impl DbusFirewallBackend {
             .map_err(map_fw_dbus_error)
     }
 
-    fn decode_ports_reply(
+    pub fn decode_ports_reply(
         reply: &zbus::message::Message,
     ) -> Result<Vec<(String, String)>, AkrepError> {
-        if let Ok(pairs) = reply.body().deserialize::<Vec<(String, String)>>() {
-            return Ok(pairs
-                .into_iter()
-                .map(|(p, pr)| (p, pr.to_ascii_lowercase()))
-                .collect());
-        }
-        let nested = reply
-            .body()
-            .deserialize::<Vec<Vec<String>>>()
-            .map_err(map_fw_dbus_error)?;
-        let mut out = Vec::new();
-        for item in nested {
-            if item.len() >= 2 {
-                out.push((item[0].clone(), item[1].to_ascii_lowercase()));
+        if let Ok(nested) = reply.body().deserialize::<Vec<Vec<String>>>() {
+            let mut out = Vec::new();
+            for item in nested {
+                if item.len() >= 2 {
+                    out.push((item[0].clone(), item[1].to_ascii_lowercase()));
+                }
             }
+            return Ok(out);
         }
-        Ok(out)
+        let pairs = reply
+            .body()
+            .deserialize::<Vec<(String, String)>>()
+            .map_err(map_fw_dbus_error)?;
+        Ok(pairs
+            .into_iter()
+            .map(|(p, pr)| (p, pr.to_ascii_lowercase()))
+            .collect())
     }
 }
 
@@ -722,7 +722,7 @@ impl FirewallBackend for DbusFirewallBackend {
         let all_zones = self.list_zones().await?;
         for z in &all_zones {
             if z != zone {
-                let _ = self.unbind_permanent_interface(z, interface).await;
+                self.unbind_permanent_interface(z, interface).await?;
             }
         }
         let cfg_path = self.resolve_config_zone_path(zone).await?;
@@ -737,10 +737,38 @@ impl FirewallBackend for DbusFirewallBackend {
             )
             .await;
         match res {
-            Ok(_) => Ok(()),
-            Err(e) if is_already_enabled_err(&e) => Ok(()),
-            Err(e) => Err(map_fw_dbus_error(e)),
+            Ok(_) => {}
+            Err(e) if is_already_enabled_err(&e) => {}
+            Err(e) => return Err(map_fw_dbus_error(e)),
         }
+
+        // Confirm prior permanent zones no longer retain this interface
+        for z in &all_zones {
+            if z != zone {
+                let other_path = self.resolve_config_zone_path(z).await?;
+                let other_ifaces: Vec<String> = self
+                    .conn
+                    .call_method(
+                        Some(FW_DEST),
+                        other_path.as_str(),
+                        Some(FW_CONFIG_ZONE_IFACE),
+                        "getInterfaces",
+                        &(),
+                    )
+                    .await
+                    .map_err(map_fw_dbus_error)?
+                    .body()
+                    .deserialize()
+                    .map_err(map_fw_dbus_error)?;
+                if other_ifaces.iter().any(|i| i == interface) {
+                    return Err(AkrepError::ApplyFailed(format!(
+                        "Interface '{}' remained permanently bound to prior zone '{}'",
+                        interface, z
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 
     async fn unbind_permanent_interface(
@@ -1023,15 +1051,25 @@ impl MutationBackend for FirewallAdapter {
         self.ensure_running().await?;
 
         let affected_zones = self.resolve_affected_zones(req).await?;
+        let mut fetched_states = BTreeMap::new();
         let mut pre_fingerprints = Vec::new();
         for z in &affected_zones {
             let st = self.backend.get_zone_state(z).await?;
             pre_fingerprints.push(Self::zone_fingerprint(&st)?);
+            fetched_states.insert(z.clone(), st);
         }
 
         let risk = req.default_risk_level();
         let mut warnings_tr = Vec::new();
         let mut warnings_en = Vec::new();
+
+        let format_presence = |in_rt: bool, in_perm: bool| -> String {
+            format!(
+                "runtime={}, permanent={}",
+                if in_rt { "enabled" } else { "disabled" },
+                if in_perm { "enabled" } else { "disabled" }
+            )
+        };
 
         let diff = match req {
             ActionRequest::FirewallAddPort {
@@ -1044,6 +1082,9 @@ impl MutationBackend for FirewallAdapter {
                 validate_zone_name(zone)?;
                 validate_port_spec(port)?;
                 validate_persistence(*mode)?;
+                let st = fetched_states.get(zone).ok_or_else(|| {
+                    AkrepError::Internal("missing fetched zone state".to_string())
+                })?;
 
                 if matches!(mode, RulePersistence::Permanent) && source_cidr.is_none() {
                     warnings_tr.push(format!(
@@ -1060,13 +1101,23 @@ impl MutationBackend for FirewallAdapter {
                     ));
                 }
 
-                let rule_desc = match source_cidr {
-                    Some(cidr) => build_cidr_port_rich_rule(cidr, port, *proto)?,
-                    None => format!("{}/{}", port, proto.as_str()),
+                let (rule_desc, in_rt, in_perm) = match source_cidr {
+                    Some(cidr) => {
+                        let r = build_cidr_port_rich_rule(cidr, port, *proto)?;
+                        let rt = st.runtime_rich_rules.contains(&r);
+                        let pm = st.permanent_rich_rules.contains(&r);
+                        (r, rt, pm)
+                    }
+                    None => {
+                        let pair = (port.clone(), proto.as_str().to_string());
+                        let rt = st.runtime_ports.contains(&pair);
+                        let pm = st.permanent_ports.contains(&pair);
+                        (format!("{}/{}", port, proto.as_str()), rt, pm)
+                    }
                 };
                 PlanDiffItem {
                     target: format!("firewall.zone.{}", zone),
-                    current_value: "closed".to_string(),
+                    current_value: format_presence(in_rt, in_perm),
                     desired_value: format!("allow {} ({:?})", rule_desc, mode),
                     description_tr: format!(
                         "'{}' bolgesinde '{}' kurali etkinlestirilecek.",
@@ -1087,14 +1138,36 @@ impl MutationBackend for FirewallAdapter {
             } => {
                 validate_zone_name(zone)?;
                 validate_port_spec(port)?;
-                let rule_desc = match source_cidr {
-                    Some(cidr) => build_cidr_port_rich_rule(cidr, port, *proto)?,
-                    None => format!("{}/{}", port, proto.as_str()),
+                let st = fetched_states.get(zone).ok_or_else(|| {
+                    AkrepError::Internal("missing fetched zone state".to_string())
+                })?;
+                let (rule_desc, in_rt, in_perm) = match source_cidr {
+                    Some(cidr) => {
+                        let r = build_cidr_port_rich_rule(cidr, port, *proto)?;
+                        let rt = st.runtime_rich_rules.contains(&r);
+                        let pm = st.permanent_rich_rules.contains(&r);
+                        (r, rt, pm)
+                    }
+                    None => {
+                        let pair = (port.clone(), proto.as_str().to_string());
+                        let rt = st.runtime_ports.contains(&pair);
+                        let pm = st.permanent_ports.contains(&pair);
+                        (format!("{}/{}", port, proto.as_str()), rt, pm)
+                    }
                 };
                 PlanDiffItem {
                     target: format!("firewall.zone.{}", zone),
-                    current_value: format!("allow {}", rule_desc),
-                    desired_value: format!("closed (permanent={})", permanent),
+                    current_value: format_presence(in_rt, in_perm),
+                    desired_value: format!(
+                        "runtime=disabled, permanent={}",
+                        if *permanent {
+                            "disabled"
+                        } else if in_perm {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        }
+                    ),
                     description_tr: format!(
                         "'{}' bolgesinden '{}' port kurali kaldirilacak.",
                         zone, rule_desc
@@ -1114,13 +1187,25 @@ impl MutationBackend for FirewallAdapter {
                 validate_zone_name(zone)?;
                 validate_service_name(service)?;
                 validate_persistence(*mode)?;
-                let rule_desc = match source_cidr {
-                    Some(cidr) => build_cidr_service_rich_rule(cidr, service)?,
-                    None => service.clone(),
+                let st = fetched_states.get(zone).ok_or_else(|| {
+                    AkrepError::Internal("missing fetched zone state".to_string())
+                })?;
+                let (rule_desc, in_rt, in_perm) = match source_cidr {
+                    Some(cidr) => {
+                        let r = build_cidr_service_rich_rule(cidr, service)?;
+                        let rt = st.runtime_rich_rules.contains(&r);
+                        let pm = st.permanent_rich_rules.contains(&r);
+                        (r, rt, pm)
+                    }
+                    None => {
+                        let rt = st.runtime_services.contains(service);
+                        let pm = st.permanent_services.contains(service);
+                        (service.clone(), rt, pm)
+                    }
                 };
                 PlanDiffItem {
                     target: format!("firewall.zone.{}", zone),
-                    current_value: "blocked".to_string(),
+                    current_value: format_presence(in_rt, in_perm),
                     desired_value: format!("allow service {} ({:?})", rule_desc, mode),
                     description_tr: format!(
                         "'{}' bolgesinde '{}' servisine izin verilecek.",
@@ -1137,14 +1222,35 @@ impl MutationBackend for FirewallAdapter {
             } => {
                 validate_zone_name(zone)?;
                 validate_service_name(service)?;
-                let rule_desc = match source_cidr {
-                    Some(cidr) => build_cidr_service_rich_rule(cidr, service)?,
-                    None => service.clone(),
+                let st = fetched_states.get(zone).ok_or_else(|| {
+                    AkrepError::Internal("missing fetched zone state".to_string())
+                })?;
+                let (rule_desc, in_rt, in_perm) = match source_cidr {
+                    Some(cidr) => {
+                        let r = build_cidr_service_rich_rule(cidr, service)?;
+                        let rt = st.runtime_rich_rules.contains(&r);
+                        let pm = st.permanent_rich_rules.contains(&r);
+                        (r, rt, pm)
+                    }
+                    None => {
+                        let rt = st.runtime_services.contains(service);
+                        let pm = st.permanent_services.contains(service);
+                        (service.clone(), rt, pm)
+                    }
                 };
                 PlanDiffItem {
                     target: format!("firewall.zone.{}", zone),
-                    current_value: format!("allow service {}", rule_desc),
-                    desired_value: format!("blocked (permanent={})", permanent),
+                    current_value: format_presence(in_rt, in_perm),
+                    desired_value: format!(
+                        "runtime=disabled, permanent={}",
+                        if *permanent {
+                            "disabled"
+                        } else if in_perm {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        }
+                    ),
                     description_tr: format!(
                         "'{}' bolgesinden '{}' servis izni kaldirilacak.",
                         zone, rule_desc
@@ -1568,6 +1674,24 @@ impl MutationBackend for FirewallAdapter {
                         "Interface '{}' not bound to zone '{}' after apply",
                         interface, zone
                     )));
+                }
+                let tracked_zones: Vec<String> = expected
+                    .target_state
+                    .get("affected_zones")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+                for other_zone in &tracked_zones {
+                    if other_zone != zone {
+                        let other_st = self.backend.get_zone_state(other_zone).await?;
+                        if other_st.runtime_interfaces.contains(interface)
+                            || (*permanent && other_st.permanent_interfaces.contains(interface))
+                        {
+                            return Err(AkrepError::VerifyFailed(format!(
+                                "Interface '{}' still bound to prior zone '{}' after move",
+                                interface, other_zone
+                            )));
+                        }
+                    }
                 }
             }
             _ => {

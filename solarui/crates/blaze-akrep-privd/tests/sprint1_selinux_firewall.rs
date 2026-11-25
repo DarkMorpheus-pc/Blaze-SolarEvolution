@@ -58,12 +58,36 @@ fn setup_sprint1_harness() -> Sprint1Harness {
 async fn sel_01_read_enforcing_mode() {
     let h = setup_sprint1_harness();
 
-    // 1. Default Enforcing mode + targeted policy
+    // 1. Default Enforcing mode + targeted policy + action scoping ("status", "booleans", "inspect_path")
     let raw_enforcing = h.engine.diagnose_selinux(":1.20", "{}").await.unwrap();
     let resp1: SelinuxDiagnoseResponse = serde_json::from_str(&raw_enforcing).unwrap();
     assert_eq!(resp1.runtime_mode, SelinuxRuntimeMode::Enforcing);
     assert_eq!(resp1.configured_mode.as_deref(), Some("enforcing"));
     assert_eq!(resp1.policy_type.as_deref(), Some("targeted"));
+    assert!(!resp1.booleans.is_empty());
+
+    let raw_status_only = h
+        .engine
+        .diagnose_selinux(":1.20", r#"{"action":"status"}"#)
+        .await
+        .unwrap();
+    let resp_status: SelinuxDiagnoseResponse = serde_json::from_str(&raw_status_only).unwrap();
+    assert!(resp_status.booleans.is_empty());
+    assert!(resp_status.avc_groups.is_empty());
+
+    let raw_inspect_only = h
+        .engine
+        .diagnose_selinux(
+            ":1.20",
+            r#"{"action":"inspect_path","inspect_path":"/srv/www/index.html"}"#,
+        )
+        .await
+        .unwrap();
+    let resp_inspect: SelinuxDiagnoseResponse = serde_json::from_str(&raw_inspect_only).unwrap();
+    assert!(resp_inspect.booleans.is_empty());
+    assert!(resp_inspect.avc_groups.is_empty());
+    assert_eq!(resp_inspect.restorecon_preview.len(), 1);
+    assert_eq!(resp_inspect.current_contexts.len(), 1);
 
     // 2. Permissive mode
     h.selinux_ops
@@ -188,7 +212,7 @@ async fn sel_03_runtime_boolean_toggle() {
         .unwrap()
         .unwrap();
     assert!(!before.current);
-    assert!(!before.persistent);
+    assert_eq!(before.persistent, Some(false));
 
     let req = ActionRequest::SelinuxSetBoolean {
         name: "httpd_can_network_connect".to_string(),
@@ -217,8 +241,9 @@ async fn sel_03_runtime_boolean_toggle() {
         .unwrap()
         .unwrap();
     assert!(after.current);
-    assert!(
-        !after.persistent,
+    assert_eq!(
+        after.persistent,
+        Some(false),
         "runtime-only toggle must not mutate persistent policy"
     );
 
@@ -241,6 +266,50 @@ async fn sel_03_runtime_boolean_toggle() {
     assert_eq!(
         fs::metadata(&snap_file).unwrap().permissions().mode() & 0o777,
         0o600
+    );
+
+    // Also verify LocalOverridesOnly fallback mode (when semanage is absent and booleans.local
+    // does not list the boolean, so persistent == None): runtime toggle + verify + rollback MUST succeed!
+    h.selinux_ops.set_local_overrides_only_mode(true);
+    let uncustomized_before = h.selinux_ops.read_boolean("nis_enabled").unwrap().unwrap();
+    assert!(!uncustomized_before.current);
+    assert_eq!(uncustomized_before.persistent, None);
+
+    let local_plan = h
+        .engine
+        .create_plan(
+            ":1.20",
+            ActionRequest::SelinuxSetBoolean {
+                name: "nis_enabled".to_string(),
+                value: true,
+                persistent: false,
+            },
+        )
+        .await
+        .unwrap();
+    let local_rec = h
+        .engine
+        .commit_plan(":1.20", &local_plan.plan_id, &local_plan.plan_sha256)
+        .await
+        .expect("runtime toggle must verify cleanly when persistent source is LocalOverridesOnly");
+    assert_eq!(local_rec.state, TransactionState::Committed);
+
+    let local_after = h.selinux_ops.read_boolean("nis_enabled").unwrap().unwrap();
+    assert!(local_after.current);
+    assert_eq!(local_after.persistent, None);
+
+    let local_rb = h
+        .engine
+        .rollback_transaction(":1.20", &local_rec.tx_id)
+        .await
+        .unwrap();
+    assert_eq!(local_rb.state, TransactionState::RolledBack);
+    assert!(
+        !h.selinux_ops
+            .read_boolean("nis_enabled")
+            .unwrap()
+            .unwrap()
+            .current
     );
 }
 
@@ -284,7 +353,7 @@ async fn sel_04_runtime_boolean_reverts_on_simulated_reboot() {
         !post_reboot.current,
         "runtime-only boolean must revert to persistent default after reboot"
     );
-    assert!(!post_reboot.persistent);
+    assert_eq!(post_reboot.persistent, Some(false));
 }
 
 #[tokio::test]
@@ -325,7 +394,7 @@ async fn sel_05_persistent_boolean_survives_simulated_reboot() {
 
     let post_reboot = h.selinux_ops.read_boolean("virt_use_usb").unwrap().unwrap();
     assert!(post_reboot.current);
-    assert!(post_reboot.persistent);
+    assert_eq!(post_reboot.persistent, Some(true));
 }
 
 #[tokio::test]
@@ -350,12 +419,13 @@ async fn sel_06_boolean_transaction_rollback() {
         .commit_plan(":1.20", &plan.plan_id, &plan.plan_sha256)
         .await
         .unwrap();
-    assert!(
+    assert_eq!(
         h.selinux_ops
             .read_boolean("samba_enable_home_dirs")
             .unwrap()
             .unwrap()
-            .persistent
+            .persistent,
+        Some(true)
     );
 
     let rb = h
@@ -370,7 +440,7 @@ async fn sel_06_boolean_transaction_rollback() {
         .unwrap()
         .unwrap();
     assert!(!restored.current);
-    assert!(!restored.persistent);
+    assert_eq!(restored.persistent, Some(false));
 
     // 2. Also verify SelinuxRestorecon commit + chcon rollback
     let rc_plan = h
@@ -705,12 +775,16 @@ async fn sel_10_audit2allow_and_global_disable_forbidden() {
         assert!(matches!(err, AkrepError::ForbiddenOperation(_)));
     }
 
-    // DiagnoseSelinux queries attempting audit2allow / semodule / setenforce MUST return ForbiddenOperation
+    // DiagnoseSelinux queries attempting audit2allow / semodule / setenforce (including JSON unicode escapes) MUST return ForbiddenOperation
     for bad_query in [
         r#"{"action":"audit2allow"}"#,
+        r#"{"action":"audit\u0032allow"}"#,
+        r#"{"boolean_filter":"semodule"}"#,
         r#"{"inspect_path":"/srv/www","note":"semodule -i custom.pp"}"#,
         r#"{"action":"setenforce 0"}"#,
+        r#"{"extra_field":"selinux=disabled"}"#,
         r#"{"inspect_path":"/proc/self"}"#,
+        r#"{"inspect_path":"/etc/shadow"}"#,
     ] {
         let err = h
             .engine
@@ -810,6 +884,9 @@ async fn fw_02_active_zone_interface_mapping() {
         updated.active_zones.get("eth0").map(String::as_str),
         Some("work")
     );
+    let old_pub = h.firewall_backend.get_zone_state("public").await.unwrap();
+    assert!(!old_pub.runtime_interfaces.contains(&"eth0".to_string()));
+    assert!(!old_pub.permanent_interfaces.contains(&"eth0".to_string()));
 }
 
 #[tokio::test]
@@ -831,12 +908,35 @@ async fn fw_03_open_tcp_port_runtime() {
         )
         .await
         .unwrap();
+    assert_eq!(
+        plan.diffs[0].current_value,
+        "runtime=disabled, permanent=disabled"
+    );
     let rec = h
         .engine
         .commit_plan(":1.20", &plan.plan_id, &plan.plan_sha256)
         .await
         .unwrap();
     assert_eq!(rec.state, TransactionState::Committed);
+
+    let rm_preview = h
+        .engine
+        .create_plan(
+            ":1.20",
+            ActionRequest::FirewallRemovePort {
+                zone: "public".to_string(),
+                port: "8443".to_string(),
+                proto: FirewallProto::Tcp,
+                permanent: false,
+                source_cidr: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        rm_preview.diffs[0].current_value,
+        "runtime=enabled, permanent=disabled"
+    );
 
     let pub_state = h.firewall_backend.get_zone_state("public").await.unwrap();
     assert!(pub_state
