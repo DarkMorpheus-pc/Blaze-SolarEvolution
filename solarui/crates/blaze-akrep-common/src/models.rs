@@ -394,13 +394,39 @@ pub fn validate_flatpak_app_id(app_id: &str) -> Result<(), AkrepError> {
     Ok(())
 }
 
+fn normalize_flatpak_fs_base(raw: &str) -> String {
+    let mut collapsed = String::with_capacity(raw.len());
+    let mut prev_slash = false;
+    for ch in raw.chars() {
+        if ch == '/' {
+            if !prev_slash {
+                collapsed.push('/');
+            }
+            prev_slash = true;
+        } else {
+            collapsed.push(ch);
+            prev_slash = false;
+        }
+    }
+    let stripped = collapsed.trim_end_matches('/');
+    if stripped.is_empty() && collapsed.starts_with('/') {
+        "/".to_string()
+    } else {
+        stripped.to_string()
+    }
+}
+
 pub fn is_forbidden_blanket_filesystem_grant(token: &str) -> bool {
     let trimmed = token.trim();
     if trimmed.starts_with('!') {
         return false;
     }
     let raw_base = trimmed.split(':').next().unwrap_or(trimmed).trim();
-    let base = raw_base.trim_end_matches('/');
+    if raw_base.is_empty() {
+        return true;
+    }
+    let normalized = normalize_flatpak_fs_base(raw_base);
+    let base = normalized.as_str();
 
     if matches!(
         base,
@@ -419,8 +445,15 @@ pub fn is_forbidden_blanket_filesystem_grant(token: &str) -> bool {
             | "/proc"
             | "/sys"
             | "/dev"
+            | "/var/lib/akrep"
+            | "/var/lib/flatpak"
             | "xdg-run/flatpak"
             | "xdg-data/flatpak"
+            | "xdg-data/akrep"
+            | "~/.local/share/flatpak"
+            | "~/.local/share/akrep"
+            | "home/.local/share/flatpak"
+            | "home/.local/share/akrep"
     ) {
         return true;
     }
@@ -433,7 +466,15 @@ pub fn is_forbidden_blanket_filesystem_grant(token: &str) -> bool {
         "/proc/",
         "/sys/",
         "/dev/",
-        "/var/lib/akrep",
+        "/var/lib/akrep/",
+        "/var/lib/flatpak/",
+        "xdg-data/flatpak/",
+        "xdg-run/flatpak/",
+        "xdg-data/akrep/",
+        "~/.local/share/flatpak/",
+        "~/.local/share/akrep/",
+        "home/.local/share/flatpak/",
+        "home/.local/share/akrep/",
     ] {
         if base.starts_with(sys_prefix) {
             return true;
@@ -1028,6 +1069,31 @@ mod tests {
             confirm_permanent_delete: false,
         };
         assert!(unconfirmed_delete.validate_red_lines().is_err());
+
+        // Sandbox-escape Flatpak override subpaths MUST be rejected
+        for escape_fs in [
+            "xdg-data/flatpak/overrides:rw",
+            "xdg-run/flatpak/app:rw",
+            "~/.local/share/flatpak/overrides:create",
+            "home/.local/share/flatpak:rw",
+            "home/.local/share/flatpak/overrides:rw",
+            "/var/lib/flatpak:rw",
+            "/var/lib/flatpak/overrides:rw",
+            "xdg-data//flatpak///overrides/:rw",
+            "~///.local//share/flatpak/overrides:rw",
+        ] {
+            let bad_escape = ActionRequest::FlatpakSetOverride {
+                app_id: "org.example.ChatApp".to_string(),
+                scope: FlatpakScope::System,
+                additions: vec![("Context.filesystems".to_string(), escape_fs.to_string())],
+                removals: vec![],
+            };
+            assert!(
+                bad_escape.validate_red_lines().is_err(),
+                "Expected sandbox-escape token '{}' to be rejected",
+                escape_fs
+            );
+        }
 
         // Tightening / removing broad permissions MUST succeed
         let valid_tightening = ActionRequest::FlatpakSetOverride {

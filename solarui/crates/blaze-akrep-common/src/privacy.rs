@@ -546,6 +546,9 @@ pub fn parse_pipewire_dump_json(raw_json: &str) -> Result<PipewireGraphInspectio
         ))
     })?;
 
+    let mut client_uids: BTreeMap<u32, u32> = BTreeMap::new();
+    let mut node_client_ids: BTreeMap<u32, u32> = BTreeMap::new();
+    let mut node_sec_uids: BTreeMap<u32, u32> = BTreeMap::new();
     let mut nodes: BTreeMap<u32, PipewireNodeSummary> = BTreeMap::new();
     let mut links: Vec<(u32, u32)> = Vec::new();
 
@@ -558,7 +561,18 @@ pub fn parse_pipewire_dump_json(raw_json: &str) -> Result<PipewireGraphInspectio
         };
         let obj_type = obj.get("type").and_then(|v| v.as_str()).unwrap_or_default();
 
-        if obj_type == "PipeWire:Interface:Node" {
+        if obj_type == "PipeWire:Interface:Client" {
+            let info = obj.get("info").unwrap_or(&serde_json::Value::Null);
+            let props = info
+                .get("props")
+                .or_else(|| obj.get("props"))
+                .unwrap_or(&serde_json::Value::Null);
+            if let Some(uid) = json_u32_prop(props, "pipewire.sec.uid")
+                .or_else(|| json_u32_prop(props, "application.process.uid"))
+            {
+                client_uids.insert(obj_id, uid);
+            }
+        } else if obj_type == "PipeWire:Interface:Node" {
             let info = obj.get("info").unwrap_or(&serde_json::Value::Null);
             let props = info
                 .get("props")
@@ -588,8 +602,16 @@ pub fn parse_pipewire_dump_json(raw_json: &str) -> Result<PipewireGraphInspectio
             let application_name = json_str_prop(props, "application.name");
             let application_id = json_str_prop(props, "application.id");
             let process_binary = json_str_prop(props, "application.process.binary");
-            let process_id = json_u32_prop(props, "application.process.id");
-            let owner_uid = json_u32_prop(props, "application.process.uid")
+            let process_id = json_u32_prop(props, "application.process.id")
+                .or_else(|| json_u32_prop(props, "pipewire.sec.pid"));
+
+            if let Some(sec_uid) = json_u32_prop(props, "pipewire.sec.uid") {
+                node_sec_uids.insert(obj_id, sec_uid);
+            }
+            if let Some(cid) = json_u32_prop(props, "client.id") {
+                node_client_ids.insert(obj_id, cid);
+            }
+            let fallback_uid = json_u32_prop(props, "application.process.uid")
                 .or_else(|| json_u32_prop(props, "client.uid"));
 
             nodes.insert(
@@ -606,7 +628,7 @@ pub fn parse_pipewire_dump_json(raw_json: &str) -> Result<PipewireGraphInspectio
                     application_id,
                     process_binary,
                     process_id,
-                    owner_uid,
+                    owner_uid: fallback_uid,
                 },
             );
         } else if obj_type == "PipeWire:Interface:Link" {
@@ -633,6 +655,19 @@ pub fn parse_pipewire_dump_json(raw_json: &str) -> Result<PipewireGraphInspectio
                 }
             }
         }
+    }
+
+    for (nid, node) in &mut nodes {
+        let resolved_uid = node_sec_uids
+            .get(nid)
+            .copied()
+            .or_else(|| {
+                node_client_ids
+                    .get(nid)
+                    .and_then(|cid| client_uids.get(cid).copied())
+            })
+            .or(node.owner_uid);
+        node.owner_uid = resolved_uid;
     }
 
     let mut active_streams = Vec::new();
@@ -950,6 +985,7 @@ fn is_permission_table_missing_err(err_msg: &str) -> bool {
     let lower = err_msg.to_ascii_lowercase();
     lower.contains("notfound")
         || lower.contains("not found")
+        || lower.contains("no entry")
         || lower.contains("no such table")
         || lower.contains("does not exist")
 }
@@ -1620,5 +1656,119 @@ impl PortalPrivacyBackend for MockPortalPrivacyBackend {
         }
         guard.destroyed_nodes.push(node_id);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_fedora45_pipewire_client_sec_uid_lookup_and_no_entry_detection() {
+        assert!(is_permission_table_missing_err(
+            "org.freedesktop.portal.Error.NotFound: No entry for devices"
+        ));
+        assert!(is_permission_table_missing_err("No entry for camera"));
+
+        // Realistic Fedora 45 pw-dump where Node appears BEFORE Client, and a second Node attempts
+        // to spoof application.process.uid=1000 while its PipeWire:Interface:Client has kernel-verified pipewire.sec.uid=1002.
+        let pw_json = serde_json::json!([
+            {
+                "id": 42,
+                "type": "PipeWire:Interface:Node",
+                "version": 3,
+                "info": {
+                    "state": "running",
+                    "props": {
+                        "media.class": "Audio/Source",
+                        "node.name": "alsa_input.pci-0000_00_1f.3.analog-stereo",
+                        "media.name": "Built-in Mic"
+                    }
+                }
+            },
+            {
+                "id": 77,
+                "type": "PipeWire:Interface:Node",
+                "version": 3,
+                "info": {
+                    "state": "running",
+                    "props": {
+                        "client.id": 35,
+                        "media.class": "Stream/Input/Audio",
+                        "application.name": "Firefox",
+                        "application.process.binary": "firefox",
+                        "media.name": "RecordStream"
+                    }
+                }
+            },
+            {
+                "id": 78,
+                "type": "PipeWire:Interface:Node",
+                "version": 3,
+                "info": {
+                    "state": "running",
+                    "props": {
+                        "client.id": 36,
+                        "media.class": "Stream/Input/Audio",
+                        "application.name": "SpoofAttempt",
+                        "application.process.uid": 1000,
+                        "media.name": "SpoofStream"
+                    }
+                }
+            },
+            {
+                "id": 35,
+                "type": "PipeWire:Interface:Client",
+                "version": 3,
+                "info": {
+                    "props": {
+                        "pipewire.protocol": "protocol-native",
+                        "pipewire.sec.pid": 5120,
+                        "pipewire.sec.uid": 1000,
+                        "pipewire.sec.gid": 1000,
+                        "application.name": "Firefox"
+                    }
+                }
+            },
+            {
+                "id": 36,
+                "type": "PipeWire:Interface:Client",
+                "version": 3,
+                "info": {
+                    "props": {
+                        "pipewire.protocol": "protocol-native",
+                        "pipewire.sec.pid": 6190,
+                        "pipewire.sec.uid": 1002,
+                        "pipewire.sec.gid": 1002,
+                        "application.name": "OtherUserClient"
+                    }
+                }
+            },
+            {
+                "id": 90,
+                "type": "PipeWire:Interface:Link",
+                "info": { "output-node-id": 42, "input-node-id": 77, "state": "active" }
+            },
+            {
+                "id": 91,
+                "type": "PipeWire:Interface:Link",
+                "info": { "output-node-id": 42, "input-node-id": 78, "state": "active" }
+            }
+        ])
+        .to_string();
+
+        let graph = parse_pipewire_dump_json(&pw_json).unwrap();
+        assert_eq!(graph.nodes.get(&77).unwrap().owner_uid, Some(1000));
+        assert_eq!(
+            graph.nodes.get(&78).unwrap().owner_uid,
+            Some(1002),
+            "kernel-verified Client pipewire.sec.uid must override unverified application.process.uid"
+        );
+
+        let ok_stream = validate_terminable_stream_node(&graph, 77, 1000).unwrap();
+        assert_eq!(ok_stream.owner_uid, Some(1000));
+
+        let spoof_err = validate_terminable_stream_node(&graph, 78, 1000).unwrap_err();
+        assert!(matches!(spoof_err, AkrepError::ForbiddenOperation(_)));
     }
 }

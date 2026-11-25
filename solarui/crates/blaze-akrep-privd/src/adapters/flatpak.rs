@@ -9,8 +9,9 @@ use blaze_akrep_common::{
     rollback_override_key_level_nofollow, validate_flatpak_app_id,
     verify_override_post_state_nofollow, write_override_file_atomic_nofollow, ActionRequest,
     AkrepError, FlatpakInstallationSnapshot, FlatpakOverrideDocument, FlatpakRuntimeProbe,
-    FlatpakScope, OverrideSnapshotBackup, ProcessFlatpakRuntimeProbe, RiskLevel, StateFingerprint,
-    TransactionRecord, DEFAULT_SYSTEM_APPLICATIONS_DIR, DEFAULT_SYSTEM_FLATPAK_ROOT,
+    FlatpakScope, OverrideSnapshotBackup, ProcCgroupFlatpakRuntimeProbe, RiskLevel,
+    StateFingerprint, TransactionRecord, DEFAULT_SYSTEM_APPLICATIONS_DIR,
+    DEFAULT_SYSTEM_FLATPAK_ROOT,
 };
 use blaze_sentinel_core::sha256_hex;
 use chrono::Utc;
@@ -22,17 +23,52 @@ use std::sync::Arc;
 pub const USER_SCOPE_PRIVD_REJECTION_MSG: &str =
     "User-scope Flatpak overrides must execute in user session, never as root";
 
-fn ensure_not_home_path(path: &Path) -> Result<(), AkrepError> {
-    let rendered = path.to_string_lossy();
-    if rendered == "/home"
+fn is_forbidden_home_or_root_str(rendered: &str) -> bool {
+    rendered == "/home"
         || rendered.starts_with("/home/")
+        || rendered == "/var/home"
+        || rendered.starts_with("/var/home/")
         || rendered == "/root"
         || rendered.starts_with("/root/")
-    {
+}
+
+fn ensure_not_home_path(path: &Path) -> Result<(), AkrepError> {
+    if is_forbidden_home_or_root_str(&path.to_string_lossy()) {
         return Err(AkrepError::ForbiddenOperation(
             "akrep-privd ProtectHome invariant forbids accessing /home or /root paths".to_string(),
         ));
     }
+
+    for ancestor in path.ancestors() {
+        if ancestor.as_os_str().is_empty() {
+            continue;
+        }
+        if let Ok(link_target) = fs::read_link(ancestor) {
+            let resolved = if link_target.is_absolute() {
+                link_target
+            } else if let Some(parent) = ancestor.parent() {
+                parent.join(link_target)
+            } else {
+                link_target
+            };
+            if is_forbidden_home_or_root_str(&resolved.to_string_lossy()) {
+                return Err(AkrepError::ForbiddenOperation(
+                    "akrep-privd ProtectHome invariant forbids symlinked /home or /root paths"
+                        .to_string(),
+                ));
+            }
+        }
+        if let Ok(canon) = fs::canonicalize(ancestor) {
+            if is_forbidden_home_or_root_str(&canon.to_string_lossy()) {
+                return Err(AkrepError::ForbiddenOperation(
+                    "akrep-privd ProtectHome invariant forbids canonical /home or /root paths"
+                        .to_string(),
+                ));
+            }
+            break;
+        }
+    }
+
     Ok(())
 }
 
@@ -49,7 +85,7 @@ impl SystemFlatpakAdapter {
         Self {
             flatpak_root: PathBuf::from(DEFAULT_SYSTEM_FLATPAK_ROOT),
             applications_dir: PathBuf::from(DEFAULT_SYSTEM_APPLICATIONS_DIR),
-            runtime_probe: Arc::new(ProcessFlatpakRuntimeProbe::new()),
+            runtime_probe: Arc::new(ProcCgroupFlatpakRuntimeProbe::new()),
         }
     }
 
@@ -382,5 +418,29 @@ impl MutationBackend for SystemFlatpakAdapter {
 
     async fn inspect_system_flatpaks(&self) -> Result<FlatpakInstallationSnapshot, AkrepError> {
         self.inspect_installation()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_ensure_not_home_path_blocks_symlinks_into_home_or_root() {
+        assert!(ensure_not_home_path(Path::new("/var/lib/flatpak")).is_ok());
+        assert!(ensure_not_home_path(Path::new("/root/flatpak")).is_err());
+
+        let tmp = TempDir::new().unwrap();
+        let sym_to_home = tmp.path().join("sneaky_home_link");
+        symlink("/home", &sym_to_home).unwrap();
+        assert!(ensure_not_home_path(&sym_to_home).is_err());
+        assert!(ensure_not_home_path(&sym_to_home.join("nested/flatpak")).is_err());
+
+        let sym_to_root = tmp.path().join("sneaky_root_link");
+        symlink("/root", &sym_to_root).unwrap();
+        assert!(ensure_not_home_path(&sym_to_root).is_err());
+        assert!(ensure_not_home_path(&sym_to_root.join("nested/flatpak")).is_err());
     }
 }

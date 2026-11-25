@@ -234,16 +234,214 @@ pub trait FlatpakRuntimeProbe: Send + Sync {
     }
 }
 
+const MAX_PROC_CGROUP_BYTES: u64 = 16 * 1024;
+const MAX_BWRAP_INFO_BYTES: u64 = 64 * 1024;
+
+pub fn unescape_systemd_unit_component(escaped: &str) -> Option<String> {
+    let bytes = escaped.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut idx = 0usize;
+    while idx < bytes.len() {
+        if bytes[idx] == b'\\'
+            && idx + 3 < bytes.len()
+            && (bytes[idx + 1] == b'x' || bytes[idx + 1] == b'X')
+        {
+            let hex_slice = std::str::from_utf8(&bytes[idx + 2..idx + 4]).ok()?;
+            let val = u8::from_str_radix(hex_slice, 16).ok()?;
+            out.push(val);
+            idx += 4;
+        } else {
+            out.push(bytes[idx]);
+            idx += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+pub fn extract_flatpak_app_ids_from_cgroup(raw: &str) -> BTreeSet<String> {
+    let mut found = BTreeSet::new();
+    for line in raw.lines() {
+        let path_part = match line.splitn(3, ':').nth(2) {
+            Some(p) => p,
+            None => line,
+        };
+        for seg in path_part.split('/') {
+            let trimmed = seg.trim();
+            let Some(inner) = trimmed
+                .strip_prefix("app-flatpak-")
+                .and_then(|s| s.strip_suffix(".scope"))
+            else {
+                continue;
+            };
+
+            let mut matched = false;
+            if let Some((left, _suffix)) = inner.split_once('-') {
+                if let Some(unescaped) = unescape_systemd_unit_component(left) {
+                    if validate_flatpak_app_id(&unescaped).is_ok() {
+                        found.insert(unescaped);
+                        matched = true;
+                    }
+                }
+            }
+            if !matched {
+                if let Some((left_last, _suffix)) = inner.rsplit_once('-') {
+                    if let Some(unescaped) = unescape_systemd_unit_component(left_last) {
+                        if validate_flatpak_app_id(&unescaped).is_ok() {
+                            found.insert(unescaped);
+                            matched = true;
+                        }
+                    }
+                }
+            }
+            if !matched {
+                if let Some(unescaped) = unescape_systemd_unit_component(inner) {
+                    if validate_flatpak_app_id(&unescaped).is_ok() {
+                        found.insert(unescaped);
+                    }
+                }
+            }
+        }
+    }
+    found
+}
+
+pub struct ProcCgroupFlatpakRuntimeProbe {
+    proc_root: PathBuf,
+}
+
+impl Default for ProcCgroupFlatpakRuntimeProbe {
+    fn default() -> Self {
+        Self {
+            proc_root: PathBuf::from("/proc"),
+        }
+    }
+}
+
+impl ProcCgroupFlatpakRuntimeProbe {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_proc_root(proc_root: PathBuf) -> Self {
+        Self { proc_root }
+    }
+}
+
+impl FlatpakRuntimeProbe for ProcCgroupFlatpakRuntimeProbe {
+    fn running_app_ids(&self) -> BTreeSet<String> {
+        let mut active = BTreeSet::new();
+        let Ok(entries) = fs::read_dir(&self.proc_root) else {
+            return active;
+        };
+        for entry in entries.flatten() {
+            let name_os = entry.file_name();
+            let Some(name_str) = name_os.to_str() else {
+                continue;
+            };
+            if name_str.is_empty()
+                || name_str.len() > 10
+                || !name_str.bytes().all(|b| b.is_ascii_digit())
+            {
+                continue;
+            }
+            let cg_path = entry.path().join("cgroup");
+            let Ok(file) = OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+                .open(&cg_path)
+            else {
+                continue;
+            };
+            let mut buf = Vec::new();
+            if file
+                .take(MAX_PROC_CGROUP_BYTES)
+                .read_to_end(&mut buf)
+                .is_ok()
+            {
+                let content = String::from_utf8_lossy(&buf);
+                active.extend(extract_flatpak_app_ids_from_cgroup(&content));
+            }
+        }
+        active
+    }
+}
+
+pub fn parse_bwrap_info_dir(info_root: &Path, out: &mut BTreeSet<String>) {
+    if !info_root.exists() || ensure_not_symlink(info_root, "bwrap info root").is_err() {
+        return;
+    }
+    let Ok(root_meta) = fs::symlink_metadata(info_root) else {
+        return;
+    };
+    if root_meta.file_type().is_symlink() || !root_meta.file_type().is_dir() {
+        return;
+    }
+
+    let Ok(entries) = fs::read_dir(info_root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let instance_dir = entry.path();
+        if ensure_not_symlink(&instance_dir, "bwrap instance directory").is_err() {
+            continue;
+        }
+        let Ok(dir_meta) = fs::symlink_metadata(&instance_dir) else {
+            continue;
+        };
+        if dir_meta.file_type().is_symlink() || !dir_meta.file_type().is_dir() {
+            continue;
+        }
+
+        let info_path = instance_dir.join("info");
+        if ensure_not_symlink(&info_path, "bwrap info file").is_err() {
+            continue;
+        }
+        let Ok(file) = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
+            .open(&info_path)
+        else {
+            continue;
+        };
+        let Ok(fd_meta) = file.metadata() else {
+            continue;
+        };
+        if !fd_meta.file_type().is_file() || fd_meta.len() > MAX_BWRAP_INFO_BYTES {
+            continue;
+        }
+
+        let mut buf = Vec::new();
+        if file
+            .take(MAX_BWRAP_INFO_BYTES + 1)
+            .read_to_end(&mut buf)
+            .is_err()
+            || (buf.len() as u64) > MAX_BWRAP_INFO_BYTES
+        {
+            continue;
+        }
+        let Ok(raw) = String::from_utf8(buf) else {
+            continue;
+        };
+        if let Ok(doc) = FlatpakOverrideDocument::parse(&raw) {
+            if let Some(app_name) = doc.get_scalar("Application", "name") {
+                if validate_flatpak_app_id(&app_name).is_ok() {
+                    out.insert(app_name);
+                }
+            }
+        }
+    }
+}
+
 pub struct ProcessFlatpakRuntimeProbe {
     flatpak_bin: PathBuf,
-    run_user_root: PathBuf,
+    proc_probe: ProcCgroupFlatpakRuntimeProbe,
 }
 
 impl Default for ProcessFlatpakRuntimeProbe {
     fn default() -> Self {
         Self {
             flatpak_bin: PathBuf::from("/usr/bin/flatpak"),
-            run_user_root: PathBuf::from("/run/user"),
+            proc_probe: ProcCgroupFlatpakRuntimeProbe::new(),
         }
     }
 }
@@ -252,35 +450,16 @@ impl ProcessFlatpakRuntimeProbe {
     pub fn new() -> Self {
         Self::default()
     }
-
-    fn parse_bwrap_info_dir(info_root: &Path, out: &mut BTreeSet<String>) {
-        let Ok(entries) = fs::read_dir(info_root) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let info_path = entry.path().join("info");
-            let Ok(meta) = fs::symlink_metadata(&info_path) else {
-                continue;
-            };
-            if meta.file_type().is_symlink() || !meta.file_type().is_file() {
-                continue;
-            }
-            if let Ok(raw) = fs::read_to_string(&info_path) {
-                if let Ok(doc) = FlatpakOverrideDocument::parse(&raw) {
-                    if let Some(app_name) = doc.get_scalar("Application", "name") {
-                        if !app_name.is_empty() {
-                            out.insert(app_name);
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 impl FlatpakRuntimeProbe for ProcessFlatpakRuntimeProbe {
     fn running_app_ids(&self) -> BTreeSet<String> {
-        let mut active = BTreeSet::new();
+        let mut active = self.proc_probe.running_app_ids();
+
+        // SAFETY: `libc::geteuid()` is thread-safe and infallible on POSIX systems.
+        if unsafe { libc::geteuid() } == 0 {
+            return active;
+        }
 
         if self.flatpak_bin.is_file() {
             if let Ok(output) = Command::new(&self.flatpak_bin)
@@ -310,19 +489,7 @@ impl FlatpakRuntimeProbe for ProcessFlatpakRuntimeProbe {
         if let Ok(xdg_rt) = std::env::var("XDG_RUNTIME_DIR") {
             let trimmed = xdg_rt.trim();
             if !trimmed.is_empty() {
-                Self::parse_bwrap_info_dir(&Path::new(trimmed).join(".flatpak"), &mut active);
-            }
-        }
-
-        if let Ok(uid_dirs) = fs::read_dir(&self.run_user_root) {
-            for uid_entry in uid_dirs.flatten() {
-                let Ok(meta) = fs::symlink_metadata(uid_entry.path()) else {
-                    continue;
-                };
-                if meta.file_type().is_symlink() || !meta.file_type().is_dir() {
-                    continue;
-                }
-                Self::parse_bwrap_info_dir(&uid_entry.path().join(".flatpak"), &mut active);
+                parse_bwrap_info_dir(&Path::new(trimmed).join(".flatpak"), &mut active);
             }
         }
 
@@ -743,7 +910,8 @@ pub fn write_override_file_atomic_nofollow(
         .mode(file_mode)
         .open(&tmp_path)?;
 
-    if let Err(err) = fs::set_permissions(&tmp_path, fs::Permissions::from_mode(file_mode))
+    if let Err(err) = tmp_file
+        .set_permissions(fs::Permissions::from_mode(file_mode))
         .and_then(|_| tmp_file.write_all(content.as_bytes()))
         .and_then(|_| tmp_file.sync_all())
     {
@@ -766,7 +934,6 @@ pub fn write_override_file_atomic_nofollow(
         let _ = fs::remove_file(&tmp_path);
         return Err(AkrepError::from(err));
     }
-    fs::set_permissions(&target, fs::Permissions::from_mode(file_mode))?;
     sync_dir(&overrides_dir)?;
     Ok(())
 }
@@ -1543,7 +1710,7 @@ impl UserFlockGuard {
             .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
             .mode(0o600)
             .open(lock_path)?;
-        let _ = fs::set_permissions(lock_path, fs::Permissions::from_mode(0o600));
+        let _ = file.set_permissions(fs::Permissions::from_mode(0o600));
         // SAFETY: `file.as_raw_fd()` is valid and owned by `UserFlockGuard` until drop.
         let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
         if rc != 0 {
@@ -1815,13 +1982,20 @@ impl UserFlatpakManager {
             .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
             .mode(0o600)
             .open(&tmp_path)?;
-        fs::set_permissions(&tmp_path, fs::Permissions::from_mode(0o600))?;
-        f.write_all(&payload)?;
-        f.sync_all()?;
+        if let Err(err) = f
+            .set_permissions(fs::Permissions::from_mode(0o600))
+            .and_then(|_| f.write_all(&payload))
+            .and_then(|_| f.sync_all())
+        {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(AkrepError::from(err));
+        }
         drop(f);
 
-        fs::rename(&tmp_path, &target)?;
-        fs::set_permissions(&target, fs::Permissions::from_mode(0o600))?;
+        if let Err(err) = fs::rename(&tmp_path, &target) {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(AkrepError::from(err));
+        }
         sync_dir(&self.user_tx_dir)?;
         Ok(())
     }
@@ -1977,5 +2151,114 @@ impl UserFlatpakManager {
         out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         out.truncate(limit.min(500));
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_proc_cgroup_flatpak_scope_unescaping_and_scanning() {
+        let dir = TempDir::new().unwrap();
+        let proc_root = dir.path();
+
+        // Numeric PID 4120: standard Flatpak scope
+        fs::create_dir_all(proc_root.join("4120")).unwrap();
+        fs::write(
+            proc_root.join("4120/cgroup"),
+            "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-flatpak-org.mozilla.firefox-18429.scope\n",
+        )
+        .unwrap();
+
+        // Numeric PID 5230: systemd hex-escaped hyphen (\x2d -> '-') in app_id
+        fs::create_dir_all(proc_root.join("5230")).unwrap();
+        fs::write(
+            proc_root.join("5230/cgroup"),
+            "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-flatpak-io.github.foo_bar.my\\x2dapp-9921.scope\n",
+        )
+        .unwrap();
+
+        // Non-numeric /proc entry ("self_fake") and invalid scope ("global") must be ignored
+        fs::create_dir_all(proc_root.join("self_fake")).unwrap();
+        fs::write(
+            proc_root.join("self_fake/cgroup"),
+            "0::/user.slice/app-flatpak-com.ignored.SelfFake-111.scope\n",
+        )
+        .unwrap();
+        fs::create_dir_all(proc_root.join("6000")).unwrap();
+        fs::write(
+            proc_root.join("6000/cgroup"),
+            "0::/user.slice/app-flatpak-global-111.scope\n",
+        )
+        .unwrap();
+
+        let probe = ProcCgroupFlatpakRuntimeProbe::with_proc_root(proc_root.to_path_buf());
+        let running = probe.running_app_ids();
+        assert!(running.contains("org.mozilla.firefox"));
+        assert!(running.contains("io.github.foo_bar.my-app"));
+        assert!(!running.contains("com.ignored.SelfFake"));
+        assert!(!running.contains("global"));
+        assert_eq!(running.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_bwrap_info_dir_rejects_symlinks_oversized_and_invalid_ids() {
+        let dir = TempDir::new().unwrap();
+        let bwrap_root = dir.path().join(".flatpak");
+        fs::create_dir_all(&bwrap_root).unwrap();
+
+        // 1. Valid regular bwrap instance info
+        let valid_inst = bwrap_root.join("10001");
+        fs::create_dir_all(&valid_inst).unwrap();
+        fs::write(
+            valid_inst.join("info"),
+            "[Application]\nname=com.obsproject.Studio\n",
+        )
+        .unwrap();
+
+        // 2. Symlinked info file -> must be rejected
+        let real_outside = dir.path().join("outside_info");
+        fs::write(&real_outside, "[Application]\nname=org.evil.SymlinkFile\n").unwrap();
+        let sym_file_inst = bwrap_root.join("10002");
+        fs::create_dir_all(&sym_file_inst).unwrap();
+        symlink(&real_outside, sym_file_inst.join("info")).unwrap();
+
+        // 3. Symlinked instance directory -> must be rejected
+        let real_outside_dir = dir.path().join("outside_dir");
+        fs::create_dir_all(&real_outside_dir).unwrap();
+        fs::write(
+            real_outside_dir.join("info"),
+            "[Application]\nname=org.evil.SymlinkDir\n",
+        )
+        .unwrap();
+        symlink(&real_outside_dir, bwrap_root.join("10003")).unwrap();
+
+        // 4. Oversized (> 64 KiB) info file -> must be rejected
+        let oversized_inst = bwrap_root.join("10004");
+        fs::create_dir_all(&oversized_inst).unwrap();
+        let mut huge = String::from("[Application]\nname=org.evil.Oversized\n# ");
+        huge.push_str(&"A".repeat(70_000));
+        huge.push('\n');
+        fs::write(oversized_inst.join("info"), huge).unwrap();
+
+        // 5. Invalid app_id ("global") -> must be rejected
+        let bad_id_inst = bwrap_root.join("10005");
+        fs::create_dir_all(&bad_id_inst).unwrap();
+        fs::write(bad_id_inst.join("info"), "[Application]\nname=global\n").unwrap();
+
+        let mut active = BTreeSet::new();
+        parse_bwrap_info_dir(&bwrap_root, &mut active);
+        assert_eq!(active.len(), 1);
+        assert!(active.contains("com.obsproject.Studio"));
+
+        // 6. Symlinked bwrap_root itself -> must be rejected
+        let symlink_root = dir.path().join("symlink_bwrap_root");
+        symlink(&bwrap_root, &symlink_root).unwrap();
+        let mut from_sym_root = BTreeSet::new();
+        parse_bwrap_info_dir(&symlink_root, &mut from_sym_root);
+        assert!(from_sym_root.is_empty());
     }
 }

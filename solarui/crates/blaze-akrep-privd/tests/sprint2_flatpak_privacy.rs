@@ -520,8 +520,20 @@ async fn app_04_grant_narrow_folder_affects_only_target_app() {
     // Mark Krita as currently running via flatpak ps probe
     h.runtime_probe.set_running("org.kde.krita", true);
 
-    // Verify red-lines block blanket grants before granting narrow folder
-    for forbidden_tok in ["host", "host-os", "host-etc", "home", "~", "/", "/home"] {
+    // Verify red-lines block blanket grants and Flatpak override sandbox-escape subpaths before granting narrow folder
+    for forbidden_tok in [
+        "host",
+        "host-os",
+        "host-etc",
+        "home",
+        "~",
+        "/",
+        "/home",
+        "xdg-data/flatpak/overrides:rw",
+        "~/.local/share/flatpak/overrides:create",
+        "home/.local/share/flatpak:rw",
+        "/var/lib/flatpak/overrides:rw",
+    ] {
         let bad = h
             .engine
             .create_plan(
@@ -1497,17 +1509,39 @@ fn sample_multi_stream_pipewire_json() -> String {
             }
         },
         {
+            "id": 31,
+            "type": "PipeWire:Interface:Client",
+            "info": {
+                "props": {
+                    "pipewire.sec.uid": 1000,
+                    "pipewire.sec.pid": 4100,
+                    "application.name": "Firefox"
+                }
+            }
+        },
+        {
+            "id": 35,
+            "type": "PipeWire:Interface:Client",
+            "info": {
+                "props": {
+                    "pipewire.sec.uid": 1001,
+                    "pipewire.sec.pid": 4500,
+                    "application.name": "OtherUserApp"
+                }
+            }
+        },
+        {
             "id": 101,
             "type": "PipeWire:Interface:Node",
             "info": {
                 "state": "running",
                 "props": {
+                    "client.id": 31,
                     "media.class": "Stream/Input/Audio",
                     "application.name": "Firefox",
                     "application.id": "org.mozilla.firefox",
                     "application.process.binary": "firefox",
                     "application.process.id": 4100,
-                    "application.process.uid": 1000,
                     "media.name": "WebRTC Voice"
                 }
             }
@@ -1518,12 +1552,12 @@ fn sample_multi_stream_pipewire_json() -> String {
             "info": {
                 "state": "running",
                 "props": {
+                    "client.id": 31,
                     "media.class": "Stream/Input/Video",
                     "application.name": "OBS Studio",
                     "application.id": "com.obsproject.Studio",
                     "application.process.binary": "obs",
                     "application.process.id": 4200,
-                    "application.process.uid": 1000,
                     "media.name": "PipeWire Screen Capture"
                 }
             }
@@ -1534,12 +1568,12 @@ fn sample_multi_stream_pipewire_json() -> String {
             "info": {
                 "state": "running",
                 "props": {
+                    "client.id": 31,
                     "media.class": "Stream/Input/Video",
                     "application.name": "Snapshot",
                     "application.id": "org.gnome.Snapshot",
                     "application.process.binary": "snapshot",
                     "application.process.id": 4300,
-                    "application.process.uid": 1000,
                     "media.name": "Camera Preview"
                 }
             }
@@ -1550,9 +1584,9 @@ fn sample_multi_stream_pipewire_json() -> String {
             "info": {
                 "state": "suspended",
                 "props": {
+                    "client.id": 31,
                     "media.class": "Stream/Input/Audio",
                     "application.name": "PausedRecorder",
-                    "application.process.uid": 1000,
                     "media.name": "Idle Capture"
                 }
             }
@@ -1563,9 +1597,9 @@ fn sample_multi_stream_pipewire_json() -> String {
             "info": {
                 "state": "running",
                 "props": {
+                    "client.id": 35,
                     "media.class": "Stream/Input/Audio",
                     "application.name": "OtherUserApp",
-                    "application.process.uid": 1001,
                     "media.name": "Other User Capture"
                 }
             }
