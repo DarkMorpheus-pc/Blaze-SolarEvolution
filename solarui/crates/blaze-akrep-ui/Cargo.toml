@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Akrep v0.1 strictly read-only GTK4 security center UI for BlazeOS"
+description = "Akrep v1.0 GTK4 security center UI for BlazeOS"
 
 [[bin]]
 name = "akrep-ui"
@@ -13,6 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 blaze-sentinel-core = { workspace = true }
+blaze-akrep-common = { workspace = true }
 tokio = { workspace = true }
 zbus = { workspace = true }
 serde = { workspace = true }
@@ -24,3 +25,6 @@ futures-util = { workspace = true }
 gdk4 = "0.11"
 gtk4 = { version = "0.11", features = ["v4_12"] }
 async-channel = "2.3"
+
+[dev-dependencies]
+tempfile = { workspace = true }

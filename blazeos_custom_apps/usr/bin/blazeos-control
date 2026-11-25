@@ -521,6 +521,18 @@ class BlazeControlWindow(Adw.PreferencesWindow):
         )
         page.add(pref_group)
 
+        # Akrep Security Center
+        row_akrep = Adw.ActionRow(
+            title="Akrep Güvenlik Merkezi" if self.is_tr else "Akrep Security Center",
+            subtitle="SELinux, güvenlik duvarı, uygulama kum havuzu izinleri, tehdit taraması ve gizlilik yönetimi." if self.is_tr
+                     else "SELinux, firewall rules, Flatpak sandbox permissions, threat scanning, and privacy controls."
+        )
+        btn_akrep = Gtk.Button(label="Başlat" if self.is_tr else "Launch", valign=Gtk.Align.CENTER)
+        btn_akrep.add_css_class("suggested-action")
+        btn_akrep.connect("clicked", lambda _: subprocess.Popen(["/usr/bin/akrep-ui"]))
+        row_akrep.add_suffix(btn_akrep)
+        pref_group.add(row_akrep)
+
         # BlazeHouse System Center
         row_bh = Adw.ActionRow(
             title="BlazeHouse Sistem Merkezi" if self.is_tr else "BlazeHouse System Center",

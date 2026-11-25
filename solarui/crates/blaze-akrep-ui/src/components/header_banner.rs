@@ -1,23 +1,37 @@
 use crate::components::{severity_css_class, severity_icon_name};
 use crate::i18n::Lang;
+use crate::state::{NoticeBanner, NoticeKind};
 use blaze_sentinel_core::{AkrepSeverity, AkrepSnapshot, Availability};
 use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Button, Image, Label, Orientation};
 
+pub struct HeaderBannerCallbacks {
+    pub on_refresh: Box<dyn Fn()>,
+    pub on_toggle_lang: Box<dyn Fn()>,
+    pub on_open_profiles: Box<dyn Fn()>,
+    pub on_dismiss_notice: Box<dyn Fn()>,
+}
+
 pub fn build_header_banner(
     snap: Option<&AkrepSnapshot>,
     offline_reason: Option<&str>,
+    notice: Option<&NoticeBanner>,
     lang: Lang,
-    on_refresh: impl Fn() + 'static,
-    on_toggle_lang: impl Fn() + 'static,
+    callbacks: HeaderBannerCallbacks,
 ) -> GtkBox {
-    let outer = GtkBox::new(Orientation::Vertical, 10);
+    let HeaderBannerCallbacks {
+        on_refresh,
+        on_toggle_lang,
+        on_open_profiles,
+        on_dismiss_notice,
+    } = callbacks;
+    let outer = GtkBox::new(Orientation::Vertical, 8);
 
     let card = GtkBox::new(Orientation::Horizontal, 14);
     card.add_css_class("akrep-banner");
     card.set_valign(Align::Center);
 
-    let (sev, avail, headline, subline) = match snap {
+    let (sev, avail, headline, subline, profile_lbl) = match snap {
         Some(s) => (
             s.overall_status,
             Availability::Available,
@@ -31,20 +45,26 @@ pub fn build_header_banner(
                 s.posture.passed,
                 s.posture.total
             ),
+            format!(
+                "{}: {}",
+                lang.pick("Profil", "Profile"),
+                lang.pick(&s.active_profile_tr, &s.active_profile_en)
+            ),
         ),
         None => (
-            AkrepSeverity::Unknown,
+            AkrepSeverity::Unavailable,
             Availability::Unavailable,
             lang.pick(
-                "Akrep Arka Plan Servisine Bağlanılamadı",
-                "Akrep Background Service Offline",
+                "Akrep Telemetri Servisi Çevrimdışı",
+                "Akrep Telemetry Service Offline",
             )
             .to_string(),
             lang.pick(
-                "Telemetry akışı olmadan yalnızca salt okunur güvenli durum gösteriliyor.",
-                "Running in degraded read-only fallback mode without telemetry daemon.",
+                "akrepd yanıt vermiyor; yerel oturum ve Polkit işlem kanalları bağımsız çalışmaya devam eder.",
+                "akrepd is unreachable; local user-session and Polkit transaction channels remain independently available.",
             )
             .to_string(),
+            format!("{}: {}", lang.pick("Profil", "Profile"), lang.pick("Dengeli", "Balanced")),
         ),
     };
 
@@ -62,10 +82,6 @@ pub fn build_header_banner(
     title_lbl.set_wrap(true);
     top_row.append(&title_lbl);
 
-    let ro_pill = Label::new(Some(lang.pick("SALT OKUNUR v0.1", "READ-ONLY v0.1")));
-    ro_pill.add_css_class("akrep-ro-pill");
-    top_row.append(&ro_pill);
-
     let badge = Label::new(Some(match lang {
         Lang::Tr => sev.label_tr(),
         Lang::En => sev.label_en(),
@@ -73,6 +89,17 @@ pub fn build_header_banner(
     badge.add_css_class("akrep-badge");
     badge.add_css_class(severity_css_class(sev));
     top_row.append(&badge);
+
+    let prof_btn = Button::with_label(&profile_lbl);
+    prof_btn.add_css_class("akrep-profile-pill");
+    prof_btn.connect_clicked(move |_| on_open_profiles());
+    top_row.append(&prof_btn);
+
+    let arch_pill = Label::new(Some(
+        lang.pick("ÇİFT KANAL (RO + POLKIT)", "DUAL-BUS (RO + POLKIT)"),
+    ));
+    arch_pill.add_css_class("akrep-ro-pill");
+    top_row.append(&arch_pill);
 
     text_col.append(&top_row);
 
@@ -91,10 +118,12 @@ pub fn build_header_banner(
         Lang::Tr => "EN",
         Lang::En => "TR",
     });
+    lang_btn.add_css_class("akrep-ghost-btn");
     lang_btn.connect_clicked(move |_| on_toggle_lang());
     actions.append(&lang_btn);
 
     let refresh_btn = Button::with_label(lang.pick("Yenile", "Refresh"));
+    refresh_btn.add_css_class("akrep-ghost-btn");
     refresh_btn.connect_clicked(move |_| on_refresh());
     actions.append(&refresh_btn);
 
@@ -105,13 +134,13 @@ pub fn build_header_banner(
         let warn_box = GtkBox::new(Orientation::Horizontal, 10);
         warn_box.add_css_class("akrep-offline-banner");
         let w_icon = Image::from_icon_name("dialog-warning-symbolic");
-        w_icon.set_pixel_size(20);
+        w_icon.set_pixel_size(18);
         warn_box.append(&w_icon);
         let msg = Label::new(Some(&format!(
             "{}: {}",
             lang.pick(
-                "Kısıtlı / Çevrimdışı Durum (akrepd servisi yanıt vermiyor)",
-                "Degraded / Offline Mode (akrepd service unreachable)",
+                "Kısıtlı Telemetri Durumu (akrepd)",
+                "Degraded Telemetry State (akrepd)",
             ),
             reason
         )));
@@ -120,6 +149,32 @@ pub fn build_header_banner(
         msg.set_hexpand(true);
         warn_box.append(&msg);
         outer.append(&warn_box);
+    }
+
+    if let Some(nt) = notice {
+        let toast_box = GtkBox::new(Orientation::Horizontal, 10);
+        let (cls, ico) = match nt.kind {
+            NoticeKind::Success => ("akrep-toast-ok", "security-high-symbolic"),
+            NoticeKind::Error => ("akrep-toast-err", "dialog-error-symbolic"),
+            NoticeKind::Info => ("akrep-toast-info", "dialog-information-symbolic"),
+        };
+        toast_box.add_css_class(cls);
+        let icon_w = Image::from_icon_name(ico);
+        icon_w.set_pixel_size(18);
+        toast_box.append(&icon_w);
+
+        let lbl = Label::new(Some(lang.pick(&nt.message_tr, &nt.message_en)));
+        lbl.set_xalign(0.0);
+        lbl.set_wrap(true);
+        lbl.set_hexpand(true);
+        toast_box.append(&lbl);
+
+        let close_btn = Button::with_label(lang.pick("Kapat", "Dismiss"));
+        close_btn.add_css_class("akrep-ghost-btn");
+        close_btn.connect_clicked(move |_| on_dismiss_notice());
+        toast_box.append(&close_btn);
+
+        outer.append(&toast_box);
     }
 
     outer

@@ -3,10 +3,26 @@ use std::path::PathBuf;
 
 use crate::severity::{AkrepSeverity, Availability};
 
-pub const AKREP_SCHEMA_VERSION: u32 = 1;
-pub const AKREP_VERSION: &str = "0.1.0";
+pub const AKREP_SCHEMA_VERSION: u32 = 2;
+pub const AKREP_VERSION: &str = "1.0.0";
 pub const ROOT_CANARY_DIR: &str = "/var/lib/blaze";
 pub const ROOT_CANARY_PATH: &str = "/var/lib/blaze/.blaze_canary";
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_active_profile_id() -> String {
+    "balanced".to_string()
+}
+
+fn default_active_profile_tr() -> String {
+    "Dengeli".to_string()
+}
+
+fn default_active_profile_en() -> String {
+    "Balanced".to_string()
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SecurityControl {
@@ -116,7 +132,11 @@ pub struct AkrepCapabilities {
     pub sentinel_version: String,
     pub schema_version: u32,
     pub read_only: bool,
+    #[serde(default = "default_true")]
+    pub read_only_daemon: bool,
     pub mutators_enabled: bool,
+    #[serde(default)]
+    pub privileged_bus: String,
     pub sections: Vec<String>,
     pub future_polkit_actions: Vec<String>,
 }
@@ -127,7 +147,15 @@ pub struct AkrepSnapshot {
     pub version: String,
     pub sentinel_version: String,
     pub read_only: bool,
+    #[serde(default = "default_true")]
+    pub read_only_daemon: bool,
     pub mutators_enabled: bool,
+    #[serde(default = "default_active_profile_id")]
+    pub active_profile_id: String,
+    #[serde(default = "default_active_profile_tr")]
+    pub active_profile_tr: String,
+    #[serde(default = "default_active_profile_en")]
+    pub active_profile_en: String,
     pub generated_at: String,
     pub overall_status: AkrepSeverity,
     pub headline_tr: String,

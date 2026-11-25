@@ -9,7 +9,7 @@ pub fn findings_from_posture(report: &PostureReport) -> Vec<AkrepFinding> {
             continue;
         }
         let section = match ctrl.id.as_str() {
-            "mac" => "selinux",
+            "mac" => "system_protection",
             "firewall" => "firewall",
             _ => "device_security",
         };
@@ -20,12 +20,12 @@ pub fn findings_from_posture(report: &PostureReport) -> Vec<AkrepFinding> {
         };
         let (remedy_tr, remedy_en) = match ctrl.id.as_str() {
             "mac" => (
-                "SELinux Enforcing durumu yalnızca yönetici tarafından /etc/selinux/config üzerinden etkinleştirilebilir (Akrep v0.1 salt okunurdur).",
-                "SELinux Enforcing mode requires administrator review via /etc/selinux/config (Akrep v0.1 is read-only).",
+                "SELinux Enforcing durumu yönetici tarafından /etc/selinux/config üzerinden doğrulanmalıdır; Akrep SELinux'u asla devre dışı bırakmaz.",
+                "Verify SELinux Enforcing mode via /etc/selinux/config as an administrator; Akrep never disables SELinux.",
             ),
             "firewall" => (
-                "Güvenlik duvarı durumunu doğrulamak için `systemctl status firewalld` çıktısını inceleyin.",
-                "Inspect `systemctl status firewalld` as an administrator to verify firewall protection.",
+                "Güvenlik duvarı durumunu Akrep Güvenlik Duvarı sayfasından veya `systemctl status firewalld` ile inceleyin.",
+                "Inspect firewall protection in the Akrep Firewall page or via `systemctl status firewalld`.",
             ),
             _ => (
                 "/etc/sysctl.d/99-blaze-optimization.conf sertleştirme parametrelerini kontrol edin.",
@@ -45,15 +45,16 @@ pub fn findings_from_posture(report: &PostureReport) -> Vec<AkrepFinding> {
             remediation_hint_tr: remedy_tr.to_string(),
             remediation_hint_en: remedy_en.to_string(),
             source: "blaze-sentinel-core".to_string(),
-            read_only_note: "Akrep v0.1 yalnızca teşhis sağlar; sistem ayarı değiştirmez."
-                .to_string(),
+            read_only_note:
+                "akrepd telemetri servisi salt okunurdur; yetkili işlemler akrep-privd + Polkit ile uygulanır."
+                    .to_string(),
         });
     }
 
     for (idx, alert) in report.alerts.iter().enumerate() {
         findings.push(AkrepFinding {
             id: format!("sentinel.integrity.{}", idx),
-            section: "threat_integrity".to_string(),
+            section: "threat_protection".to_string(),
             severity: AkrepSeverity::Critical,
             availability: Availability::Available,
             title_tr: "Çalışma Zamanı Bütünlük Uyarısı".to_string(),
@@ -67,7 +68,9 @@ pub fn findings_from_posture(report: &PostureReport) -> Vec<AkrepFinding> {
                 "Inspect BERP recovery logs and /var/log/blaze-sentinel.log as administrator."
                     .to_string(),
             source: "blaze-sentinel-core".to_string(),
-            read_only_note: "Akrep v0.1 yalnızca teşhis sağlar; müdahale etmez.".to_string(),
+            read_only_note:
+                "akrepd telemetri servisi yalnızca teşhis sağlar; sistem ayarı değiştirmez."
+                    .to_string(),
         });
     }
 

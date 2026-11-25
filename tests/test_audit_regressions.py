@@ -1408,39 +1408,107 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
 
     def test_gate45_akrep_readonly_contract_and_specs(self):
         cargo_toml = (ROOT / 'solarui/Cargo.toml').read_text(encoding='utf-8')
-        for member in ('blaze-sentinel-core', 'blaze-akrep-daemon', 'blaze-akrep-ui'):
+        for member in (
+            'blaze-sentinel-core',
+            'blaze-akrep-common',
+            'blaze-akrep-privd',
+            'blaze-akrep-daemon',
+            'blaze-akrep-ui',
+        ):
             self.assertIn(member, cargo_toml)
 
         daemon_cargo = (ROOT / 'solarui/crates/blaze-akrep-daemon/Cargo.toml').read_text(encoding='utf-8')
+        privd_cargo = (ROOT / 'solarui/crates/blaze-akrep-privd/Cargo.toml').read_text(encoding='utf-8')
         for forbidden_gui in ('gtk4', 'gdk4', 'libadwaita'):
             self.assertNotIn(forbidden_gui, daemon_cargo)
+            self.assertNotIn(forbidden_gui, privd_cargo)
 
         dbus_src = (ROOT / 'solarui/crates/blaze-akrep-daemon/src/dbus.rs').read_text(encoding='utf-8')
         for ro_fn in ('fn get_version', 'fn get_capabilities', 'fn get_snapshot', 'fn get_findings', 'fn get_section_detail'):
             self.assertIn(ro_fn, dbus_src)
-        for forbidden_mutator in ('fn set_', 'fn toggle_', 'fn apply_', 'fn execute', 'fn run_shell', 'fn write_'):
+        for forbidden_mutator in (
+            'fn set_',
+            'fn toggle_',
+            'fn apply_',
+            'fn execute',
+            'fn run_shell',
+            'fn write_',
+            'fn create_plan',
+            'fn commit_plan',
+        ):
             self.assertNotIn(forbidden_mutator, dbus_src)
+
+        priv_dbus_src = (ROOT / 'solarui/crates/blaze-akrep-privd/src/dbus.rs').read_text(encoding='utf-8')
+        for priv_fn in (
+            'fn create_plan',
+            'fn commit_plan',
+            'fn rollback_transaction',
+            'fn get_history',
+            'fn diagnose_selinux',
+            'fn inspect_firewall',
+            'fn list_profiles',
+            'fn preview_profile',
+        ):
+            self.assertIn(priv_fn, priv_dbus_src)
 
         ui_src = (ROOT / 'solarui/crates/blaze-akrep-ui/src/main.rs').read_text(encoding='utf-8')
         self.assertIn('spawn_local', ui_src)
+        self.assertIn('present_plan_preview_dialog', ui_src)
         ui_dbus = (ROOT / 'solarui/crates/blaze-akrep-ui/src/dbus_client.rs').read_text(encoding='utf-8')
         self.assertIn('async_channel', ui_dbus)
+        self.assertIn('AKREP_BUS_NAME', ui_dbus)
+        self.assertIn('AKREP_PRIV_BUS_NAME', ui_dbus)
+
+        nav_src = (ROOT / 'solarui/crates/blaze-akrep-ui/src/components/nav_rail.rs').read_text(encoding='utf-8')
+        for page_id in (
+            '"overview"',
+            '"threat_protection"',
+            '"system_protection"',
+            '"firewall"',
+            '"applications"',
+            '"device_security"',
+            '"privacy"',
+            '"profiles"',
+            '"history"',
+            '"settings"',
+        ):
+            self.assertIn(page_id, nav_src)
 
         self.assertTrue((OVERLAY / 'usr/lib/sysusers.d/blaze-akrep.conf').is_file())
         svc = (OVERLAY / 'usr/lib/systemd/system/akrepd.service').read_text(encoding='utf-8')
         self.assertIn('User=akrep', svc)
         self.assertIn('BusName=tr.com.blazeos.Akrep1', svc)
+        priv_svc = (OVERLAY / 'usr/lib/systemd/system/akrep-privd.service').read_text(encoding='utf-8')
+        self.assertIn('BusName=tr.com.blazeos.Akrep1.Privileged', priv_svc)
+        self.assertIn('--idle-timeout-secs 60', priv_svc)
         self.assertTrue((OVERLAY / 'usr/lib/systemd/system-preset/90-blaze-akrep.preset').is_file())
 
         dbus_pol = (OVERLAY / 'usr/share/dbus-1/system.d/tr.com.blazeos.Akrep1.conf').read_text(encoding='utf-8')
         self.assertIn('<deny own="tr.com.blazeos.Akrep1"/>', dbus_pol)
         self.assertIn('<allow own="tr.com.blazeos.Akrep1"/>', dbus_pol)
+        priv_dbus_pol = (OVERLAY / 'usr/share/dbus-1/system.d/tr.com.blazeos.Akrep1.Privileged.conf').read_text(encoding='utf-8')
+        self.assertIn('<deny own="tr.com.blazeos.Akrep1.Privileged"/>', priv_dbus_pol)
+        self.assertIn('<allow own="tr.com.blazeos.Akrep1.Privileged"/>', priv_dbus_pol)
 
         polkit_pol = (OVERLAY / 'usr/share/polkit-1/actions/tr.com.blazeos.Akrep1.policy').read_text(encoding='utf-8')
-        self.assertIn('auth_admin', polkit_pol)
+        self.assertIn('auth_admin_keep', polkit_pol)
+        for pk_act in (
+            'tr.com.blazeos.Akrep1.selinux.diagnose',
+            'tr.com.blazeos.Akrep1.selinux.manage',
+            'tr.com.blazeos.Akrep1.firewall.manage',
+            'tr.com.blazeos.Akrep1.flatpak.system-manage',
+            'tr.com.blazeos.Akrep1.quarantine.manage',
+            'tr.com.blazeos.Akrep1.profile.apply',
+            'tr.com.blazeos.Akrep1.packages.install-optional',
+        ):
+            self.assertIn(pk_act, polkit_pol)
 
         desktop = (OVERLAY / 'usr/share/applications/tr.com.blazeos.Akrep.desktop').read_text(encoding='utf-8')
         self.assertIn('Exec=akrep-ui', desktop)
+
+        control_src = (OVERLAY / 'usr/bin/blazeos-control').read_text(encoding='utf-8')
+        self.assertIn('subprocess.Popen(["/usr/bin/akrep-ui"])', control_src)
+        self.assertIn('Akrep Security Center', control_src)
 
         omnibar = (ROOT / 'solarui/crates/solar-shell/src/omnibar.rs').read_text(encoding='utf-8')
         self.assertIn('"akrep-ui"', omnibar)

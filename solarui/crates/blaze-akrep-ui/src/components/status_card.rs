@@ -11,7 +11,7 @@ pub fn build_status_card(
 ) -> Button {
     let btn = Button::new();
     btn.add_css_class("akrep-card");
-    btn.set_size_request(220, 140);
+    btn.set_size_request(220, 142);
     btn.set_hexpand(false);
 
     let root = GtkBox::new(Orientation::Vertical, 8);
@@ -19,7 +19,7 @@ pub fn build_status_card(
 
     let top_row = GtkBox::new(Orientation::Horizontal, 8);
     let icon = Image::from_icon_name(severity_icon_name(card.status, card.availability));
-    icon.set_pixel_size(28);
+    icon.set_pixel_size(26);
     top_row.append(&icon);
 
     let spacer = GtkBox::new(Orientation::Horizontal, 0);
@@ -48,7 +48,7 @@ pub fn build_status_card(
     summary.set_vexpand(true);
     root.append(&summary);
 
-    let footer = Label::new(Some(lang.pick("İncele →", "Inspect →")));
+    let footer = Label::new(Some(lang.pick("Bölümü Aç ->", "Open Section ->")));
     footer.add_css_class("akrep-metric-key");
     footer.set_xalign(0.0);
     root.append(&footer);

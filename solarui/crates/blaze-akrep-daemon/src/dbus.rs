@@ -151,8 +151,15 @@ impl AkrepManager {
         section: &str,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<String> {
+        let canonical = match section {
+            "selinux" => "system_protection",
+            "flatpak" => "applications",
+            "threat_integrity" => "threat_protection",
+            "packages" => "device_security",
+            other => other,
+        };
         let snap = self.refresh_snapshot(false, Some(&emitter)).await;
-        let Some(detail) = snap.sections.iter().find(|s| s.section == section) else {
+        let Some(detail) = snap.sections.iter().find(|s| s.section == canonical) else {
             return Err(zbus::fdo::Error::InvalidArgs(format!(
                 "Unknown Akrep read-only section: {}",
                 section

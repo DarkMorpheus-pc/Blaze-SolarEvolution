@@ -100,7 +100,7 @@ pub fn collect_flatpak() -> FlatpakSection {
         status = status.combine(AkrepSeverity::Warning);
         findings.push(AkrepFinding {
             id: "flatpak.global_override".to_string(),
-            section: "flatpak".to_string(),
+            section: "applications".to_string(),
             severity: AkrepSeverity::Warning,
             availability: Availability::Available,
             title_tr: "Genel Flatpak Sistem Override İzni".to_string(),
@@ -114,13 +114,13 @@ pub fn collect_flatpak() -> FlatpakSection {
                 global_overrides.join(", ")
             ),
             remediation_hint_tr:
-                "`flatpak override --show` ile kapsamı inceleyin (Akrep v0.1 izni değiştirmez)."
+                "Uygulama Güvenliği sayfasından uygulama bazlı izinleri inceleyin; genel override önerilmez."
                     .to_string(),
             remediation_hint_en:
-                "Inspect permissions using `flatpak override --show` (read-only in v0.1)."
+                "Inspect per-app sandbox overrides in Application Security; global overrides are discouraged."
                     .to_string(),
             source: "/var/lib/flatpak/overrides/global".to_string(),
-            read_only_note: "Salt Okunur v0.1 — izin yazımı veya kısıtlama yapılmaz.".to_string(),
+            read_only_note: "akrepd salt okunurdur — uygulama izinleri Uygulama Güvenliği sayfasından yönetilir.".to_string(),
         });
     }
 
@@ -134,7 +134,7 @@ pub fn collect_flatpak() -> FlatpakSection {
             status = status.combine(AkrepSeverity::Warning);
             findings.push(AkrepFinding {
                 id: format!("flatpak.broad.{}", app_id),
-                section: "flatpak".to_string(),
+                section: "applications".to_string(),
                 severity: AkrepSeverity::Warning,
                 availability: Availability::Available,
                 title_tr: format!("Geniş Sandbox İzni: {}", app_id),
@@ -142,15 +142,15 @@ pub fn collect_flatpak() -> FlatpakSection {
                 description_tr: format!("Algılanan yetkiler: {}", elevated.join(", ")),
                 description_en: format!("Detected permissions: {}", elevated.join(", ")),
                 remediation_hint_tr: format!(
-                    "Gerekirse `flatpak info --show-permissions {}` ile doğrulayın.",
+                    "Uygulama Güvenliği sayfasından {} için daraltılmış dizin veya cihaz kısıtlaması uygulayın.",
                     app_id
                 ),
                 remediation_hint_en: format!(
-                    "Review with `flatpak info --show-permissions {}` if needed.",
+                    "Tighten {} sandbox grants in Application Security.",
                     app_id
                 ),
                 source: "collectors/flatpak".to_string(),
-                read_only_note: "Salt Okunur v0.1 — override uygulanmaz.".to_string(),
+                read_only_note: "akrepd salt okunurdur — override işlemleri Uygulama Güvenliği sayfasından yapılır.".to_string(),
             });
         }
     }
@@ -188,9 +188,9 @@ pub fn collect_flatpak() -> FlatpakSection {
     let summary_en = format!("{} app(s) • {} broad access", apps.len(), broad_host_apps);
 
     let card = AkrepCardSummary {
-        id: "flatpak".to_string(),
-        title_tr: "Uygulama İzinleri (Flatpak)".to_string(),
-        title_en: "App Permissions (Flatpak)".to_string(),
+        id: "applications".to_string(),
+        title_tr: "Uygulama Güvenliği".to_string(),
+        title_en: "Application Security".to_string(),
         status,
         availability: avail,
         summary_tr: summary_tr.clone(),
@@ -199,7 +199,7 @@ pub fn collect_flatpak() -> FlatpakSection {
     };
 
     let detail = AkrepSectionDetail {
-        section: "flatpak".to_string(),
+        section: "applications".to_string(),
         title_tr: card.title_tr.clone(),
         title_en: card.title_en.clone(),
         status,

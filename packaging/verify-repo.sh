@@ -22,7 +22,7 @@ REPO
   blaze-sentinel status | head -6
   akrepd --version
   akrep-ui --version
-  akrepd --oneshot-json | grep -q "\"mutators_enabled\": false" || { echo "FATAL: akrepd mutators_enabled must be false"; exit 1; }
+  akrepd --oneshot-json | grep -q "\"read_only\": true" || { echo "FATAL: akrepd read_only must be true"; exit 1; }
   echo "--- blaze.repo shipped by blaze-release:"
   cat /usr/share/dnf5/repos.d/blaze.repo
   echo "--- identity persistence & releasever=45 checks:"

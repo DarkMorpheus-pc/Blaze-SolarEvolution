@@ -20,6 +20,20 @@ impl Lang {
         Self::Tr
     }
 
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Tr => "tr",
+            Self::En => "en",
+        }
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Tr => "Türkçe (TR)",
+            Self::En => "English (EN)",
+        }
+    }
+
     pub fn pick<'a>(self, tr: &'a str, en: &'a str) -> &'a str {
         match self {
             Self::Tr => tr,

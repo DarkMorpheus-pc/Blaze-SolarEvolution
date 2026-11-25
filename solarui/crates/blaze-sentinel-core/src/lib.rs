@@ -116,5 +116,7 @@ mod tests {
         assert_eq!(f.len(), 1);
         assert_eq!(f[0].section, "firewall");
         assert_eq!(f[0].severity, AkrepSeverity::Critical);
+        assert_eq!(AKREP_VERSION, "1.0.0");
+        assert_eq!(AKREP_SCHEMA_VERSION, 2);
     }
 }

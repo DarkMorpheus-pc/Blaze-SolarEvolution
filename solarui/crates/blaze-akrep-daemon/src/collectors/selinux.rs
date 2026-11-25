@@ -170,17 +170,17 @@ pub fn collect_selinux() -> SelinuxSection {
     if status != AkrepSeverity::Normal {
         findings.push(AkrepFinding {
             id: "selinux.mode".to_string(),
-            section: "selinux".to_string(),
+            section: "system_protection".to_string(),
             severity: status,
             availability: Availability::Available,
             title_tr: format!("SELinux Durumu: {}", mode_tr),
             title_en: format!("SELinux Mode: {}", mode_en),
             description_tr: format!("Aktif çalışma kipi '{}' olarak algılandı (yapılandırma: {}).", mode_tr, cfg_mode_str),
             description_en: format!("Active runtime mode detected as '{}' (config: {}).", mode_en, cfg_mode_str),
-            remediation_hint_tr: "Akrep v0.1 salt okunurdur; kalıcı değişiklik için /etc/selinux/config dosyasını yönetici olarak doğrulayın.".to_string(),
-            remediation_hint_en: "Akrep v0.1 is strictly read-only; review /etc/selinux/config as an administrator.".to_string(),
+            remediation_hint_tr: "Kalıcı çalışma kipi için /etc/selinux/config dosyasını yönetici olarak doğrulayın; Akrep SELinux'u devre dışı bırakmaz.".to_string(),
+            remediation_hint_en: "Review /etc/selinux/config as an administrator; Akrep never disables SELinux.".to_string(),
             source: "collectors/selinux".to_string(),
-            read_only_note: "Salt Okunur v0.1 — setenforce / bool değişikliği yapılmaz.".to_string(),
+            read_only_note: "akrepd telemetri servisi salt okunurdur — boolean/bağlam onarımı Sistem Koruması sayfasından yapılır.".to_string(),
         });
     }
 
@@ -189,17 +189,17 @@ pub fn collect_selinux() -> SelinuxSection {
             final_status = final_status.combine(AkrepSeverity::Warning);
             findings.push(AkrepFinding {
                 id: "selinux.avc_recent".to_string(),
-                section: "selinux".to_string(),
+                section: "system_protection".to_string(),
                 severity: AkrepSeverity::Warning,
                 availability: avc_avail,
                 title_tr: format!("Son 24 Saatte {} AVC / SELinux Uyarısı", cnt),
                 title_en: format!("{} Recent SELinux / AVC Event(s)", cnt),
                 description_tr: avc_summary.clone(),
                 description_en: avc_summary.clone(),
-                remediation_hint_tr: "Yönetici terminalinde `ausearch -m avc -ts recent` ile etiket reddi nedenini inceleyin.".to_string(),
-                remediation_hint_en: "Inspect AVC denial details using `ausearch -m avc -ts recent` as administrator.".to_string(),
+                remediation_hint_tr: "Akrep Sistem Koruması sayfasından AVC Tanılama (Polkit) aracını kullanarak etiket veya boolean düzeltmelerini inceleyin.".to_string(),
+                remediation_hint_en: "Use the AVC Diagnose (Polkit) tool in Akrep System Protection to review restorecon or boolean fixes.".to_string(),
                 source: "collectors/selinux".to_string(),
-                read_only_note: "Salt Okunur v0.1 — politika yüklemesi yapılmaz.".to_string(),
+                read_only_note: "akrepd salt okunur telemetri sunar; audit2allow asla kullanılmaz.".to_string(),
             });
         }
     }
@@ -238,7 +238,7 @@ pub fn collect_selinux() -> SelinuxSection {
     ];
 
     let card = AkrepCardSummary {
-        id: "selinux".to_string(),
+        id: "system_protection".to_string(),
         title_tr: "Sistem Koruması (SELinux)".to_string(),
         title_en: "System Protection (SELinux)".to_string(),
         status: final_status,
@@ -249,7 +249,7 @@ pub fn collect_selinux() -> SelinuxSection {
     };
 
     let detail = AkrepSectionDetail {
-        section: "selinux".to_string(),
+        section: "system_protection".to_string(),
         title_tr: card.title_tr.clone(),
         title_en: card.title_en.clone(),
         status: final_status,

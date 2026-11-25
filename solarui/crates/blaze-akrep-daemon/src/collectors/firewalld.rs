@@ -175,10 +175,10 @@ pub async fn collect_firewalld(conn: Option<&Connection>) -> FirewallSection {
             title_en: "Firewall Not Active".to_string(),
             description_tr: warn_msg_tr,
             description_en: warn_msg_en,
-            remediation_hint_tr: "Durumu doğrulamak için `systemctl status firewalld` komutunu kullanın (Akrep v0.1 kural yazmaz).".to_string(),
-            remediation_hint_en: "Verify with `systemctl status firewalld` (Akrep v0.1 does not modify firewall rules).".to_string(),
+            remediation_hint_tr: "Durumu doğrulamak için `systemctl status firewalld` komutunu kullanın (akrepd salt okunur telemetri sunar).".to_string(),
+            remediation_hint_en: "Verify with `systemctl status firewalld` (akrepd provides read-only telemetry).".to_string(),
             source: "collectors/firewalld (D-Bus)".to_string(),
-            read_only_note: "Salt Okunur v0.1 — bölge veya port kuralı değiştirilmez.".to_string(),
+            read_only_note: "akrepd salt okunurdur — kurallar Güvenlik Duvarı sayfasından Polkit onayıyla yönetilir.".to_string(),
         });
     }
 

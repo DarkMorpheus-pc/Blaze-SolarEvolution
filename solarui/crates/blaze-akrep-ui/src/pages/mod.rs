@@ -1,3 +1,10 @@
-pub mod home;
-pub mod section;
+pub mod applications;
+pub mod device_security;
+pub mod firewall;
+pub mod history;
+pub mod overview;
+pub mod privacy;
+pub mod profiles;
 pub mod settings;
+pub mod system_protection;
+pub mod threat_protection;

@@ -95,7 +95,7 @@ pub fn collect_packages() -> PackagesSection {
     } else {
         findings.push(AkrepFinding {
             id: "packages.repo_gpg".to_string(),
-            section: "packages".to_string(),
+            section: "device_security".to_string(),
             severity: AkrepSeverity::Warning,
             availability: Availability::Available,
             title_tr: "Blaze DNF5 Depo İmza Doğrulaması Eksik".to_string(),
@@ -105,7 +105,7 @@ pub fn collect_packages() -> PackagesSection {
             remediation_hint_tr: "/usr/share/dnf5/repos.d/blaze.repo dosyasında gpgcheck=1 ve repo_gpgcheck=1 ayarlarını doğrulayın.".to_string(),
             remediation_hint_en: "Verify gpgcheck=1 and repo_gpgcheck=1 in /usr/share/dnf5/repos.d/blaze.repo.".to_string(),
             source: "collectors/packages".to_string(),
-            read_only_note: "Salt Okunur v0.1 — dnf işlemi başlatılmaz.".to_string(),
+            read_only_note: "akrepd salt okunur telemetri sunar — otomatik dnf işlemi başlatılmaz.".to_string(),
         });
         AkrepSeverity::Warning
     };

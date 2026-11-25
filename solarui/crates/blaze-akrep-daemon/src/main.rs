@@ -142,20 +142,35 @@ mod tests {
 
     #[tokio::test]
     async fn test_collect_snapshot_offline_read_only_invariants() {
+        let started = std::time::Instant::now();
         let snap = collect_snapshot(None).await;
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed <= Duration::from_millis(250),
+            "collect_snapshot exceeded 250ms budget: {:?}",
+            elapsed
+        );
+        assert_eq!(snap.version, "1.0.0");
+        assert_eq!(snap.schema_version, 2);
         assert!(snap.read_only);
-        assert!(!snap.mutators_enabled);
+        assert!(snap.read_only_daemon);
+        assert!(snap.mutators_enabled);
         assert_eq!(snap.posture.total, 7);
-        assert_eq!(snap.cards.len(), 7);
-        assert_eq!(snap.sections.len(), 7);
+        assert_eq!(snap.cards.len(), 8);
+        assert_eq!(snap.sections.len(), 8);
         assert!(snap.capabilities.read_only);
-        assert!(!snap.capabilities.mutators_enabled);
+        assert!(snap.capabilities.read_only_daemon);
+        assert!(snap.capabilities.mutators_enabled);
+        assert_eq!(
+            snap.capabilities.privileged_bus,
+            "tr.com.blazeos.Akrep1.Privileged"
+        );
 
         let selinux_sec = snap
             .sections
             .iter()
-            .find(|s| s.section == "selinux")
-            .expect("selinux section");
+            .find(|s| s.section == "system_protection")
+            .expect("system_protection section");
         assert!(selinux_sec
             .metrics
             .iter()
@@ -167,6 +182,44 @@ mod tests {
             .find(|s| s.section == "firewall")
             .expect("firewall section");
         assert!(fw_sec.metrics.iter().any(|m| m.label_en == "Rich Rules"));
+
+        for expected_sec in [
+            "threat_protection",
+            "system_protection",
+            "firewall",
+            "applications",
+            "device_security",
+            "privacy",
+            "profiles",
+            "history",
+        ] {
+            assert!(
+                snap.sections.iter().any(|s| s.section == expected_sec),
+                "missing section {}",
+                expected_sec
+            );
+        }
+    }
+
+    #[test]
+    fn test_profiles_collector_reads_active_profile_or_defaults_to_balanced() {
+        let dir = std::env::temp_dir().join(format!("akrep_prof_col_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let state_path = dir.join("active_profile.json");
+        let fallback = crate::collectors::profiles::collect_profiles_at(&state_path, &dir);
+        assert_eq!(fallback.active_id, "balanced");
+        assert_eq!(fallback.active_en, "Balanced");
+
+        std::fs::write(
+            &state_path,
+            r#"{"active_profile_id":"gaming","effective_zone":"FedoraWorkstation"}"#,
+        )
+        .unwrap();
+        let active = crate::collectors::profiles::collect_profiles_at(&state_path, &dir);
+        assert_eq!(active.active_id, "gaming");
+        assert_eq!(active.active_en, "Gaming");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

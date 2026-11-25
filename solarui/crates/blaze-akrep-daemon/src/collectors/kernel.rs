@@ -4,7 +4,9 @@ use blaze_sentinel_core::{
 };
 use std::fs;
 
+use crate::collectors::packages::PackagesSection;
 use crate::collectors::secureboot::collect_secureboot_and_tpm;
+use std::path::Path;
 
 pub struct DeviceSecuritySection {
     pub card: AkrepCardSummary,
@@ -27,9 +29,26 @@ fn read_lockdown_state() -> String {
     }
 }
 
-pub fn collect_device_and_kernel(posture: &PostureReport) -> DeviceSecuritySection {
+fn count_sysfs_usb_devices() -> usize {
+    let Ok(entries) = fs::read_dir(Path::new("/sys/bus/usb/devices")) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            !name.contains(':') && e.path().join("idVendor").is_file()
+        })
+        .count()
+}
+
+pub fn collect_device_and_kernel(
+    posture: &PostureReport,
+    pkg_sec: &PackagesSection,
+) -> DeviceSecuritySection {
     let sb = collect_secureboot_and_tpm();
     let lockdown = read_lockdown_state();
+    let usb_count = count_sysfs_usb_devices();
     let bpf_unpriv = fs::read_to_string("/proc/sys/kernel/unprivileged_bpf_disabled")
         .ok()
         .map(|s| s.trim().to_string())
@@ -109,6 +128,14 @@ pub fn collect_device_and_kernel(posture: &PostureReport) -> DeviceSecuritySecti
         label_en: "unprivileged_bpf_disabled".to_string(),
         value: bpf_unpriv,
     });
+    metrics.push(AkrepKeyValue {
+        label_tr: "Bağlı USB Aygıtları".to_string(),
+        label_en: "Connected USB Devices".to_string(),
+        value: format!("{} aygıt (/sys/bus/usb/devices)", usb_count),
+    });
+    for m in &pkg_sec.detail.metrics {
+        metrics.push(m.clone());
+    }
     for c in sysctl_controls {
         metrics.push(AkrepKeyValue {
             label_tr: c.name.clone(),
@@ -116,6 +143,9 @@ pub fn collect_device_and_kernel(posture: &PostureReport) -> DeviceSecuritySecti
             value: c.detail.clone(),
         });
     }
+
+    status = status.combine(pkg_sec.card.status);
+    findings.extend(pkg_sec.findings.iter().cloned());
 
     let summary_tr = format!(
         "Sysctl {}/{} • {} • {}",
