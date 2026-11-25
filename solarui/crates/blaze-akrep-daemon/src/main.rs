@@ -13,7 +13,10 @@ use crate::collectors::collect_snapshot;
 use crate::dbus::{AkrepManager, AKREP_BUS_NAME, AKREP_OBJECT_PATH};
 
 fn print_help() {
-    println!("akrepd {} — Strictly read-only BlazeOS Akrep D-Bus service", AKREP_VERSION);
+    println!(
+        "akrepd {} — Strictly read-only BlazeOS Akrep D-Bus service",
+        AKREP_VERSION
+    );
     println!("Usage: akrepd [--oneshot-json | --session | --version | --help]");
 }
 
@@ -73,11 +76,17 @@ async fn main() -> Result<()> {
         .interface("org.fedoraproject.FirewallD1")?
         .build();
 
-    let mut owner_stream = MessageStream::for_match_rule(fw_owner_rule, &conn, Some(8)).await.ok();
-    let mut zone_stream = MessageStream::for_match_rule(fw_zone_rule, &conn, Some(8)).await.ok();
+    let mut owner_stream = MessageStream::for_match_rule(fw_owner_rule, &conn, Some(8))
+        .await
+        .ok();
+    let mut zone_stream = MessageStream::for_match_rule(fw_zone_rule, &conn, Some(8))
+        .await
+        .ok();
 
     let obj_server = conn.object_server();
-    let iface_ref = obj_server.interface::<_, AkrepManager>(AKREP_OBJECT_PATH).await?;
+    let iface_ref = obj_server
+        .interface::<_, AkrepManager>(AKREP_OBJECT_PATH)
+        .await?;
 
     let mut sigterm = signal(SignalKind::terminate())?;
     let mut sigint = signal(SignalKind::interrupt())?;
@@ -141,5 +150,36 @@ mod tests {
         assert_eq!(snap.sections.len(), 7);
         assert!(snap.capabilities.read_only);
         assert!(!snap.capabilities.mutators_enabled);
+
+        let selinux_sec = snap
+            .sections
+            .iter()
+            .find(|s| s.section == "selinux")
+            .expect("selinux section");
+        assert!(selinux_sec
+            .metrics
+            .iter()
+            .any(|m| m.label_en == "Policy Booleans"));
+
+        let fw_sec = snap
+            .sections
+            .iter()
+            .find(|s| s.section == "firewall")
+            .expect("firewall section");
+        assert!(fw_sec.metrics.iter().any(|m| m.label_en == "Rich Rules"));
+    }
+
+    #[test]
+    fn test_count_sysfs_booleans_readonly_helper() {
+        let dir = std::env::temp_dir().join(format!("akrep_sysfs_bools_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("virt_use_kvm"), "1   1\n").unwrap();
+        std::fs::write(dir.join("httpd_can_network_connect"), "0   0\n").unwrap();
+        std::fs::write(dir.join("container_manage_cgroup"), "1   1\n").unwrap();
+
+        let counts = crate::collectors::selinux::count_sysfs_booleans_at(&dir);
+        assert_eq!(counts, Some((2, 3)));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

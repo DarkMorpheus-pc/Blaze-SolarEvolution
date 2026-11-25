@@ -20,6 +20,7 @@ pub async fn collect_firewalld(conn: Option<&Connection>) -> FirewallSection {
     let mut active_zones_summary = String::new();
     let mut services_summary = String::new();
     let mut ports_summary = String::new();
+    let mut rich_rules_summary = String::new();
     let mut active = false;
 
     if let Some(c) = conn {
@@ -45,7 +46,10 @@ pub async fn collect_firewalld(conn: Option<&Connection>) -> FirewallSection {
                 .await
                 {
                     if let Ok(az) = zone_proxy
-                        .call::<_, _, HashMap<String, HashMap<String, Vec<String>>>>("getActiveZones", &())
+                        .call::<_, _, HashMap<String, HashMap<String, Vec<String>>>>(
+                            "getActiveZones",
+                            &(),
+                        )
                         .await
                     {
                         let mut parts = Vec::new();
@@ -67,7 +71,10 @@ pub async fn collect_firewalld(conn: Option<&Connection>) -> FirewallSection {
                         };
                     }
 
-                    if let Ok(svcs) = zone_proxy.call::<_, _, Vec<String>>("getServices", &(&dz,)).await {
+                    if let Ok(svcs) = zone_proxy
+                        .call::<_, _, Vec<String>>("getServices", &(&dz,))
+                        .await
+                    {
                         services_summary = if svcs.is_empty() {
                             "Yok".to_string()
                         } else {
@@ -89,6 +96,17 @@ pub async fn collect_firewalld(conn: Option<&Connection>) -> FirewallSection {
                                 .join(", ")
                         };
                     }
+
+                    if let Ok(rich_rules) = zone_proxy
+                        .call::<_, _, Vec<String>>("getRichRules", &(&dz,))
+                        .await
+                    {
+                        rich_rules_summary = if rich_rules.is_empty() {
+                            "0 kural".to_string()
+                        } else {
+                            format!("{} aktif kural", rich_rules.len())
+                        };
+                    }
                 }
             }
         } else {
@@ -108,11 +126,16 @@ pub async fn collect_firewalld(conn: Option<&Connection>) -> FirewallSection {
     }
 
     if !active {
-        let mut warn_msg_tr = "firewalld servisi aktif değil veya D-Bus üzerinden yanıt vermiyor.".to_string();
-        let mut warn_msg_en = "firewalld service is inactive or unreachable over system D-Bus.".to_string();
+        let mut warn_msg_tr =
+            "firewalld servisi aktif değil veya D-Bus üzerinden yanıt vermiyor.".to_string();
+        let mut warn_msg_en =
+            "firewalld service is inactive or unreachable over system D-Bus.".to_string();
         if avail == Availability::Unavailable {
-            warn_msg_tr = "Sistem D-Bus bağlantısı kurulamadığı için firewalld durumu doğrulanamadı.".to_string();
-            warn_msg_en = "Could not query firewalld state because system D-Bus was unavailable.".to_string();
+            warn_msg_tr =
+                "Sistem D-Bus bağlantısı kurulamadığı için firewalld durumu doğrulanamadı."
+                    .to_string();
+            warn_msg_en =
+                "Could not query firewalld state because system D-Bus was unavailable.".to_string();
         }
         findings.push(AkrepFinding {
             id: "firewall.inactive".to_string(),
@@ -133,27 +156,56 @@ pub async fn collect_firewalld(conn: Option<&Connection>) -> FirewallSection {
     metrics.push(AkrepKeyValue {
         label_tr: "Firewalld D-Bus Durumu".to_string(),
         label_en: "Firewalld D-Bus State".to_string(),
-        value: if active { "Aktif (org.fedoraproject.FirewallD1)".to_string() } else { "Pasif / Erişilemiyor".to_string() },
+        value: if active {
+            "Aktif (org.fedoraproject.FirewallD1)".to_string()
+        } else {
+            "Pasif / Erişilemiyor".to_string()
+        },
     });
     metrics.push(AkrepKeyValue {
         label_tr: "Varsayılan Bölge (Zone)".to_string(),
         label_en: "Default Zone".to_string(),
-        value: if default_zone.is_empty() { "Bilinmiyor".to_string() } else { default_zone.clone() },
+        value: if default_zone.is_empty() {
+            "Bilinmiyor".to_string()
+        } else {
+            default_zone.clone()
+        },
     });
     metrics.push(AkrepKeyValue {
         label_tr: "Etkin Bölgeler".to_string(),
         label_en: "Active Zones".to_string(),
-        value: if active_zones_summary.is_empty() { "—".to_string() } else { active_zones_summary.clone() },
+        value: if active_zones_summary.is_empty() {
+            "—".to_string()
+        } else {
+            active_zones_summary.clone()
+        },
     });
     metrics.push(AkrepKeyValue {
         label_tr: "İzin Verilen Servisler".to_string(),
         label_en: "Allowed Services".to_string(),
-        value: if services_summary.is_empty() { "—".to_string() } else { services_summary },
+        value: if services_summary.is_empty() {
+            "—".to_string()
+        } else {
+            services_summary
+        },
     });
     metrics.push(AkrepKeyValue {
         label_tr: "Açık Özel Portlar".to_string(),
         label_en: "Open Custom Ports".to_string(),
-        value: if ports_summary.is_empty() { "—".to_string() } else { ports_summary },
+        value: if ports_summary.is_empty() {
+            "—".to_string()
+        } else {
+            ports_summary
+        },
+    });
+    metrics.push(AkrepKeyValue {
+        label_tr: "Zengin Kurallar (Rich Rules)".to_string(),
+        label_en: "Rich Rules".to_string(),
+        value: if rich_rules_summary.is_empty() {
+            "—".to_string()
+        } else {
+            rich_rules_summary
+        },
     });
 
     let summary_tr = if active {
@@ -175,7 +227,11 @@ pub async fn collect_firewalld(conn: Option<&Connection>) -> FirewallSection {
         availability: avail,
         summary_tr: summary_tr.clone(),
         summary_en: summary_en.clone(),
-        metric: if active { default_zone } else { "OFF".to_string() },
+        metric: if active {
+            default_zone
+        } else {
+            "OFF".to_string()
+        },
     };
 
     let detail = AkrepSectionDetail {
@@ -190,5 +246,9 @@ pub async fn collect_firewalld(conn: Option<&Connection>) -> FirewallSection {
         findings: findings.clone(),
     };
 
-    FirewallSection { card, detail, findings }
+    FirewallSection {
+        card,
+        detail,
+        findings,
+    }
 }

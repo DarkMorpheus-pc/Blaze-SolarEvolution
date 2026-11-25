@@ -226,4 +226,17 @@ impl PrivilegedManager {
             .await
             .map_err(map_akrep_error_to_fdo)
     }
+
+    async fn inspect_firewall(
+        &self,
+        zone_filter: &str,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<String> {
+        let _guard = self.idle.begin_call();
+        let caller = extract_caller_bus_name(&header)?;
+        self.engine
+            .inspect_firewall(&caller, zone_filter)
+            .await
+            .map_err(map_akrep_error_to_fdo)
+    }
 }

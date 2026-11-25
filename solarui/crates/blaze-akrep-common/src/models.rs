@@ -226,17 +226,100 @@ fn validate_identifier_ascii(
     Ok(())
 }
 
-fn validate_zone_name(zone: &str) -> Result<(), AkrepError> {
+pub fn validate_zone_name(zone: &str) -> Result<(), AkrepError> {
     validate_identifier_ascii("zone", zone, 64, false)
 }
 
-fn validate_persistence(mode: RulePersistence) -> Result<(), AkrepError> {
+pub fn validate_persistence(mode: RulePersistence) -> Result<(), AkrepError> {
     if let RulePersistence::TimedRuntime { seconds } = mode {
-        if seconds == 0 || seconds > 604_800 {
+        if seconds == 0 || seconds > 86_400 {
             return Err(AkrepError::InvalidInput(
-                "TimedRuntime seconds must be within 1..=604800".to_string(),
+                "TimedRuntime seconds must be within 1..=86400".to_string(),
             ));
         }
+    }
+    Ok(())
+}
+
+pub fn validate_selinux_boolean_name(name: &str) -> Result<(), AkrepError> {
+    let lower = name.to_ascii_lowercase();
+    if lower.contains("selinux=disabled")
+        || lower == "disabled"
+        || lower.contains("audit2allow")
+        || lower.contains("setenforce")
+        || lower.contains("semodule")
+    {
+        return Err(AkrepError::ForbiddenOperation(
+            "Disabling SELinux or invoking audit2allow/semodule is forbidden".to_string(),
+        ));
+    }
+    reject_shell_metacharacters("boolean.name", name)?;
+    if name.contains("..") {
+        return Err(AkrepError::ForbiddenOperation(
+            "Field 'boolean.name' must not contain '..'".to_string(),
+        ));
+    }
+    if !(2..=96).contains(&name.len()) {
+        return Err(AkrepError::InvalidInput(
+            "SELinux boolean name length must be in 2..=96".to_string(),
+        ));
+    }
+    let bytes = name.as_bytes();
+    if !bytes[0].is_ascii_lowercase()
+        || !bytes[1..]
+            .iter()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'_')
+    {
+        return Err(AkrepError::InvalidInput(format!(
+            "Invalid SELinux boolean name '{}' (expected ^[a-z][a-z0-9_]{{1,95}}$)",
+            name
+        )));
+    }
+    Ok(())
+}
+
+pub fn validate_restorecon_path(target_path: &str) -> Result<(), AkrepError> {
+    let lower = target_path.to_ascii_lowercase();
+    if lower.contains("audit2allow")
+        || lower.contains("selinux=disabled")
+        || lower.contains("semodule")
+        || lower.contains("setenforce")
+    {
+        return Err(AkrepError::ForbiddenOperation(
+            "Forbidden SELinux directive in restorecon path".to_string(),
+        ));
+    }
+    validate_safe_absolute_path("target_path", target_path)?;
+    for virtual_fs in ["/proc", "/sys", "/dev"] {
+        if target_path == virtual_fs || target_path.starts_with(&format!("{}/", virtual_fs)) {
+            return Err(AkrepError::ForbiddenOperation(format!(
+                "restorecon on pseudo-filesystem '{}' is forbidden",
+                virtual_fs
+            )));
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_network_interface(interface: &str) -> Result<(), AkrepError> {
+    if interface.is_empty() || interface.len() > 15 {
+        return Err(AkrepError::InvalidInput(
+            "Network interface name must be 1..=15 characters".to_string(),
+        ));
+    }
+    reject_shell_metacharacters("interface", interface)?;
+    if interface.contains('/') || interface.contains("..") {
+        return Err(AkrepError::ForbiddenOperation(
+            "Invalid characters in network interface name".to_string(),
+        ));
+    }
+    if !interface
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
+    {
+        return Err(AkrepError::InvalidInput(
+            "Invalid network interface identifier (expected ^[a-zA-Z0-9._-]+$)".to_string(),
+        ));
     }
     Ok(())
 }
@@ -448,50 +531,8 @@ impl ActionRequest {
 
     pub fn validate_red_lines(&self) -> Result<(), AkrepError> {
         match self {
-            Self::SelinuxSetBoolean { name, .. } => {
-                let lower = name.to_ascii_lowercase();
-                if lower.contains("selinux=disabled")
-                    || lower == "disabled"
-                    || lower.contains("audit2allow")
-                    || lower.contains("setenforce")
-                {
-                    return Err(AkrepError::ForbiddenOperation(
-                        "Disabling SELinux or invoking audit2allow is forbidden".to_string(),
-                    ));
-                }
-                validate_identifier_ascii("boolean.name", name, 128, true)?;
-                if !name
-                    .as_bytes()
-                    .first()
-                    .map(|b| b.is_ascii_alphabetic())
-                    .unwrap_or(false)
-                {
-                    return Err(AkrepError::InvalidInput(
-                        "SELinux boolean name must start with an ASCII letter".to_string(),
-                    ));
-                }
-                Ok(())
-            }
-            Self::SelinuxRestorecon { target_path, .. } => {
-                let lower = target_path.to_ascii_lowercase();
-                if lower.contains("audit2allow") || lower.contains("selinux=disabled") {
-                    return Err(AkrepError::ForbiddenOperation(
-                        "Forbidden SELinux directive in restorecon path".to_string(),
-                    ));
-                }
-                validate_safe_absolute_path("target_path", target_path)?;
-                for virtual_fs in ["/proc", "/sys", "/dev"] {
-                    if target_path == virtual_fs
-                        || target_path.starts_with(&format!("{}/", virtual_fs))
-                    {
-                        return Err(AkrepError::ForbiddenOperation(format!(
-                            "restorecon on pseudo-filesystem '{}' is forbidden",
-                            virtual_fs
-                        )));
-                    }
-                }
-                Ok(())
-            }
+            Self::SelinuxSetBoolean { name, .. } => validate_selinux_boolean_name(name),
+            Self::SelinuxRestorecon { target_path, .. } => validate_restorecon_path(target_path),
             Self::FirewallAddPort {
                 zone,
                 port,
@@ -551,26 +592,7 @@ impl ActionRequest {
                 zone, interface, ..
             } => {
                 validate_zone_name(zone)?;
-                if interface.is_empty() || interface.len() > 15 {
-                    return Err(AkrepError::InvalidInput(
-                        "Network interface name must be 1..=15 characters".to_string(),
-                    ));
-                }
-                reject_shell_metacharacters("interface", interface)?;
-                if interface.contains('/') || interface.contains("..") {
-                    return Err(AkrepError::ForbiddenOperation(
-                        "Invalid characters in network interface name".to_string(),
-                    ));
-                }
-                if !interface
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.' | b':'))
-                {
-                    return Err(AkrepError::InvalidInput(
-                        "Invalid network interface identifier".to_string(),
-                    ));
-                }
-                Ok(())
+                validate_network_interface(interface)
             }
             Self::FlatpakSetOverride {
                 app_id,

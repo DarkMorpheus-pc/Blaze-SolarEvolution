@@ -1,8 +1,10 @@
+pub mod adapters;
 pub mod audit;
 pub mod authorization;
 pub mod dbus;
 pub mod transaction_engine;
 
+pub use adapters::*;
 pub use audit::*;
 pub use authorization::*;
 pub use dbus::*;

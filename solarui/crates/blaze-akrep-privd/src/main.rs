@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use blaze_akrep_common::{AKREP_PRIV_BUS_NAME, AKREP_PRIV_OBJECT_PATH};
 use blaze_akrep_privd::{
-    DefaultStubBackend, IdleTracker, PrivilegedManager, SystemPolkitAuthorizer, TransactionEngine,
-    DEFAULT_AKREP_STATE_DIR,
+    CompositeMutationBackend, IdleTracker, PrivilegedManager, SystemPolkitAuthorizer,
+    TransactionEngine, DEFAULT_AKREP_STATE_DIR,
 };
 use blaze_sentinel_core::AKREP_VERSION;
 use std::path::PathBuf;
@@ -99,7 +99,7 @@ async fn main() -> Result<()> {
     };
 
     let authorizer = Arc::new(SystemPolkitAuthorizer::new(conn.clone()));
-    let backend = Arc::new(DefaultStubBackend);
+    let backend = Arc::new(CompositeMutationBackend::new_system(conn.clone()));
     let engine = Arc::new(
         TransactionEngine::new(cfg.state_dir.clone(), authorizer, backend)
             .map_err(|e| anyhow::anyhow!("{}", e.to_redacted_json()))?,

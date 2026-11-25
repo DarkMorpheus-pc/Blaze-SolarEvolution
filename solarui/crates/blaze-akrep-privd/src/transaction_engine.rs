@@ -2,9 +2,10 @@ use crate::audit::AuditLogger;
 use crate::authorization::Authorizer;
 use async_trait::async_trait;
 use blaze_akrep_common::{
-    generate_uuid_v4, redact_secrets, ActionPlan, ActionRequest, AkrepError, PlanDiffItem,
-    RiskLevel, StateFingerprint, TransactionRecord, TransactionState, ALL_POLKIT_ACTIONS,
-    POLKIT_PROFILE_APPLY, POLKIT_SELINUX_DIAGNOSE,
+    generate_uuid_v4, redact_secrets, validate_zone_name, ActionPlan, ActionRequest, AkrepError,
+    FirewallStateSnapshot, PlanDiffItem, RiskLevel, SelinuxDiagnoseQuery, SelinuxDiagnoseResponse,
+    StateFingerprint, TransactionRecord, TransactionState, ALL_POLKIT_ACTIONS,
+    POLKIT_FIREWALL_MANAGE, POLKIT_PROFILE_APPLY, POLKIT_SELINUX_DIAGNOSE,
 };
 use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
@@ -58,6 +59,24 @@ pub trait MutationBackend: Send + Sync {
         record: &TransactionRecord,
         snapshot_dir: &Path,
     ) -> Result<String, AkrepError>;
+
+    async fn diagnose_selinux(
+        &self,
+        _query: &SelinuxDiagnoseQuery,
+    ) -> Result<SelinuxDiagnoseResponse, AkrepError> {
+        Err(AkrepError::BackendUnavailable(
+            "SELinux diagnosis backend is not wired on this MutationBackend".to_string(),
+        ))
+    }
+
+    async fn inspect_firewall(
+        &self,
+        _zone_filter: Option<&str>,
+    ) -> Result<FirewallStateSnapshot, AkrepError> {
+        Err(AkrepError::BackendUnavailable(
+            "Firewall inspection backend is not wired on this MutationBackend".to_string(),
+        ))
+    }
 }
 
 pub struct DefaultStubBackend;
@@ -571,6 +590,11 @@ impl TransactionEngine {
         self.prune_expired_plans();
 
         let preview = self.backend.preview(&req).await.map_err(|e| e.redacted())?;
+        if preview.pre_fingerprints.is_empty() {
+            return Err(AkrepError::Internal(
+                "MutationBackend preview returned empty pre_fingerprints".to_string(),
+            ));
+        }
         let plan = ActionPlan::new_signed(
             caller.uid,
             req,
@@ -814,6 +838,14 @@ impl TransactionEngine {
 
         match self.backend.verify(&record.request, &apply_outcome).await {
             Ok(post_fps) => {
+                if post_fps.is_empty() {
+                    let clean_err = AkrepError::VerifyFailed(
+                        "MutationBackend verify returned empty post_fingerprints".to_string(),
+                    );
+                    return Err(self
+                        .execute_automatic_rollback(&mut record, &tx_path, &snapshot_dir, clean_err)
+                        .await);
+                }
                 let done_at = Utc::now().to_rfc3339();
                 record.post_fingerprints = post_fps;
                 record.state = TransactionState::Committed;
@@ -1117,32 +1149,158 @@ impl TransactionEngine {
                 "Invalid SELinux diagnosis query payload".to_string(),
             ));
         }
-        let caller = self
+        let caller = match self
             .authorizer
             .verify_caller(caller_bus_name, POLKIT_SELINUX_DIAGNOSE, true)
             .await
-            .map_err(|e| e.redacted())?;
+        {
+            Ok(c) => c,
+            Err(err) => {
+                self.audit_logged(
+                    "selinux_diagnose_denied",
+                    None,
+                    None,
+                    None,
+                    Some(caller_bus_name),
+                    Some(POLKIT_SELINUX_DIAGNOSE),
+                    "denied",
+                    err.message(),
+                );
+                return Err(err.redacted());
+            }
+        };
 
-        let _: serde_json::Value = serde_json::from_str(query_json).map_err(|e| {
+        let lower_raw = query_json.to_ascii_lowercase();
+        for forbidden in ["audit2allow", "semodule", "setenforce", "selinux=disabled"] {
+            if lower_raw.contains(forbidden) {
+                let msg = format!(
+                    "Forbidden SELinux directive '{}' in diagnosis query",
+                    forbidden
+                );
+                self.audit_logged(
+                    "selinux_diagnose_rejected_redline",
+                    None,
+                    None,
+                    Some(caller.uid),
+                    Some(&caller.bus_name),
+                    Some(POLKIT_SELINUX_DIAGNOSE),
+                    "rejected",
+                    &msg,
+                );
+                return Err(AkrepError::ForbiddenOperation(msg));
+            }
+        }
+
+        let normalized_json = if query_json.trim().is_empty() {
+            "{}"
+        } else {
+            query_json
+        };
+        let query: SelinuxDiagnoseQuery = serde_json::from_str(normalized_json).map_err(|e| {
             AkrepError::InvalidInput(format!(
                 "Malformed SELinux diagnosis query JSON: {}",
                 redact_secrets(&e.to_string())
             ))
         })?;
 
+        if let Err(err) = query.validate_red_lines(normalized_json) {
+            self.audit_logged(
+                "selinux_diagnose_rejected_redline",
+                None,
+                None,
+                Some(caller.uid),
+                Some(&caller.bus_name),
+                Some(POLKIT_SELINUX_DIAGNOSE),
+                "rejected",
+                err.message(),
+            );
+            return Err(err.redacted());
+        }
+
+        let resp = self
+            .backend
+            .diagnose_selinux(&query)
+            .await
+            .map_err(|e| e.redacted())?;
+
         self.audit_logged(
-            "selinux_diagnose_requested",
+            "selinux_diagnose_completed",
             None,
             None,
             Some(caller.uid),
             Some(&caller.bus_name),
             Some(POLKIT_SELINUX_DIAGNOSE),
-            "unavailable",
-            "SELinux diagnosis adapter stubbed in Sprint 0",
+            "ok",
+            "SELinux diagnosis completed",
         );
 
-        Err(AkrepError::BackendUnavailable(
-            "SELinux diagnosis backend will be activated in Sprint 1".to_string(),
-        ))
+        serde_json::to_string(&resp).map_err(|e| {
+            AkrepError::Internal(format!(
+                "SELinux diagnosis response serialize failed: {}",
+                e
+            ))
+        })
+    }
+
+    pub async fn inspect_firewall(
+        &self,
+        caller_bus_name: &str,
+        zone_filter: &str,
+    ) -> Result<String, AkrepError> {
+        if zone_filter.len() > 64 || zone_filter.contains('\0') {
+            return Err(AkrepError::InvalidInput(
+                "Invalid firewall zone_filter payload".to_string(),
+            ));
+        }
+
+        let caller = match self
+            .authorizer
+            .verify_caller(caller_bus_name, POLKIT_FIREWALL_MANAGE, true)
+            .await
+        {
+            Ok(c) => c,
+            Err(err) => {
+                self.audit_logged(
+                    "firewall_inspect_denied",
+                    None,
+                    None,
+                    None,
+                    Some(caller_bus_name),
+                    Some(POLKIT_FIREWALL_MANAGE),
+                    "denied",
+                    err.message(),
+                );
+                return Err(err.redacted());
+            }
+        };
+
+        let trimmed = zone_filter.trim();
+        let filter_opt = if trimmed.is_empty() {
+            None
+        } else {
+            validate_zone_name(trimmed)?;
+            Some(trimmed)
+        };
+
+        let snapshot = self
+            .backend
+            .inspect_firewall(filter_opt)
+            .await
+            .map_err(|e| e.redacted())?;
+
+        self.audit_logged(
+            "firewall_inspect_completed",
+            None,
+            None,
+            Some(caller.uid),
+            Some(&caller.bus_name),
+            Some(POLKIT_FIREWALL_MANAGE),
+            "ok",
+            "Firewall state inspection completed",
+        );
+
+        serde_json::to_string(&snapshot).map_err(|e| {
+            AkrepError::Internal(format!("Firewall inspection serialize failed: {}", e))
+        })
     }
 }

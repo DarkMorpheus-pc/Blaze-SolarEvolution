@@ -34,7 +34,10 @@ fn parse_selinux_config_kv() -> (Option<String>, Option<String>) {
 fn check_recent_avc_readonly() -> (Availability, Option<usize>, String) {
     // Try audit.log only if directly readable by current service account
     if let Ok(raw) = fs::read_to_string("/var/log/audit/audit.log") {
-        let count = raw.lines().filter(|l| l.contains("avc:") && l.contains("denied")).count();
+        let count = raw
+            .lines()
+            .filter(|l| l.contains("avc:") && l.contains("denied"))
+            .count();
         return (
             Availability::Available,
             Some(count),
@@ -44,7 +47,17 @@ fn check_recent_avc_readonly() -> (Availability, Option<usize>, String) {
 
     // Try journalctl for setroubleshoot/audit entries if accessible (returns Err/permission error when restricted)
     if let Ok(out) = Command::new("journalctl")
-        .args(["-t", "setroubleshoot", "--since", "24 hours ago", "--no-pager", "-n", "25", "-o", "cat"])
+        .args([
+            "-t",
+            "setroubleshoot",
+            "--since",
+            "24 hours ago",
+            "--no-pager",
+            "-n",
+            "25",
+            "-o",
+            "cat",
+        ])
         .output()
     {
         if out.status.success() {
@@ -65,6 +78,29 @@ fn check_recent_avc_readonly() -> (Availability, Option<usize>, String) {
     )
 }
 
+pub fn count_sysfs_booleans_at(bool_dir: &Path) -> Option<(usize, usize)> {
+    let entries = fs::read_dir(bool_dir).ok()?;
+    let mut total = 0usize;
+    let mut enabled = 0usize;
+    for entry in entries.flatten() {
+        let Ok(raw) = fs::read_to_string(entry.path()) else {
+            continue;
+        };
+        total += 1;
+        if raw.split_whitespace().next() == Some("1") {
+            enabled += 1;
+        }
+    }
+    Some((enabled, total))
+}
+
+fn summarize_selinux_booleans_readonly() -> String {
+    match count_sysfs_booleans_at(Path::new("/sys/fs/selinux/booleans")) {
+        Some((enabled, total)) => format!("{} etkin / {} toplam", enabled, total),
+        None => "Kullanılamıyor (/sys/fs/selinux yok)".to_string(),
+    }
+}
+
 pub fn collect_selinux() -> SelinuxSection {
     let enforce_sysfs = fs::read_to_string("/sys/fs/selinux/enforce")
         .ok()
@@ -76,18 +112,35 @@ pub fn collect_selinux() -> SelinuxSection {
     let (cfg_mode, cfg_policy) = parse_selinux_config_kv();
 
     let (status, mode_tr, mode_en) = match enforce_sysfs.as_deref() {
-        Some("1") => (AkrepSeverity::Normal, "Enforcing (Zorunlu)".to_string(), "Enforcing".to_string()),
-        Some("0") => (AkrepSeverity::Warning, "Permissive (İzin Veren)".to_string(), "Permissive".to_string()),
+        Some("1") => (
+            AkrepSeverity::Normal,
+            "Enforcing (Zorunlu)".to_string(),
+            "Enforcing".to_string(),
+        ),
+        Some("0") => (
+            AkrepSeverity::Warning,
+            "Permissive (İzin Veren)".to_string(),
+            "Permissive".to_string(),
+        ),
         _ => {
             if Path::new("/sys/fs/selinux").exists() {
-                (AkrepSeverity::Unknown, "Bilinmiyor".to_string(), "Unknown".to_string())
+                (
+                    AkrepSeverity::Unknown,
+                    "Bilinmiyor".to_string(),
+                    "Unknown".to_string(),
+                )
             } else {
-                (AkrepSeverity::Critical, "Devre Dışı".to_string(), "Disabled".to_string())
+                (
+                    AkrepSeverity::Critical,
+                    "Devre Dışı".to_string(),
+                    "Disabled".to_string(),
+                )
             }
         }
     };
 
     let (avc_avail, avc_count, avc_summary) = check_recent_avc_readonly();
+    let booleans_summary = summarize_selinux_booleans_readonly();
     let policy_str = cfg_policy.unwrap_or_else(|| "targeted (varsayılan)".to_string());
     let cfg_mode_str = cfg_mode.unwrap_or_else(|| "bilinmiyor".to_string());
 
@@ -152,6 +205,11 @@ pub fn collect_selinux() -> SelinuxSection {
             value: lsm_stack,
         },
         AkrepKeyValue {
+            label_tr: "Politika Anahtarları (Booleans)".to_string(),
+            label_en: "Policy Booleans".to_string(),
+            value: booleans_summary,
+        },
+        AkrepKeyValue {
             label_tr: "Son AVC Kayıtları".to_string(),
             label_en: "Recent AVC Log".to_string(),
             value: avc_summary,
@@ -181,5 +239,9 @@ pub fn collect_selinux() -> SelinuxSection {
         findings: findings.clone(),
     };
 
-    SelinuxSection { card, detail, findings }
+    SelinuxSection {
+        card,
+        detail,
+        findings,
+    }
 }
