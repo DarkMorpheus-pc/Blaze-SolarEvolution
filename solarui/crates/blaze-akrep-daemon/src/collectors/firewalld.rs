@@ -2,7 +2,6 @@ use blaze_sentinel_core::{
     AkrepCardSummary, AkrepFinding, AkrepKeyValue, AkrepSectionDetail, AkrepSeverity, Availability,
 };
 use std::collections::HashMap;
-use std::path::Path;
 use zbus::Connection;
 
 pub struct FirewallSection {
@@ -145,13 +144,6 @@ pub async fn collect_firewalld(conn: Option<&Connection>) -> FirewallSection {
     } else {
         avail = Availability::Unavailable;
         status = AkrepSeverity::Unknown;
-    }
-
-    if !active && Path::new("/run/firewalld").exists() {
-        active = true;
-        status = AkrepSeverity::Normal;
-        avail = Availability::Available;
-        default_zone = "firewalld çalışıyor (/run/firewalld)".to_string();
     }
 
     if !active {

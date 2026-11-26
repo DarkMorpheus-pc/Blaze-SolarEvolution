@@ -304,12 +304,11 @@ pub fn check_mac_control() -> SecurityControl {
 }
 
 pub fn check_firewall_control() -> SecurityControl {
-    let firewalld_active = Path::new("/run/firewalld").exists()
-        || Command::new("systemctl")
-            .args(["is-active", "--quiet", "firewalld.service"])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
+    let firewalld_active = Command::new("systemctl")
+        .args(["is-active", "--quiet", "firewalld.service"])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
     let nftables_active = Command::new("systemctl")
         .args(["is-active", "--quiet", "nftables.service"])
         .status()

@@ -1568,7 +1568,8 @@ mod tests {
             "/home/alice/./android",
             "/mnt",
             "/run/media/alice",
-            "/root/android",
+            "/root",
+            "/var/tmp/android",
             "relative/android",
             "/home/alice/android;id",
         ] {

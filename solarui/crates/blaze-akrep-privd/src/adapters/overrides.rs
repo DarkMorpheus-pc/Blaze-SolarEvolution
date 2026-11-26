@@ -32,6 +32,7 @@ pub const NOFILE_PAM_DROPIN_PATH: &str = "/etc/security/limits.d/90-akrep-dev-no
 pub const NOFILE_SYSTEMD_DROPIN_PATH: &str = "/etc/systemd/user.conf.d/90-akrep-nofile.conf";
 pub const SYSTEMD_FIREWALLD_UNIT: &str = "firewalld.service";
 pub const SYSTEMD_OOMD_UNIT: &str = "systemd-oomd.service";
+const SYSTEMD_OOMD_SOCKET: &str = "systemd-oomd.socket";
 pub const AKREP_PRIVD_BIN_PATH: &str = "/usr/bin/akrep-privd";
 pub const CHCON_TIMEOUT_SECS: u64 = 60;
 const SYSTEMCTL_TIMEOUT_SECS: u64 = 30;
@@ -772,6 +773,10 @@ impl OverrideOps for LinuxOverrideOps {
 
     fn start_unit(&self, unit: &str) -> Result<(), AkrepError> {
         validate_managed_systemd_unit(unit)?;
+        if unit == SYSTEMD_OOMD_UNIT {
+            // Ensure the companion varlink socket is running before starting systemd-oomd.service.
+            let _ = self.run_systemctl(&["start", SYSTEMD_OOMD_SOCKET], "systemctl start oomd socket");
+        }
         let out = self.run_systemctl(&["start", unit], "systemctl start")?;
         if !out.status.success() {
             return Err(AkrepError::ApplyFailed(format!(
@@ -785,6 +790,10 @@ impl OverrideOps for LinuxOverrideOps {
 
     fn stop_unit(&self, unit: &str) -> Result<(), AkrepError> {
         validate_managed_systemd_unit(unit)?;
+        if unit == SYSTEMD_OOMD_UNIT {
+            // Stop the varlink socket first so systemd does not immediately re-activate systemd-oomd.service.
+            let _ = self.run_systemctl(&["stop", SYSTEMD_OOMD_SOCKET], "systemctl stop oomd socket");
+        }
         let out = self.run_systemctl(&["stop", unit], "systemctl stop")?;
         if !out.status.success() {
             return Err(AkrepError::ApplyFailed(format!(
