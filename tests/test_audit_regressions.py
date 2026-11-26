@@ -674,7 +674,7 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
             'rewrite_niri_kdl_output_mode',
             'ColorDialogButton',
             '"#e81123"',
-            'Yenileme Hızı (Hz):',
+            'Yenileme hızı (Hz)',
         ):
             self.assertIn(sym, settings_rs)
 
@@ -1064,9 +1064,9 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
         gz_gui = (ROOT / 'solarui/crates/solar-shell/src/gamezone_gui.rs').read_text(encoding='utf-8')
         self.assertIn('pub fn is_adult_content_allowed() -> bool', gz_gui)
         self.assertIn('pub fn set_adult_content_allowed(allow: bool)', gz_gui)
-        self.assertIn('18 Yaşından Büyüküm: KAPALI (Güvenli)', gz_gui)
-        self.assertIn('18 Yaşından Büyüküm: AÇIK (+18 Göster)', gz_gui)
-        self.assertIn('Masaüstüne Dön', gz_gui)
+        self.assertIn('18 yaşından büyüğüm: kapalı', gz_gui)
+        self.assertIn('18 yaşından büyüğüm: açık (+18 göster)', gz_gui)
+        self.assertIn('Masaüstüne dön', gz_gui)
         self.assertIn('REBUILDING_FOR_LANG', gz_gui)
         self.assertIn('focus_external_window_over_gamezone', gz_gui)
 

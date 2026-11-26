@@ -1128,7 +1128,7 @@ impl LivePreviewController {
                 .unwrap_or(false);
 
         if let Some(url) = stream_url.filter(|u| !u.is_empty() && has_ffmpeg) {
-            status_badge.set_text("▶ CANLI FRAGMAN");
+            status_badge.set_text("Canlı fragman");
             let (frame_tx, frame_rx) = async_channel::bounded::<Vec<u8>>(2);
             let gen_ui = self.generation.clone();
             let pic_ui = target_pic.clone();
@@ -1232,7 +1232,7 @@ impl LivePreviewController {
                 }
             });
         } else if screenshots.len() > 1 {
-            status_badge.set_text("◉ MAĞAZA ÖN İZLEME");
+            status_badge.set_text("Mağaza ön izlemesi");
             let gen_ss = self.generation.clone();
             let pic_ss = target_pic.clone();
             let mut idx = 0usize;
@@ -1245,7 +1245,7 @@ impl LivePreviewController {
                 glib::ControlFlow::Continue
             });
         } else {
-            status_badge.set_text("◉ RESMİ ÖN İZLEME");
+            status_badge.set_text("Resmi ön izleme");
         }
     }
 }
