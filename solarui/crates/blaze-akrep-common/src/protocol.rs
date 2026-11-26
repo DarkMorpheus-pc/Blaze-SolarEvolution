@@ -9,8 +9,9 @@ pub const POLKIT_FLATPAK_SYSTEM_MANAGE: &str = "tr.com.blazeos.Akrep1.flatpak.sy
 pub const POLKIT_QUARANTINE_MANAGE: &str = "tr.com.blazeos.Akrep1.quarantine.manage";
 pub const POLKIT_PROFILE_APPLY: &str = "tr.com.blazeos.Akrep1.profile.apply";
 pub const POLKIT_PACKAGES_INSTALL: &str = "tr.com.blazeos.Akrep1.packages.install-optional";
+pub const POLKIT_SYSTEM_COMPAT_MANAGE: &str = "tr.com.blazeos.Akrep1.system.compat-manage";
 
-pub const ALL_POLKIT_ACTIONS: [&str; 7] = [
+pub const ALL_POLKIT_ACTIONS: [&str; 8] = [
     POLKIT_SELINUX_DIAGNOSE,
     POLKIT_SELINUX_MANAGE,
     POLKIT_FIREWALL_MANAGE,
@@ -18,6 +19,7 @@ pub const ALL_POLKIT_ACTIONS: [&str; 7] = [
     POLKIT_QUARANTINE_MANAGE,
     POLKIT_PROFILE_APPLY,
     POLKIT_PACKAGES_INSTALL,
+    POLKIT_SYSTEM_COMPAT_MANAGE,
 ];
 
 pub const DEFAULT_PLAN_TTL_SECS: i64 = 300;

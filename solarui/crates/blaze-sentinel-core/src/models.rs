@@ -141,6 +141,42 @@ pub struct AkrepCapabilities {
     pub future_polkit_actions: Vec<String>,
 }
 
+/// Active temporary or manual override entry surfaced read-only in `AkrepSnapshot`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActiveOverrideEntry {
+    pub subsystem: String,
+    pub duration_kind: String,
+    pub minutes: Option<u32>,
+    pub started_at: String,
+    pub expires_at: Option<String>,
+    pub remaining_secs: Option<i64>,
+    pub boot_id: String,
+}
+
+/// Read-only developer and build compatibility status (`systemd-oomd`, `nofile`, Android packages).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SystemCompatStatus {
+    pub oomd_active: bool,
+    pub oomd_enabled: bool,
+    pub nofile_enabled: bool,
+    pub nofile_soft: u32,
+    pub nofile_hard: u32,
+    pub android_udev_installed: bool,
+    pub ncurses_compat_installed: bool,
+}
+
+/// Read-only Secure Boot, MOK enrollment, and NVIDIA kernel module compatibility summary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DriverMokSummary {
+    pub secure_boot_enabled: Option<bool>,
+    pub mok_enrolled_count: Option<usize>,
+    pub nvidia_module_loaded: bool,
+    pub akmod_nvidia_installed: bool,
+    pub unsigned_risk: bool,
+    pub guidance_tr: String,
+    pub guidance_en: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AkrepSnapshot {
     pub schema_version: u32,
@@ -165,4 +201,91 @@ pub struct AkrepSnapshot {
     pub findings: Vec<AkrepFinding>,
     pub sections: Vec<AkrepSectionDetail>,
     pub capabilities: AkrepCapabilities,
+    #[serde(default)]
+    pub active_overrides: Vec<ActiveOverrideEntry>,
+    #[serde(default)]
+    pub system_compat: Option<SystemCompatStatus>,
+    #[serde(default)]
+    pub driver_mok: Option<DriverMokSummary>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_akrep_snapshot_deserializes_legacy_json_without_new_fields() {
+        let legacy_json = r#"{
+            "schema_version": 2,
+            "version": "1.0.0",
+            "sentinel_version": "0.1.0",
+            "read_only": true,
+            "mutators_enabled": true,
+            "active_profile_id": "balanced",
+            "active_profile_tr": "Dengeli",
+            "active_profile_en": "Balanced",
+            "generated_at": "2026-11-26T12:00:00Z",
+            "overall_status": "protected",
+            "headline_tr": "Korunuyor",
+            "headline_en": "Protected",
+            "posture": {
+                "passed": 7,
+                "total": 7,
+                "verified": true,
+                "integrity_ok": true,
+                "controls": [],
+                "checks": []
+            },
+            "cards": [],
+            "findings": [],
+            "sections": [],
+            "capabilities": {
+                "version": "1.0.0",
+                "sentinel_version": "0.1.0",
+                "schema_version": 2,
+                "read_only": true,
+                "mutators_enabled": true,
+                "sections": [],
+                "future_polkit_actions": []
+            }
+        }"#;
+
+        let snap: AkrepSnapshot =
+            serde_json::from_str(legacy_json).expect("legacy schema v2 JSON must deserialize");
+        assert_eq!(snap.schema_version, 2);
+        assert!(snap.active_overrides.is_empty());
+        assert!(snap.system_compat.is_none());
+        assert!(snap.driver_mok.is_none());
+
+        let override_entry = ActiveOverrideEntry {
+            subsystem: "selinux".to_string(),
+            duration_kind: "timed".to_string(),
+            minutes: Some(15),
+            started_at: "2026-11-26T12:00:00Z".to_string(),
+            expires_at: Some("2026-11-26T12:15:00Z".to_string()),
+            remaining_secs: Some(900),
+            boot_id: "boot-123".to_string(),
+        };
+        let compat = SystemCompatStatus {
+            oomd_active: true,
+            oomd_enabled: true,
+            nofile_enabled: true,
+            nofile_soft: 65536,
+            nofile_hard: 524288,
+            android_udev_installed: false,
+            ncurses_compat_installed: true,
+        };
+        let mok = DriverMokSummary {
+            secure_boot_enabled: Some(true),
+            mok_enrolled_count: Some(1),
+            nvidia_module_loaded: false,
+            akmod_nvidia_installed: false,
+            unsigned_risk: false,
+            guidance_tr: "Hazir".to_string(),
+            guidance_en: "Ready".to_string(),
+        };
+        assert_eq!(override_entry.minutes, Some(15));
+        assert_eq!(compat.nofile_hard, 524288);
+        assert_eq!(mok.mok_enrolled_count, Some(1));
+    }
 }

@@ -268,5 +268,8 @@ pub async fn collect_snapshot(dbus_conn: Option<&Connection>) -> AkrepSnapshot {
         findings: all_findings,
         sections,
         capabilities,
+        active_overrides: Vec::new(),
+        system_compat: None,
+        driver_mok: None,
     }
 }

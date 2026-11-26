@@ -3,6 +3,7 @@ use crate::ini_override::resolve_override_spec;
 use crate::protocol::{
     DEFAULT_PLAN_TTL_SECS, POLKIT_FIREWALL_MANAGE, POLKIT_FLATPAK_SYSTEM_MANAGE,
     POLKIT_PACKAGES_INSTALL, POLKIT_PROFILE_APPLY, POLKIT_QUARANTINE_MANAGE, POLKIT_SELINUX_MANAGE,
+    POLKIT_SYSTEM_COMPAT_MANAGE,
 };
 use crate::rich_rule::{parse_and_validate_cidr, validate_port_spec, validate_service_name};
 use blaze_sentinel_core::sha256_hex;
@@ -50,6 +51,71 @@ pub enum RiskLevel {
     Medium,
     High,
     Critical,
+}
+
+/// Protection subsystem supporting timed or manual overrides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OverrideSubsystem {
+    Selinux,
+    Firewalld,
+    Oomd,
+}
+
+impl OverrideSubsystem {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Selinux => "selinux",
+            Self::Firewalld => "firewalld",
+            Self::Oomd => "oomd",
+        }
+    }
+
+    pub fn from_str_id(s: &str) -> Option<Self> {
+        match s {
+            "selinux" => Some(Self::Selinux),
+            "firewalld" => Some(Self::Firewalld),
+            "oomd" => Some(Self::Oomd),
+            _ => None,
+        }
+    }
+}
+
+/// Duration policy for temporarily or manually relaxing a protection subsystem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum OverrideDuration {
+    /// Automatically revert after `minutes` via transient systemd timer (validated: 1..=1440).
+    Timed { minutes: u32 },
+    /// Runtime-only; cleared automatically on next reboot (verified via kernel boot_id).
+    UntilReboot,
+    /// Persistent across reboots until the user explicitly re-enables protection.
+    UntilChanged,
+}
+
+/// Allowed target SELinux modes (`disabled` is intentionally absent).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SelinuxDesiredMode {
+    Enforcing,
+    Permissive,
+}
+
+/// Fixed allowlisted compatibility package groups for Android/ROM workflows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompatPackageGroup {
+    AndroidUdevRules,
+    AndroidLegacyLibs,
+}
+
+impl CompatPackageGroup {
+    pub fn rpm_packages(&self) -> &'static [&'static str] {
+        match self {
+            Self::AndroidUdevRules => &["android-udev-rules"],
+            Self::AndroidLegacyLibs => &["ncurses-compat-libs"],
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,6 +198,30 @@ pub enum ActionRequest {
         profile_id: String,
     },
     InstallOptionalScanner,
+    SelinuxSetMode {
+        mode: SelinuxDesiredMode,
+        duration: OverrideDuration,
+    },
+    FirewallSetState {
+        enabled: bool,
+        duration: OverrideDuration,
+    },
+    OomdSetState {
+        enabled: bool,
+        duration: OverrideDuration,
+    },
+    DevLimitsSetNofile {
+        enabled: bool,
+        soft_limit: u32,
+        hard_limit: u32,
+    },
+    SelinuxLabelContainerDir {
+        target_path: String,
+        recursive: bool,
+    },
+    InstallCompatibilityPackage {
+        package_group: CompatPackageGroup,
+    },
     #[cfg(any(test, feature = "test-support"))]
     NoopTestAction {
         key: String,
@@ -594,23 +684,112 @@ pub fn validate_flatpak_override_changes(
     Ok(())
 }
 
+/// Validates that timed override durations stay within 1..=1440 minutes.
+pub fn validate_override_duration(duration: OverrideDuration) -> Result<(), AkrepError> {
+    if let OverrideDuration::Timed { minutes } = duration {
+        if minutes == 0 || minutes > 1_440 {
+            return Err(AkrepError::InvalidInput(
+                "Timed override duration minutes must be within 1..=1440".to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Validates developer `nofile` limits (`1024 <= soft_limit <= hard_limit <= 1_048_576`).
+pub fn validate_nofile_limits(soft_limit: u32, hard_limit: u32) -> Result<(), AkrepError> {
+    if soft_limit < 1_024 {
+        return Err(AkrepError::InvalidInput(
+            "nofile soft_limit must be at least 1024".to_string(),
+        ));
+    }
+    if hard_limit > 1_048_576 {
+        return Err(AkrepError::InvalidInput(
+            "nofile hard_limit must not exceed 1048576".to_string(),
+        ));
+    }
+    if soft_limit > hard_limit {
+        return Err(AkrepError::InvalidInput(
+            "nofile soft_limit must not exceed hard_limit".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Validates and normalizes a container/ROM workspace directory path to user-owned subfolders.
+pub fn validate_container_dir_path(path: &str) -> Result<String, AkrepError> {
+    if path.is_empty() || path.len() > 4_096 {
+        return Err(AkrepError::InvalidInput(
+            "Container directory path length must be in 1..=4096".to_string(),
+        ));
+    }
+    if path.trim() != path {
+        return Err(AkrepError::InvalidInput(
+            "Container directory path must not contain leading or trailing whitespace"
+                .to_string(),
+        ));
+    }
+    let lower = path.to_ascii_lowercase();
+    if lower.contains("audit2allow")
+        || lower.contains("selinux=disabled")
+        || lower.contains("semodule")
+        || lower.contains("setenforce")
+    {
+        return Err(AkrepError::ForbiddenOperation(
+            "Forbidden SELinux directive in container directory path".to_string(),
+        ));
+    }
+    validate_safe_absolute_path("target_path", path)?;
+    if path.split('/').any(|seg| seg == "." || seg == "..") {
+        return Err(AkrepError::ForbiddenOperation(
+            "Path traversal ('.' or '..') is forbidden in container directory path".to_string(),
+        ));
+    }
+    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    if segments.iter().any(|s| s.trim().is_empty()) {
+        return Err(AkrepError::InvalidInput(
+            "Container directory path contains whitespace-only path segment".to_string(),
+        ));
+    }
+    let allowed = match segments.as_slice() {
+        ["home", user, _, ..] if !user.is_empty() => true,
+        ["mnt", _, ..] => true,
+        ["run", "media", user, _, ..] if !user.is_empty() => true,
+        _ => false,
+    };
+    if !allowed {
+        return Err(AkrepError::ForbiddenOperation(format!(
+            "Container directory '{}' must be a subfolder under /home/<user>/..., /mnt/..., or /run/media/<user>/...",
+            path
+        )));
+    }
+    Ok(format!("/{}", segments.join("/")))
+}
+
 impl ActionRequest {
     pub fn required_polkit_action(&self) -> &'static str {
         match self {
-            Self::SelinuxSetBoolean { .. } | Self::SelinuxRestorecon { .. } => {
-                POLKIT_SELINUX_MANAGE
-            }
+            Self::SelinuxSetBoolean { .. }
+            | Self::SelinuxRestorecon { .. }
+            | Self::SelinuxSetMode { .. }
+            | Self::SelinuxLabelContainerDir { .. } => POLKIT_SELINUX_MANAGE,
             Self::FirewallAddPort { .. }
             | Self::FirewallRemovePort { .. }
             | Self::FirewallAddService { .. }
             | Self::FirewallRemoveService { .. }
-            | Self::FirewallBindInterface { .. } => POLKIT_FIREWALL_MANAGE,
+            | Self::FirewallBindInterface { .. }
+            | Self::FirewallSetState { .. } => POLKIT_FIREWALL_MANAGE,
+            Self::OomdSetState { .. } | Self::DevLimitsSetNofile { .. } => {
+                POLKIT_SYSTEM_COMPAT_MANAGE
+            }
             Self::FlatpakSetOverride { .. } => POLKIT_FLATPAK_SYSTEM_MANAGE,
             Self::QuarantineFile { .. }
             | Self::RestoreQuarantine { .. }
             | Self::DeleteQuarantine { .. } => POLKIT_QUARANTINE_MANAGE,
             Self::ApplyProfile { .. } => POLKIT_PROFILE_APPLY,
-            Self::InstallOptionalScanner => POLKIT_PACKAGES_INSTALL,
+            Self::InstallOptionalScanner | Self::InstallCompatibilityPackage { .. } => {
+                POLKIT_PACKAGES_INSTALL
+            }
             #[cfg(any(test, feature = "test-support"))]
             Self::NoopTestAction { .. } => POLKIT_PROFILE_APPLY,
         }
@@ -626,6 +805,12 @@ impl ActionRequest {
                     RiskLevel::Low
                 }
             }
+            Self::SelinuxSetMode { mode, duration } => match (mode, duration) {
+                (SelinuxDesiredMode::Enforcing, _) => RiskLevel::Low,
+                (SelinuxDesiredMode::Permissive, OverrideDuration::UntilChanged) => RiskLevel::High,
+                (SelinuxDesiredMode::Permissive, _) => RiskLevel::Medium,
+            },
+            Self::SelinuxLabelContainerDir { .. } => RiskLevel::Medium,
             Self::FirewallAddPort {
                 mode, source_cidr, ..
             }
@@ -639,6 +824,23 @@ impl ActionRequest {
             Self::FirewallRemovePort { .. }
             | Self::FirewallRemoveService { .. }
             | Self::FirewallBindInterface { .. } => RiskLevel::Medium,
+            Self::FirewallSetState { enabled, duration } => {
+                if *enabled {
+                    RiskLevel::Low
+                } else if matches!(duration, OverrideDuration::UntilChanged) {
+                    RiskLevel::High
+                } else {
+                    RiskLevel::Medium
+                }
+            }
+            Self::OomdSetState { enabled, .. } => {
+                if *enabled {
+                    RiskLevel::Low
+                } else {
+                    RiskLevel::Medium
+                }
+            }
+            Self::DevLimitsSetNofile { .. } => RiskLevel::Low,
             Self::FlatpakSetOverride { scope, .. } => match scope {
                 FlatpakScope::System => RiskLevel::Medium,
                 FlatpakScope::User => RiskLevel::Low,
@@ -647,6 +849,7 @@ impl ActionRequest {
             Self::DeleteQuarantine { .. } => RiskLevel::High,
             Self::ApplyProfile { .. } => RiskLevel::Medium,
             Self::InstallOptionalScanner => RiskLevel::Medium,
+            Self::InstallCompatibilityPackage { .. } => RiskLevel::Low,
             #[cfg(any(test, feature = "test-support"))]
             Self::NoopTestAction { .. } => RiskLevel::Low,
         }
@@ -796,6 +999,26 @@ impl ActionRequest {
                 validate_identifier_ascii("profile_id", profile_id, 64, false)
             }
             Self::InstallOptionalScanner => Ok(()),
+            Self::SelinuxSetMode { duration, .. }
+            | Self::FirewallSetState { duration, .. }
+            | Self::OomdSetState { duration, .. } => validate_override_duration(*duration),
+            Self::DevLimitsSetNofile {
+                soft_limit,
+                hard_limit,
+                ..
+            } => validate_nofile_limits(*soft_limit, *hard_limit),
+            Self::SelinuxLabelContainerDir { target_path, .. } => {
+                validate_container_dir_path(target_path).map(|_| ())
+            }
+            Self::InstallCompatibilityPackage { package_group } => {
+                if package_group.rpm_packages().is_empty() {
+                    Err(AkrepError::InvalidInput(
+                        "CompatPackageGroup has no RPM packages".to_string(),
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
             #[cfg(any(test, feature = "test-support"))]
             Self::NoopTestAction {
                 key,
@@ -1106,5 +1329,267 @@ mod tests {
             removals: vec![("Context.filesystems".to_string(), "host".to_string())],
         };
         assert!(valid_tightening.validate_red_lines().is_ok());
+    }
+
+    #[test]
+    fn test_new_flexible_action_requests_validation_and_polkit() {
+        assert_eq!(OverrideSubsystem::Selinux.as_str(), "selinux");
+        assert_eq!(OverrideSubsystem::Firewalld.as_str(), "firewalld");
+        assert_eq!(OverrideSubsystem::Oomd.as_str(), "oomd");
+        assert_eq!(
+            OverrideSubsystem::from_str_id("selinux"),
+            Some(OverrideSubsystem::Selinux)
+        );
+        assert_eq!(
+            OverrideSubsystem::from_str_id("firewalld"),
+            Some(OverrideSubsystem::Firewalld)
+        );
+        assert_eq!(
+            OverrideSubsystem::from_str_id("oomd"),
+            Some(OverrideSubsystem::Oomd)
+        );
+        assert_eq!(OverrideSubsystem::from_str_id("unknown"), None);
+
+        assert_eq!(
+            CompatPackageGroup::AndroidUdevRules.rpm_packages(),
+            &["android-udev-rules"]
+        );
+        assert_eq!(
+            CompatPackageGroup::AndroidLegacyLibs.rpm_packages(),
+            &["ncurses-compat-libs"]
+        );
+
+        assert!(crate::protocol::ALL_POLKIT_ACTIONS.contains(&POLKIT_SYSTEM_COMPAT_MANAGE));
+
+        let selinux_enforce = ActionRequest::SelinuxSetMode {
+            mode: SelinuxDesiredMode::Enforcing,
+            duration: OverrideDuration::UntilChanged,
+        };
+        assert!(selinux_enforce.validate_red_lines().is_ok());
+        assert_eq!(
+            selinux_enforce.required_polkit_action(),
+            "tr.com.blazeos.Akrep1.selinux.manage"
+        );
+        assert_eq!(selinux_enforce.default_risk_level(), RiskLevel::Low);
+
+        let selinux_timed = ActionRequest::SelinuxSetMode {
+            mode: SelinuxDesiredMode::Permissive,
+            duration: OverrideDuration::Timed { minutes: 15 },
+        };
+        assert!(selinux_timed.validate_red_lines().is_ok());
+        assert_eq!(
+            selinux_timed.required_polkit_action(),
+            "tr.com.blazeos.Akrep1.selinux.manage"
+        );
+        assert_eq!(selinux_timed.default_risk_level(), RiskLevel::Medium);
+
+        let selinux_until_changed = ActionRequest::SelinuxSetMode {
+            mode: SelinuxDesiredMode::Permissive,
+            duration: OverrideDuration::UntilChanged,
+        };
+        assert!(selinux_until_changed.validate_red_lines().is_ok());
+        assert_eq!(
+            selinux_until_changed.required_polkit_action(),
+            "tr.com.blazeos.Akrep1.selinux.manage"
+        );
+        assert_eq!(selinux_until_changed.default_risk_level(), RiskLevel::High);
+
+        let fw_enable = ActionRequest::FirewallSetState {
+            enabled: true,
+            duration: OverrideDuration::UntilChanged,
+        };
+        assert!(fw_enable.validate_red_lines().is_ok());
+        assert_eq!(
+            fw_enable.required_polkit_action(),
+            "tr.com.blazeos.Akrep1.firewall.manage"
+        );
+        assert_eq!(fw_enable.default_risk_level(), RiskLevel::Low);
+
+        let fw_timed = ActionRequest::FirewallSetState {
+            enabled: false,
+            duration: OverrideDuration::Timed { minutes: 60 },
+        };
+        assert!(fw_timed.validate_red_lines().is_ok());
+        assert_eq!(
+            fw_timed.required_polkit_action(),
+            "tr.com.blazeos.Akrep1.firewall.manage"
+        );
+        assert_eq!(fw_timed.default_risk_level(), RiskLevel::Medium);
+
+        let fw_until_changed = ActionRequest::FirewallSetState {
+            enabled: false,
+            duration: OverrideDuration::UntilChanged,
+        };
+        assert!(fw_until_changed.validate_red_lines().is_ok());
+        assert_eq!(
+            fw_until_changed.required_polkit_action(),
+            "tr.com.blazeos.Akrep1.firewall.manage"
+        );
+        assert_eq!(fw_until_changed.default_risk_level(), RiskLevel::High);
+
+        let oomd_enable = ActionRequest::OomdSetState {
+            enabled: true,
+            duration: OverrideDuration::UntilChanged,
+        };
+        assert!(oomd_enable.validate_red_lines().is_ok());
+        assert_eq!(
+            oomd_enable.required_polkit_action(),
+            "tr.com.blazeos.Akrep1.system.compat-manage"
+        );
+        assert_eq!(oomd_enable.default_risk_level(), RiskLevel::Low);
+
+        let oomd_pause = ActionRequest::OomdSetState {
+            enabled: false,
+            duration: OverrideDuration::UntilReboot,
+        };
+        assert!(oomd_pause.validate_red_lines().is_ok());
+        assert_eq!(
+            oomd_pause.required_polkit_action(),
+            "tr.com.blazeos.Akrep1.system.compat-manage"
+        );
+        assert_eq!(oomd_pause.default_risk_level(), RiskLevel::Medium);
+
+        let nofile = ActionRequest::DevLimitsSetNofile {
+            enabled: true,
+            soft_limit: 65536,
+            hard_limit: 524288,
+        };
+        assert!(nofile.validate_red_lines().is_ok());
+        assert_eq!(
+            nofile.required_polkit_action(),
+            "tr.com.blazeos.Akrep1.system.compat-manage"
+        );
+        assert_eq!(nofile.default_risk_level(), RiskLevel::Low);
+
+        let container_dir = ActionRequest::SelinuxLabelContainerDir {
+            target_path: "/home/alice/android".to_string(),
+            recursive: true,
+        };
+        assert!(container_dir.validate_red_lines().is_ok());
+        assert_eq!(
+            container_dir.required_polkit_action(),
+            "tr.com.blazeos.Akrep1.selinux.manage"
+        );
+        assert_eq!(container_dir.default_risk_level(), RiskLevel::Medium);
+        assert_eq!(
+            validate_container_dir_path("/mnt/aosp/").unwrap(),
+            "/mnt/aosp"
+        );
+        assert_eq!(
+            validate_container_dir_path("/run/media/alice/ssd").unwrap(),
+            "/run/media/alice/ssd"
+        );
+
+        let pkg_udev = ActionRequest::InstallCompatibilityPackage {
+            package_group: CompatPackageGroup::AndroidUdevRules,
+        };
+        assert!(pkg_udev.validate_red_lines().is_ok());
+        assert_eq!(
+            pkg_udev.required_polkit_action(),
+            "tr.com.blazeos.Akrep1.packages.install-optional"
+        );
+        assert_eq!(pkg_udev.default_risk_level(), RiskLevel::Low);
+    }
+
+    #[test]
+    fn test_flexible_action_red_lines_rejected() {
+        for bad_minutes in [0u32, 1441u32] {
+            let sel_bad = ActionRequest::SelinuxSetMode {
+                mode: SelinuxDesiredMode::Permissive,
+                duration: OverrideDuration::Timed {
+                    minutes: bad_minutes,
+                },
+            };
+            assert!(matches!(
+                sel_bad.validate_red_lines(),
+                Err(AkrepError::InvalidInput(_))
+            ));
+
+            let fw_bad = ActionRequest::FirewallSetState {
+                enabled: false,
+                duration: OverrideDuration::Timed {
+                    minutes: bad_minutes,
+                },
+            };
+            assert!(matches!(
+                fw_bad.validate_red_lines(),
+                Err(AkrepError::InvalidInput(_))
+            ));
+
+            let oomd_bad = ActionRequest::OomdSetState {
+                enabled: false,
+                duration: OverrideDuration::Timed {
+                    minutes: bad_minutes,
+                },
+            };
+            assert!(matches!(
+                oomd_bad.validate_red_lines(),
+                Err(AkrepError::InvalidInput(_))
+            ));
+        }
+
+        let low_soft = ActionRequest::DevLimitsSetNofile {
+            enabled: true,
+            soft_limit: 500,
+            hard_limit: 65536,
+        };
+        assert!(matches!(
+            low_soft.validate_red_lines(),
+            Err(AkrepError::InvalidInput(_))
+        ));
+
+        let soft_gt_hard = ActionRequest::DevLimitsSetNofile {
+            enabled: true,
+            soft_limit: 131_072,
+            hard_limit: 65536,
+        };
+        assert!(matches!(
+            soft_gt_hard.validate_red_lines(),
+            Err(AkrepError::InvalidInput(_))
+        ));
+
+        let hard_too_high = ActionRequest::DevLimitsSetNofile {
+            enabled: true,
+            soft_limit: 65536,
+            hard_limit: 1_048_577,
+        };
+        assert!(matches!(
+            hard_too_high.validate_red_lines(),
+            Err(AkrepError::InvalidInput(_))
+        ));
+
+        for bad_dir in [
+            "/",
+            "/home",
+            "/home/alice",
+            "/home/alice/",
+            "/etc/foo",
+            "/home/alice/../etc/shadow",
+            "/home/alice/./android",
+            "/mnt",
+            "/run/media/alice",
+            "/root/android",
+            "relative/android",
+            "/home/alice/android;id",
+        ] {
+            let req = ActionRequest::SelinuxLabelContainerDir {
+                target_path: bad_dir.to_string(),
+                recursive: true,
+            };
+            let res = req.validate_red_lines();
+            assert!(
+                matches!(
+                    res,
+                    Err(AkrepError::InvalidInput(_)) | Err(AkrepError::ForbiddenOperation(_))
+                ),
+                "Expected '{}' to be rejected with InvalidInput or ForbiddenOperation, got {:?}",
+                bad_dir,
+                res
+            );
+        }
+
+        // SELINUX=disabled cannot even be deserialized into SelinuxDesiredMode
+        let disabled_mode_json = r#"{"kind":"selinux_set_mode","mode":"disabled","duration":{"kind":"until_changed"}}"#;
+        assert!(serde_json::from_str::<ActionRequest>(disabled_mode_json).is_err());
     }
 }
