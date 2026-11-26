@@ -560,15 +560,25 @@ pub fn build_container_chcon_args(recursive: bool, canonical_dir: &Path) -> Vec<
 /// Fedora `policycoreutils` `restorecon` treats `-h` as usage help (and always traverses via
 /// `FTW_PHYS` without dereferencing symlinks), while `-F` is required to reset `container_file_t`
 /// because it is listed in `/etc/selinux/targeted/contexts/customizable_types`.
-pub fn build_container_restorecon_args(recursive: bool, canonical_dir: &Path) -> Vec<OsString> {
+pub fn build_container_restorecon_args_with_xdev(
+    recursive: bool,
+    no_xdev: bool,
+    canonical_dir: &Path,
+) -> Vec<OsString> {
     let mut args = vec![OsString::from("-F")];
     if recursive {
         args.push(OsString::from("-R"));
-        args.push(OsString::from("-x"));
+        if no_xdev {
+            args.push(OsString::from("-x"));
+        }
     }
     args.push(OsString::from("--"));
     args.push(canonical_dir.as_os_str().to_os_string());
     args
+}
+
+pub fn build_container_restorecon_args(recursive: bool, canonical_dir: &Path) -> Vec<OsString> {
+    build_container_restorecon_args_with_xdev(recursive, true, canonical_dir)
 }
 
 fn validate_managed_systemd_unit(unit: &str) -> Result<(), AkrepError> {
@@ -1075,8 +1085,11 @@ impl OverrideOps for LinuxOverrideOps {
         .ok_or_else(|| {
             AkrepError::BackendUnavailable("restorecon binary is not installed".to_string())
         })?;
+        let no_xdev = !crate::adapters::selinux::is_overlayfs_without_submounts(&resolved);
         let mut cmd = command_c_locale(bin);
-        cmd.args(build_container_restorecon_args(recursive, &resolved));
+        cmd.args(build_container_restorecon_args_with_xdev(
+            recursive, no_xdev, &resolved,
+        ));
         let out = run_command_with_timeout(
             cmd,
             Duration::from_secs(CHCON_TIMEOUT_SECS),

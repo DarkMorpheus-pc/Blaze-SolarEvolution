@@ -456,10 +456,76 @@ pub fn is_customizable_container_context(ctx: &str) -> bool {
         || ctx.contains(":svirt_sandbox_file_t:")
 }
 
-pub fn build_restorecon_args_with_force(
+fn unescape_mountinfo_field(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let bytes = raw.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 3 < bytes.len() {
+            if let Ok(oct) = std::str::from_utf8(&bytes[i + 1..i + 4]) {
+                if let Ok(val) = u8::from_str_radix(oct, 8) {
+                    out.push(val as char);
+                    i += 4;
+                    continue;
+                }
+            }
+        }
+        let ch = raw[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+/// Returns `true` when `target` resides on an `overlay` filesystem and has no child mountpoints
+/// underneath it. On Linux `overlayfs` (such as Fedora Live ISO rootfs), regular files on
+/// `upperdir` report the backing filesystem's `st_dev` while directories report the overlay
+/// superblock `st_dev`, causing `restorecon -R -x` and naive `dev != root_dev` walks to skip files.
+pub fn parse_mountinfo_is_overlay_without_submounts(mountinfo: &str, target: &Path) -> bool {
+    let mut best_depth: usize = 0;
+    let mut best_fstype: Option<String> = None;
+    let mut has_child_mount = false;
+
+    for line in mountinfo.lines() {
+        let Some((pre, post)) = line.split_once(" - ") else {
+            continue;
+        };
+        let Some(mp_raw) = pre.split(' ').nth(4) else {
+            continue;
+        };
+        let Some(fstype) = post.split(' ').next() else {
+            continue;
+        };
+        let mp_unescaped = unescape_mountinfo_field(mp_raw);
+        let mp_path = Path::new(&mp_unescaped);
+
+        if mp_path != target && mp_path.starts_with(target) {
+            has_child_mount = true;
+        }
+        if target.starts_with(mp_path) {
+            let depth = mp_path.components().count();
+            if depth >= best_depth {
+                best_depth = depth;
+                best_fstype = Some(fstype.to_string());
+            }
+        }
+    }
+
+    best_fstype.as_deref() == Some("overlay") && !has_child_mount
+}
+
+pub fn is_overlayfs_without_submounts(target: &Path) -> bool {
+    let Ok(mountinfo) = fs::read_to_string("/proc/self/mountinfo") else {
+        return false;
+    };
+    parse_mountinfo_is_overlay_without_submounts(&mountinfo, target)
+}
+
+pub fn build_restorecon_args_with_options(
     preview_only: bool,
     recursive: bool,
     force_customizable: bool,
+    no_xdev: bool,
     target: &Path,
 ) -> Vec<OsString> {
     let mut args = Vec::new();
@@ -472,11 +538,22 @@ pub fn build_restorecon_args_with_force(
     }
     if recursive {
         args.push(OsString::from("-R"));
-        args.push(OsString::from("-x"));
+        if no_xdev {
+            args.push(OsString::from("-x"));
+        }
     }
     args.push(OsString::from("--"));
     args.push(target.as_os_str().to_os_string());
     args
+}
+
+pub fn build_restorecon_args_with_force(
+    preview_only: bool,
+    recursive: bool,
+    force_customizable: bool,
+    target: &Path,
+) -> Vec<OsString> {
+    build_restorecon_args_with_options(preview_only, recursive, force_customizable, true, target)
 }
 
 pub fn build_restorecon_args(preview_only: bool, recursive: bool, target: &Path) -> Vec<OsString> {
@@ -496,6 +573,7 @@ pub fn walk_restorecon_paths_bounded(
     }
 
     let root_dev = root_meta.dev();
+    let overlay_root = is_overlayfs_without_submounts(&resolved);
     let mut collected = Vec::new();
     let mut stack = vec![resolved.clone()];
 
@@ -518,8 +596,10 @@ pub fn walk_restorecon_paths_bounded(
 
         for child in children.into_iter().rev() {
             let child_meta = fs::symlink_metadata(&child)?;
-            // Skip foreign mount boundaries (matching `restorecon -R -x`) before validating child path
-            if child_meta.dev() != root_dev {
+            // Skip foreign mount boundaries (matching `restorecon -R -x`) before validating child path.
+            // On overlayfs without submounts, upperdir files carry the backing fs st_dev while dirs carry
+            // the overlay st_dev, so only differing-dev directories indicate foreign mounts there.
+            if child_meta.dev() != root_dev && (!overlay_root || child_meta.file_type().is_dir()) {
                 continue;
             }
             let child_str = child.to_str().ok_or_else(|| {
@@ -999,11 +1079,13 @@ impl SelinuxSysOps for LinuxSelinuxOps {
         let force_customizable = Self::read_single_file_context(&resolved)
             .map(|ctx| is_customizable_container_context(&ctx))
             .unwrap_or(false);
+        let no_xdev = !is_overlayfs_without_submounts(&resolved);
         let mut cmd = command_c_locale(bin);
-        cmd.args(build_restorecon_args_with_force(
+        cmd.args(build_restorecon_args_with_options(
             true,
             recursive,
             force_customizable,
+            no_xdev,
             &resolved,
         ));
         let out = cmd.output()?;
@@ -1057,11 +1139,13 @@ impl SelinuxSysOps for LinuxSelinuxOps {
         let force_customizable = Self::read_single_file_context(&resolved)
             .map(|ctx| is_customizable_container_context(&ctx))
             .unwrap_or(false);
+        let no_xdev = !is_overlayfs_without_submounts(&resolved);
         let mut cmd = command_c_locale(bin);
-        cmd.args(build_restorecon_args_with_force(
+        cmd.args(build_restorecon_args_with_options(
             false,
             recursive,
             force_customizable,
+            no_xdev,
             &resolved,
         ));
         let out = cmd.output()?;
@@ -2874,6 +2958,44 @@ container_manage_cgroup        (on   ,  off)  Allow container cgroups
                 "--".to_string(),
                 "/home/alice/android".to_string(),
             ]]
+        );
+
+        let mountinfo_overlay = "\
+36 28 0:34 / / rw,relatime shared:1 - overlay LiveOS_rootfs rw,lowerdir=/run/rootfsbase\n\
+37 36 0:38 / /proc rw,nosuid - proc proc rw\n";
+        assert!(parse_mountinfo_is_overlay_without_submounts(
+            mountinfo_overlay,
+            Path::new("/home/liveuser/android_test")
+        ));
+
+        let mountinfo_with_child = "\
+36 28 0:34 / / rw,relatime shared:1 - overlay LiveOS_rootfs rw,lowerdir=/run/rootfsbase\n\
+38 36 8:1 / /home/liveuser/android_test/usb rw,relatime - ext4 /dev/sdb1 rw\n";
+        assert!(!parse_mountinfo_is_overlay_without_submounts(
+            mountinfo_with_child,
+            Path::new("/home/liveuser/android_test")
+        ));
+
+        let mountinfo_btrfs = "\
+36 28 0:34 / / rw,relatime shared:1 - btrfs /dev/vda3 rw\n";
+        assert!(!parse_mountinfo_is_overlay_without_submounts(
+            mountinfo_btrfs,
+            Path::new("/home/liveuser/android_test")
+        ));
+
+        let overlay_args: Vec<String> = build_restorecon_args_with_options(
+            false,
+            true,
+            true,
+            false,
+            Path::new("/home/liveuser/android_test"),
+        )
+        .into_iter()
+        .map(|s| s.to_string_lossy().into_owned())
+        .collect();
+        assert_eq!(
+            overlay_args,
+            vec!["-v", "-F", "-R", "--", "/home/liveuser/android_test"]
         );
     }
 
