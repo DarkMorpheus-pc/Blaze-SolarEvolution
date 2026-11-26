@@ -1,4 +1,4 @@
-use crate::components::build_kv_row;
+use crate::components::{build_kv_row, build_status_indicator};
 use crate::dbus_client::{
     dispatch_cmd, UiCommand, AKREP_BUS_NAME, AKREP_INTERFACE_NAME, AKREP_OBJECT_PATH,
 };
@@ -9,7 +9,7 @@ use blaze_akrep_common::{
 };
 use blaze_sentinel_core::{AKREP_SCHEMA_VERSION, AKREP_VERSION, SENTINEL_VERSION};
 use gtk4::prelude::*;
-use gtk4::{Box as GtkBox, Button, Label, Orientation};
+use gtk4::{Align, Box as GtkBox, Button, Expander, Label, Orientation};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -24,19 +24,21 @@ pub fn build_settings_page(
     let priv_ver = st.privd_version.clone();
     drop(st);
 
-    let root = GtkBox::new(Orientation::Vertical, 16);
+    let root = GtkBox::new(Orientation::Vertical, 20);
 
-    let title = Label::new(Some(lang.pick(
-        "Ayarlar, Dil Tercihi ve Akrep v1.0 Çift Veriyolu Mimarisi",
-        "Settings, Language Preference & Akrep v1.0 Dual-Bus Architecture",
+    let page_desc = Label::new(Some(lang.pick(
+        "Arayüz dili ve Akrep servis bilgileri",
+        "Interface language and Akrep service details",
     )));
-    title.add_css_class("akrep-title");
-    title.set_xalign(0.0);
-    root.append(&title);
+    page_desc.add_css_class("akrep-subtitle");
+    page_desc.set_xalign(0.0);
+    page_desc.set_wrap(true);
+    root.append(&page_desc);
 
-    let lang_card = GtkBox::new(Orientation::Vertical, 10);
+    // 1. Language card
+    let lang_card = GtkBox::new(Orientation::Vertical, 12);
     lang_card.add_css_class("akrep-detail-box");
-    let l_title = Label::new(Some(lang.pick("Arayüz Dili", "Interface Language")));
+    let l_title = Label::new(Some(lang.pick("Arayüz dili", "Interface language")));
     l_title.add_css_class("akrep-section-hdr");
     l_title.set_xalign(0.0);
     lang_card.append(&l_title);
@@ -45,9 +47,9 @@ pub fn build_settings_page(
     for target_lang in [Lang::Tr, Lang::En] {
         let b = Button::with_label(target_lang.display_name());
         b.add_css_class(if lang == target_lang {
-            "akrep-primary-btn"
+            "akrep-seg-active"
         } else {
-            "akrep-ghost-btn"
+            "akrep-seg-btn"
         });
         let st_l = Rc::clone(state);
         let rr_l = Rc::clone(&on_rerender);
@@ -57,101 +59,102 @@ pub fn build_settings_page(
         });
         btn_row.append(&b);
     }
+    lang_card.append(&btn_row);
+    root.append(&lang_card);
 
-    let ver_btn =
-        Button::with_label(lang.pick("akrep-privd Sürümünü Sorgula", "Ping akrep-privd Version"));
+    // 2. Service status & versions
+    let info_box = GtkBox::new(Orientation::Vertical, 12);
+    info_box.add_css_class("akrep-detail-box");
+
+    let i_hdr = GtkBox::new(Orientation::Horizontal, 12);
+    i_hdr.set_valign(Align::Center);
+    let i_title = Label::new(Some(lang.pick(
+        "Bileşenler ve servisler",
+        "Components and services",
+    )));
+    i_title.add_css_class("akrep-section-hdr");
+    i_title.set_xalign(0.0);
+    i_title.set_hexpand(true);
+    i_hdr.append(&i_title);
+
+    i_hdr.append(&build_status_indicator(
+        if snap.is_some() {
+            "akrep-sev-protected"
+        } else {
+            "akrep-sev-unavailable"
+        },
+        if snap.is_some() {
+            lang.pick("Çevrimiçi", "Online")
+        } else {
+            lang.pick("Çevrimdışı", "Offline")
+        },
+        snap.is_none(),
+    ));
+
+    let ver_btn = Button::with_label(lang.pick("Servisi denetle", "Check service"));
     ver_btn.add_css_class("akrep-ghost-btn");
     let cmd_v = cmd_tx.clone();
     ver_btn.connect_clicked(move |_| {
         dispatch_cmd(&cmd_v, UiCommand::QueryPrivVersion);
     });
-    btn_row.append(&ver_btn);
-    lang_card.append(&btn_row);
-    root.append(&lang_card);
+    i_hdr.append(&ver_btn);
+    info_box.append(&i_hdr);
 
-    let info_box = GtkBox::new(Orientation::Vertical, 8);
-    info_box.add_css_class("akrep-detail-box");
-    let i_title = Label::new(Some(lang.pick(
-        "Bileşen Sürümleri ve Yetki Ayrımı Sözleşmesi",
-        "Component Versions & Privilege-Separation Contract",
+    info_box.append(&build_kv_row(
+        lang.pick("Akrep sürümü", "Akrep version"),
+        &format!("v{} (schema v{})", AKREP_VERSION, AKREP_SCHEMA_VERSION),
+    ));
+    info_box.append(&build_kv_row(
+        lang.pick("Sentinel çekirdeği", "Sentinel core"),
+        &format!("v{}", SENTINEL_VERSION),
+    ));
+    info_box.append(&build_kv_row(
+        lang.pick("İzleme servisi", "Monitoring service"),
+        &match &snap {
+            Some(s) => format!("{} (v{})", lang.pick("Çevrimiçi", "Online"), s.version),
+            None => lang.pick("Çevrimdışı", "Offline").to_string(),
+        },
+    ));
+    info_box.append(&build_kv_row(
+        lang.pick("Yönetici yardımcı servisi", "Admin helper service"),
+        &priv_ver
+            .as_deref()
+            .map(|v| format!("v{}", v))
+            .unwrap_or_else(|| lang.pick("Talep üzerine hazır", "Ready on demand").to_string()),
+    ));
+
+    let tech_exp = Expander::new(Some(lang.pick(
+        "Teknik servis ayrıntıları",
+        "Technical service details",
     )));
-    i_title.add_css_class("akrep-section-hdr");
-    i_title.set_xalign(0.0);
-    info_box.append(&i_title);
-
-    let rows: Vec<(&str, &str, String)> = vec![
-        (
-            "Akrep Sürümü",
-            "Akrep Suite Version",
-            format!("v{} (Schema v{})", AKREP_VERSION, AKREP_SCHEMA_VERSION),
+    let tech_col = GtkBox::new(Orientation::Vertical, 8);
+    tech_col.set_margin_top(8);
+    tech_col.append(&build_kv_row(
+        "akrepd",
+        &format!(
+            "{} ({} / {})",
+            AKREP_BUS_NAME, AKREP_OBJECT_PATH, AKREP_INTERFACE_NAME
         ),
-        (
-            "Paylaşılan Çekirdek",
-            "Shared Posture Core",
-            format!("blaze-sentinel-core / Sentinel v{}", SENTINEL_VERSION),
+    ));
+    tech_col.append(&build_kv_row(
+        "akrep-privd",
+        &format!(
+            "{} ({} / {})",
+            AKREP_PRIV_BUS_NAME, AKREP_PRIV_OBJECT_PATH, AKREP_PRIV_INTERFACE_NAME
         ),
-        (
-            "Salt Okunur Telemetri (Kanal 1)",
-            "Read-Only Telemetry (Channel 1)",
-            format!(
-                "{} ({} / {}) — User=akrep, read_only=true, 0 GTK4 bağımlılığı",
-                AKREP_BUS_NAME, AKREP_OBJECT_PATH, AKREP_INTERFACE_NAME
-            ),
-        ),
-        (
-            "Ayrıcalıklı İşlem Servisi (Kanal 2)",
-            "Privileged Transaction Daemon (Channel 2)",
-            format!(
-                "{} ({} / {}) — D-Bus aktivasyonlu, 60sn boşta kapanma ({})",
-                AKREP_PRIV_BUS_NAME,
-                AKREP_PRIV_OBJECT_PATH,
-                AKREP_PRIV_INTERFACE_NAME,
-                priv_ver
-                    .as_deref()
-                    .map(|v| format!("v{}", v))
-                    .unwrap_or_else(|| lang.pick("talep üzerine hazır", "on-demand ready").to_string())
-            ),
-        ),
-        (
-            "Kullanıcı Oturumu İşlemleri (Kanal 3)",
-            "User-Session Channel (Channel 3)",
-            lang.pick(
-                "Kullanıcı Flatpak INI override + XDG Portal & PipeWire doğrudan akrep-ui içinde çalışır",
-                "User Flatpak INI overrides + XDG Portal & PipeWire run directly in-process as desktop user",
-            )
-            .to_string(),
-        ),
-        (
-            "Tanımlı Polkit Eylemleri",
-            "Granular Polkit Actions",
-            ALL_POLKIT_ACTIONS.join(", "),
-        ),
-        (
-            "akrepd Bağlantı Durumu",
-            "akrepd Telemetry Connection",
-            match snap {
-                Some(s) => format!(
-                    "Online (v{}, read_only={}, mutators_enabled={})",
-                    s.version, s.read_only, s.mutators_enabled
-                ),
-                None => lang
-                    .pick("Çevrimdışı / Kısıtlı görünüm", "Offline / Degraded view")
-                    .to_string(),
-            },
-        ),
-    ];
-
-    for (l_tr, l_en, val) in rows {
-        info_box.append(&build_kv_row(lang.pick(l_tr, l_en), &val));
-    }
+    ));
+    tech_col.append(&build_kv_row(
+        lang.pick("Yetki eylemleri", "Auth actions"),
+        &ALL_POLKIT_ACTIONS.join(", "),
+    ));
+    tech_exp.set_child(Some(&tech_col));
+    info_box.append(&tech_exp);
     root.append(&info_box);
 
-    let perf_box = GtkBox::new(Orientation::Vertical, 8);
+    // 3. Resource usage card
+    let perf_box = GtkBox::new(Orientation::Vertical, 12);
     perf_box.add_css_class("akrep-detail-box");
-    let p_title = Label::new(Some(lang.pick(
-        "Performans ve Bellek Ayak İzi Garantileri",
-        "Performance & Resource Footprint Guarantees",
-    )));
+    let p_title = Label::new(Some(lang.pick("Kaynak kullanımı", "Resource usage")));
     p_title.add_css_class("akrep-section-hdr");
     p_title.set_xalign(0.0);
     perf_box.append(&p_title);
@@ -159,22 +162,22 @@ pub fn build_settings_page(
     perf_box.append(&build_kv_row(
         "akrepd",
         lang.pick(
-            "Olay güdümlü D-Bus sinyalleri (sıfır sıcak yoklama döngüsü), MemoryMax=96M, CPUQuota=15%, GetSnapshot() < 100ms",
-            "Event-driven D-Bus signals (zero hot polling loops), MemoryMax=96M, CPUQuota=15%, GetSnapshot() < 100ms",
+            "Yalnızca sistem durumu değiştiğinde güncellenir; düşük bellek ve işlemci sınırıyla çalışır",
+            "Updates only when system state changes, with strict memory and CPU limits",
         ),
     ));
     perf_box.append(&build_kv_row(
         "akrep-privd",
         lang.pick(
-            "Yalnızca işlem sırasında çalışır; 60 saniye hareketsizlikten sonra kendiliğinden kapanır (boşta 0 MB RAM)",
-            "Runs strictly on-demand; exits cleanly after 60s of inactivity (0 MB idle RSS)",
+            "Yalnızca onaylı değişiklik sırasında açılır ve kısa süre sonra kendiliğinden kapanır",
+            "Starts only for approved changes and exits shortly after completion",
         ),
     ));
     perf_box.append(&build_kv_row(
         "ClamAV",
         lang.pick(
-            "İsteğe bağlı ve yalnızca talep üzerine tarama; sürekli arka plan fanotify taraması çalıştırılmaz",
-            "Optional & strictly on-demand scanning; zero continuous background fanotify CPU tax",
+            "İsteğe bağlıdır; yalnızca siz başlattığınızda dosya ve klasör taraması yapar",
+            "Optional; scans files and folders only when you start a scan",
         ),
     ));
     root.append(&perf_box);

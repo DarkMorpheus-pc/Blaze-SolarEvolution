@@ -1,8 +1,9 @@
-use crate::components::{build_kv_row, tx_state_css_class, tx_state_label};
+use crate::components::{build_admin_note, build_kv_row, build_tx_state_indicator};
 use crate::dbus_client::{dispatch_cmd, UiCommand};
 use crate::i18n::Lang;
 use crate::state::AppUiState;
 use blaze_akrep_common::{ActionRequest, TransactionState};
+use gtk4::pango::WrapMode;
 use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Button, Expander, Label, Orientation};
 use std::cell::RefCell;
@@ -15,16 +16,25 @@ pub fn summarize_action_request(req: &ActionRequest, lang: Lang) -> String {
             value,
             persistent,
         } => format!(
-            "SELinux Boolean: {} = {} ({})",
+            "SELinux: {} = {} ({})",
             name,
-            value,
-            if *persistent { "persistent" } else { "runtime" }
+            if *value {
+                lang.pick("açık", "on")
+            } else {
+                lang.pick("kapalı", "off")
+            },
+            if *persistent {
+                lang.pick("kalıcı", "permanent")
+            } else {
+                lang.pick("geçici", "temporary")
+            }
         ),
         ActionRequest::SelinuxRestorecon {
             target_path,
             recursive,
         } => format!(
-            "SELinux restorecon: {}{}",
+            "{}: {}{}",
+            lang.pick("Bağlam onarımı", "Context repair"),
             target_path,
             if *recursive { " (-R)" } else { "" }
         ),
@@ -34,57 +44,83 @@ pub fn summarize_action_request(req: &ActionRequest, lang: Lang) -> String {
             proto,
             source_cidr,
             ..
-        } => format!(
-            "Firewall Add Port: {}/{} in {} (cidr={})",
-            port,
-            proto.as_str(),
-            zone,
-            source_cidr.as_deref().unwrap_or("any")
-        ),
+        } => match source_cidr {
+            Some(src) => format!(
+                "{}: {}/{} ({}, {})",
+                lang.pick("Port aç", "Allow port"),
+                port,
+                proto.as_str(),
+                zone,
+                src
+            ),
+            None => format!(
+                "{}: {}/{} ({})",
+                lang.pick("Port aç", "Allow port"),
+                port,
+                proto.as_str(),
+                zone
+            ),
+        },
         ActionRequest::FirewallRemovePort {
             zone, port, proto, ..
         } => format!(
-            "Firewall Remove Port: {}/{} in {}",
+            "{}: {}/{} ({})",
+            lang.pick("Port kaldır", "Remove port"),
             port,
             proto.as_str(),
             zone
         ),
-        ActionRequest::FirewallAddService { zone, service, .. } => {
-            format!("Firewall Add Service: {} in {}", service, zone)
-        }
-        ActionRequest::FirewallRemoveService { zone, service, .. } => {
-            format!("Firewall Remove Service: {} in {}", service, zone)
-        }
+        ActionRequest::FirewallAddService { zone, service, .. } => format!(
+            "{}: {} ({})",
+            lang.pick("Servis aç", "Allow service"),
+            service,
+            zone
+        ),
+        ActionRequest::FirewallRemoveService { zone, service, .. } => format!(
+            "{}: {} ({})",
+            lang.pick("Servis kaldır", "Remove service"),
+            service,
+            zone
+        ),
         ActionRequest::FirewallBindInterface {
             zone, interface, ..
-        } => format!("Firewall Bind Interface: {} -> {}", interface, zone),
-        ActionRequest::FlatpakSetOverride { app_id, .. } => {
-            format!("System Flatpak Override: {}", app_id)
+        } => format!(
+            "{}: {} → {}",
+            lang.pick("Arayüz bağla", "Bind interface"),
+            interface,
+            zone
+        ),
+        ActionRequest::FlatpakSetOverride { app_id, .. } => format!(
+            "{}: {}",
+            lang.pick("Sistem uygulama izni", "System app permission"),
+            app_id
+        ),
+        ActionRequest::QuarantineFile { path, threat_name } => format!(
+            "{}: {} ({})",
+            lang.pick("Karantinaya al", "Quarantine file"),
+            path,
+            threat_name
+        ),
+        ActionRequest::RestoreQuarantine { quarantine_id } => format!(
+            "{}: {}",
+            lang.pick("Karantinadan geri yükle", "Restore from quarantine"),
+            quarantine_id
+        ),
+        ActionRequest::DeleteQuarantine { quarantine_id, .. } => format!(
+            "{}: {}",
+            lang.pick("Karantinadan kalıcı sil", "Delete from quarantine"),
+            quarantine_id
+        ),
+        ActionRequest::ApplyProfile { profile_id } => format!(
+            "{}: {}",
+            lang.pick("Güvenlik profili", "Security profile"),
+            profile_id
+        ),
+        ActionRequest::InstallOptionalScanner => {
+            lang.pick("ClamAV kurulumu", "Install ClamAV").to_string()
         }
-        ActionRequest::QuarantineFile { path, threat_name } => {
-            format!("Quarantine File: {} [{}]", path, threat_name)
-        }
-        ActionRequest::RestoreQuarantine { quarantine_id } => {
-            format!("Restore Quarantine: {}", quarantine_id)
-        }
-        ActionRequest::DeleteQuarantine { quarantine_id, .. } => {
-            format!("Permanent Delete Quarantine: {}", quarantine_id)
-        }
-        ActionRequest::ApplyProfile { profile_id } => {
-            format!(
-                "{}: {}",
-                lang.pick("Güvenlik Profili Uygulama", "Apply Security Profile"),
-                profile_id
-            )
-        }
-        ActionRequest::InstallOptionalScanner => lang
-            .pick(
-                "İsteğe Bağlı ClamAV Kurulumu",
-                "Install Optional ClamAV Scanner",
-            )
-            .to_string(),
         #[allow(unreachable_patterns)]
-        _ => "System Security Transaction".to_string(),
+        _ => lang.pick("Güvenlik işlemi", "Security action").to_string(),
     }
 }
 
@@ -107,38 +143,40 @@ pub fn build_history_page(
     let scanner = st.scanner_report.clone();
     drop(st);
 
-    let root = GtkBox::new(Orientation::Vertical, 16);
+    let root = GtkBox::new(Orientation::Vertical, 20);
 
-    let hdr_row = GtkBox::new(Orientation::Horizontal, 10);
-    let title = Label::new(Some(lang.pick(
-        "Koruma Geçmişi, İşlem Denetim Kaydı ve Tek Tıkla Geri Alma",
-        "Protection History, Transaction Audit Log & 1-Click Rollback",
+    let intro_col = GtkBox::new(Orientation::Vertical, 4);
+    let hdr_row = GtkBox::new(Orientation::Horizontal, 12);
+    hdr_row.set_valign(Align::Center);
+
+    let page_desc = Label::new(Some(lang.pick(
+        "Yapılan güvenlik değişiklikleri, tarama kayıtları ve geri alma seçenekleri",
+        "Security changes, scan records and rollback options",
     )));
-    title.add_css_class("akrep-title");
-    title.set_xalign(0.0);
-    title.set_hexpand(true);
-    hdr_row.append(&title);
+    page_desc.add_css_class("akrep-subtitle");
+    page_desc.set_xalign(0.0);
+    page_desc.set_wrap(true);
+    page_desc.set_hexpand(true);
+    hdr_row.append(&page_desc);
 
-    let load_btn = Button::with_label(lang.pick(
-        "Sistem İşlem Geçmişini Yükle (Polkit)",
-        "Load System History (Polkit)",
-    ));
+    let load_btn = Button::with_label(lang.pick("Geçmişi yükle", "Load history"));
     load_btn.add_css_class("akrep-primary-btn");
+    load_btn.set_valign(Align::Center);
     let cmd_ld = cmd_tx.clone();
     load_btn.connect_clicked(move |_| {
         dispatch_cmd(&cmd_ld, UiCommand::LoadHistory { limit: 100 });
     });
     hdr_row.append(&load_btn);
-    root.append(&hdr_row);
+    intro_col.append(&hdr_row);
+    intro_col.append(&build_admin_note(lang));
+    root.append(&intro_col);
 
-    let sys_card = GtkBox::new(Orientation::Vertical, 10);
+    // 1. System actions
+    let sys_card = GtkBox::new(Orientation::Vertical, 12);
     sys_card.add_css_class("akrep-detail-box");
     let sys_hdr = Label::new(Some(&format!(
         "{} ({})",
-        lang.pick(
-            "Ayrıcalıklı Sistem İşlemleri (akrep-privd)",
-            "Privileged System Transactions (akrep-privd)"
-        ),
+        lang.pick("Sistem işlemleri", "System actions"),
         records.len()
     )));
     sys_hdr.add_css_class("akrep-section-hdr");
@@ -147,8 +185,8 @@ pub fn build_history_page(
 
     if records.is_empty() {
         let hint = Label::new(Some(lang.pick(
-            "Henüz işlem yüklenmedi veya kayıt yok. Kayıtlı tüm Committed / RolledBack / RollbackFailed / Interrupted işlemleri görmek için yukarıdaki düğmeye tıklayın.",
-            "No system transactions loaded yet. Click 'Load System History (Polkit)' above to inspect Committed / RolledBack / RollbackFailed / Interrupted records.",
+            "Kayıtlı sistem değişikliklerini görmek için üstteki Geçmişi yükle düğmesine tıklayın",
+            "Select Load history above to view recorded system changes",
         )));
         hint.add_css_class("akrep-subtitle");
         hint.set_xalign(0.0);
@@ -156,28 +194,33 @@ pub fn build_history_page(
         sys_card.append(&hint);
     } else {
         for rec in &records {
-            let tcard = GtkBox::new(Orientation::Vertical, 6);
+            let tcard = GtkBox::new(Orientation::Vertical, 8);
             tcard.add_css_class("akrep-diff-row");
 
-            let top = GtkBox::new(Orientation::Horizontal, 8);
-            let sb = Label::new(Some(tx_state_label(rec.state, lang)));
-            sb.add_css_class("akrep-badge");
-            sb.add_css_class(tx_state_css_class(rec.state));
-            top.append(&sb);
+            let top = GtkBox::new(Orientation::Horizontal, 12);
+            top.set_valign(Align::Center);
+            top.append(&build_tx_state_indicator(rec.state, lang));
 
             let sum = Label::new(Some(&summarize_action_request(&rec.request, lang)));
             sum.add_css_class("akrep-card-title");
             sum.set_xalign(0.0);
             sum.set_wrap(true);
+            sum.set_wrap_mode(WrapMode::WordChar);
             sum.set_hexpand(true);
             top.append(&sum);
 
-            let ts_lbl = Label::new(Some(&rec.created_at.chars().take(19).collect::<String>()));
-            ts_lbl.add_css_class("akrep-mono");
+            let ts_lbl = Label::new(Some(
+                &rec.created_at
+                    .chars()
+                    .take(16)
+                    .collect::<String>()
+                    .replace('T', " "),
+            ));
+            ts_lbl.add_css_class("akrep-meta");
             top.append(&ts_lbl);
 
             if rec.state == TransactionState::Committed && can_rollback_request(&rec.request) {
-                let rb_btn = Button::with_label(lang.pick("Geri Al (Rollback)", "Rollback"));
+                let rb_btn = Button::with_label(lang.pick("Geri al", "Rollback"));
                 rb_btn.add_css_class("akrep-danger-btn");
                 rb_btn.set_valign(Align::Center);
                 let cmd_rb = cmd_tx.clone();
@@ -192,38 +235,38 @@ pub fn build_history_page(
             }
             tcard.append(&top);
 
-            let exp = Expander::new(Some(lang.pick(
-                "İşlem Ayrıntıları ve SHA-256 Parmak İzleri",
-                "Transaction Metadata & SHA-256 State Fingerprints",
-            )));
+            let exp = Expander::new(Some(lang.pick("Teknik ayrıntılar", "Technical details")));
             let details = GtkBox::new(Orientation::Vertical, 4);
-            details.set_margin_top(6);
-            details.append(&build_kv_row("Transaction UUID", &rec.tx_id));
-            details.append(&build_kv_row("Plan UUID", &rec.plan_id));
+            details.set_margin_top(8);
+            details.append(&build_kv_row(lang.pick("İşlem kimliği", "Action ID"), &rec.tx_id));
+            details.append(&build_kv_row(lang.pick("Plan kimliği", "Plan ID"), &rec.plan_id));
             details.append(&build_kv_row("Plan SHA-256", &rec.plan_sha256));
             details.append(&build_kv_row(
-                lang.pick("Aktör UID / Veriyolu", "Actor UID / Bus Name"),
+                lang.pick("Kullanıcı", "Actor"),
                 &format!("uid={} ({})", rec.actor_uid, rec.actor_bus_name),
             ));
-            details.append(&build_kv_row("Polkit Action", &rec.polkit_action));
+            details.append(&build_kv_row(
+                lang.pick("Yetki eylemi", "Auth action"),
+                &rec.polkit_action,
+            ));
             if let Some(ar) = &rec.apply_result {
                 details.append(&build_kv_row(
-                    lang.pick("Uygulama Sonucu", "Apply Summary"),
+                    lang.pick("Uygulama sonucu", "Apply summary"),
                     ar,
                 ));
             }
             if let Some(rr) = &rec.rollback_result {
                 details.append(&build_kv_row(
-                    lang.pick("Geri Alma Sonucu", "Rollback Summary"),
+                    lang.pick("Geri alma sonucu", "Rollback summary"),
                     rr,
                 ));
             }
             if let Some(em) = &rec.error_message {
-                details.append(&build_kv_row(lang.pick("Hata İletisi", "Error Detail"), em));
+                details.append(&build_kv_row(lang.pick("Hata ayrıntısı", "Error detail"), em));
             }
             for fp in &rec.post_fingerprints {
                 details.append(&build_kv_row(
-                    &format!("Post SHA-256 ({})", fp.target),
+                    &format!("SHA-256 ({})", fp.target),
                     &fp.sha256,
                 ));
             }
@@ -235,14 +278,12 @@ pub fn build_history_page(
     }
     root.append(&sys_card);
 
-    let usr_card = GtkBox::new(Orientation::Vertical, 8);
+    // 2. User app changes
+    let usr_card = GtkBox::new(Orientation::Vertical, 12);
     usr_card.add_css_class("akrep-detail-box");
     let usr_hdr = Label::new(Some(&format!(
         "{} ({})",
-        lang.pick(
-            "Kullanıcı Kapsamlı Flatpak İşlemleri",
-            "User-Scope Flatpak Override Transactions"
-        ),
+        lang.pick("Kullanıcı uygulama izinleri", "User app permissions"),
         user_txs.len()
     )));
     usr_hdr.add_css_class("akrep-section-hdr");
@@ -251,36 +292,38 @@ pub fn build_history_page(
 
     if user_txs.is_empty() {
         let uempty = Label::new(Some(lang.pick(
-            "Kullanıcı kapsamında kayıtlı Flatpak override işlemi yok.",
-            "No user-scope Flatpak override transactions recorded.",
+            "Kayıtlı kullanıcı izin değişikliği yok",
+            "No recorded user app permission changes",
         )));
         uempty.add_css_class("akrep-subtitle");
         uempty.set_xalign(0.0);
         usr_card.append(&uempty);
     } else {
         for utx in &user_txs {
-            let urow = GtkBox::new(Orientation::Horizontal, 8);
+            let urow = GtkBox::new(Orientation::Horizontal, 12);
             urow.add_css_class("akrep-diff-row");
+            urow.set_valign(Align::Center);
 
-            let sb = Label::new(Some(tx_state_label(utx.state, lang)));
-            sb.add_css_class("akrep-badge");
-            sb.add_css_class(tx_state_css_class(utx.state));
-            urow.append(&sb);
+            urow.append(&build_tx_state_indicator(utx.state, lang));
 
             let ulbl = Label::new(Some(&format!(
-                "User Flatpak Override: {} ({}) • {}",
+                "{} · {}",
                 utx.app_id,
-                utx.tx_id,
-                utx.created_at.chars().take(19).collect::<String>()
+                utx.created_at
+                    .chars()
+                    .take(16)
+                    .collect::<String>()
+                    .replace('T', " ")
             )));
             ulbl.add_css_class("akrep-mono");
             ulbl.set_xalign(0.0);
             ulbl.set_wrap(true);
+            ulbl.set_wrap_mode(WrapMode::WordChar);
             ulbl.set_hexpand(true);
             urow.append(&ulbl);
 
             if utx.state == TransactionState::Committed {
-                let rb = Button::with_label(lang.pick("Geri Al", "Rollback"));
+                let rb = Button::with_label(lang.pick("Geri al", "Rollback"));
                 rb.add_css_class("akrep-ghost-btn");
                 let cmd_rb = cmd_tx.clone();
                 let tid = utx.tx_id.clone();
@@ -297,11 +340,12 @@ pub fn build_history_page(
     }
     root.append(&usr_card);
 
-    let log_card = GtkBox::new(Orientation::Vertical, 8);
+    // 3. Scan & recovery summary
+    let log_card = GtkBox::new(Orientation::Vertical, 12);
     log_card.add_css_class("akrep-detail-box");
     let l_hdr = Label::new(Some(lang.pick(
-        "Tarama, Sentinel ve BERE Kurtarma Günlüğü Özeti",
-        "Scan, Sentinel & BERE Recovery Event Summary",
+        "Tarama ve kurtarma kayıtları",
+        "Scan and recovery records",
     )));
     l_hdr.add_css_class("akrep-section-hdr");
     l_hdr.set_xalign(0.0);
@@ -310,10 +354,14 @@ pub fn build_history_page(
     if let Some(sc) = &scanner {
         for sh in &sc.recent_history {
             log_card.append(&build_kv_row(
-                &format!("AV Scan ({})", sh.job_id),
+                &format!("{} ({})", lang.pick("Tarama", "Scan"), sh.job_id),
                 &format!(
-                    "{} — {:?} ({} files, {} findings)",
-                    sh.target_path, sh.state, sh.scanned_files, sh.findings_count
+                    "{} · {} {}, {} {}",
+                    sh.target_path,
+                    sh.scanned_files,
+                    lang.pick("dosya", "files"),
+                    sh.findings_count,
+                    lang.pick("bulgu", "findings")
                 ),
             ));
         }

@@ -1,56 +1,64 @@
 use crate::i18n::Lang;
-use blaze_sentinel_core::AKREP_VERSION;
+use gtk4::pango::EllipsizeMode;
 use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Button, Image, Label, Orientation};
 use std::rc::Rc;
 
 pub const NAV_ITEMS: &[(&str, &str, &str, &str)] = &[
-    ("overview", "Genel Bakış", "Overview", "go-home-symbolic"),
+    ("overview", "Genel bakış", "Overview", "go-home-symbolic"),
     (
         "threat_protection",
-        "Tehdit Koruması",
-        "Threat Protection",
+        "Tehdit koruması",
+        "Threat protection",
         "security-high-symbolic",
     ),
     (
         "system_protection",
-        "Sistem Koruması",
-        "System Protection",
+        "Sistem koruması",
+        "System protection",
         "security-medium-symbolic",
     ),
     (
         "firewall",
-        "Güvenlik Duvarı",
+        "Güvenlik duvarı",
         "Firewall",
         "network-transmit-receive-symbolic",
     ),
     (
         "applications",
-        "Uygulama Güvenliği",
-        "Application Security",
+        "Uygulama güvenliği",
+        "App security",
         "application-x-executable-symbolic",
     ),
     (
         "device_security",
-        "Cihaz Güvenliği",
-        "Device Security",
+        "Cihaz güvenliği",
+        "Device security",
         "computer-symbolic",
     ),
     ("privacy", "Gizlilik", "Privacy", "camera-web-symbolic"),
     (
         "profiles",
-        "Güvenlik Profilleri",
-        "Security Profiles",
+        "Güvenlik profilleri",
+        "Security profiles",
         "preferences-system-symbolic",
     ),
     (
         "history",
-        "Koruma Geçmişi",
-        "Protection History",
+        "Koruma geçmişi",
+        "Protection history",
         "document-open-recent-symbolic",
     ),
     ("settings", "Ayarlar", "Settings", "emblem-system-symbolic"),
 ];
+
+pub fn nav_title_for_tab(tab_id: &str, lang: Lang) -> &'static str {
+    if let Some(&(_, tr, en, _)) = NAV_ITEMS.iter().find(|&&(id, _, _, _)| id == tab_id) {
+        lang.pick(tr, en)
+    } else {
+        lang.pick("Genel bakış", "Overview")
+    }
+}
 
 pub fn map_card_id_to_tab(card_id: &str) -> &'static str {
     match card_id {
@@ -70,22 +78,28 @@ pub fn map_card_id_to_tab(card_id: &str) -> &'static str {
 pub fn build_nav_rail(active_tab: &str, lang: Lang, on_select: Rc<dyn Fn(&'static str)>) -> GtkBox {
     let rail = GtkBox::new(Orientation::Vertical, 4);
     rail.add_css_class("akrep-rail");
-    rail.set_size_request(248, -1);
+    rail.set_size_request(220, -1);
 
     let brand_box = GtkBox::new(Orientation::Horizontal, 8);
-    brand_box.set_margin_bottom(12);
-    brand_box.set_margin_start(6);
+    brand_box.set_margin_bottom(16);
+    brand_box.set_margin_start(8);
+    brand_box.set_margin_end(8);
+    brand_box.set_valign(Align::Center);
+
     let logo = Image::from_icon_name("security-high-symbolic");
-    logo.set_pixel_size(24);
-    let brand_col = GtkBox::new(Orientation::Vertical, 1);
-    let brand_lbl = Label::new(Some(&format!("Akrep v{}", AKREP_VERSION)));
-    brand_lbl.add_css_class("akrep-card-title");
+    logo.set_pixel_size(16);
+    logo.add_css_class("akrep-icon-secondary");
+    logo.set_valign(Align::Center);
+
+    let brand_col = GtkBox::new(Orientation::Vertical, 0);
+    let brand_lbl = Label::new(Some("Akrep"));
+    brand_lbl.add_css_class("akrep-brand-title");
     brand_lbl.set_xalign(0.0);
-    let sub_lbl = Label::new(Some(
-        lang.pick("BlazeOS Güvenlik Merkezi", "BlazeOS Security Center"),
-    ));
-    sub_lbl.add_css_class("akrep-subtitle");
+
+    let sub_lbl = Label::new(Some(lang.pick("Güvenlik merkezi", "Security center")));
+    sub_lbl.add_css_class("akrep-brand-sub");
     sub_lbl.set_xalign(0.0);
+
     brand_col.append(&brand_lbl);
     brand_col.append(&sub_lbl);
     brand_box.append(&logo);
@@ -103,13 +117,27 @@ pub fn build_nav_rail(active_tab: &str, lang: Lang, on_select: Rc<dyn Fn(&'stati
             btn.set_valign(Align::End);
         }
 
-        let row = GtkBox::new(Orientation::Horizontal, 10);
+        let row = GtkBox::new(Orientation::Horizontal, 8);
+        row.set_hexpand(true);
+        row.set_halign(Align::Fill);
+        row.set_valign(Align::Center);
+
+        let indicator = GtkBox::new(Orientation::Vertical, 0);
+        indicator.add_css_class("akrep-nav-indicator");
+        indicator.set_valign(Align::Center);
+        row.append(&indicator);
+
         let icon = Image::from_icon_name(icon_name);
         icon.set_pixel_size(16);
+        icon.set_valign(Align::Center);
+        row.append(&icon);
+
         let lbl = Label::new(Some(lang.pick(title_tr, title_en)));
         lbl.set_xalign(0.0);
-        row.append(&icon);
+        lbl.set_hexpand(true);
+        lbl.set_ellipsize(EllipsizeMode::End);
         row.append(&lbl);
+
         btn.set_child(Some(&row));
 
         let cb = Rc::clone(&on_select);

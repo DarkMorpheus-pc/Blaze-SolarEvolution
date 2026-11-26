@@ -1,8 +1,9 @@
 use crate::components::plan_dialog::present_plan_preview_dialog;
-use crate::components::{risk_css_class, risk_label};
+use crate::components::{build_admin_note, build_risk_indicator, build_status_indicator};
 use crate::dbus_client::{dispatch_cmd, UiCommand};
 use crate::state::AppUiState;
 use blaze_akrep_common::{ActionRequest, TransactionState};
+use gtk4::pango::WrapMode;
 use gtk4::prelude::*;
 use gtk4::{Align, ApplicationWindow, Box as GtkBox, Button, Label, Orientation};
 use std::cell::RefCell;
@@ -22,43 +23,43 @@ struct StaticProfileMeta {
 const BUILTIN_PROFILES: &[StaticProfileMeta] = &[
     StaticProfileMeta {
         id: "balanced",
-        name_tr: "Dengeli (Varsayılan)",
-        name_en: "Balanced (Default)",
+        name_tr: "Dengeli",
+        name_en: "Balanced",
         zone: "FedoraWorkstation / public",
-        summary_tr: "Günlük masaüstü kullanımı için sıkı SELinux Enforcing ve temiz güvenlik duvarı temel çizgisi.",
-        summary_en: "Default BlazeOS desktop baseline with SELinux Enforcing and clean firewall posture.",
-        policy_tr: "SELinux: Enforcing • Firewalld: Aktif • Özel LAN rich-rule yok • Flatpak & Portal onayı korunur",
-        policy_en: "SELinux: Enforcing • Firewalld: Active • Zero custom LAN rich-rules • Flatpak & Portal consent preserved",
+        summary_tr: "Günlük masaüstü kullanımı için SELinux Enforcing ve standart güvenlik duvarı kuralları",
+        summary_en: "Default BlazeOS desktop baseline with SELinux Enforcing and clean firewall rules",
+        policy_tr: "SELinux Enforcing · Özel yerel ağ kuralı yok",
+        policy_en: "SELinux Enforcing · No custom LAN rules",
     },
     StaticProfileMeta {
         id: "developer",
         name_tr: "Geliştirici",
         name_en: "Developer",
         zone: "FedoraWorkstation / public",
-        summary_tr: "Konteyner ve sanallaştırma iş akışları için denetimli boolean ayarları; SELinux ve güvenlik duvarı açık kalır.",
-        summary_en: "Curated virtualization/container booleans while keeping SELinux Enforcing and Firewalld active.",
-        policy_tr: "SELinux: Enforcing (virt_use_kvm=on, container_manage_cgroup=on) • Bellek zayıflatan execheap/execstack yasaklı",
-        policy_en: "SELinux: Enforcing (virt_use_kvm=on, container_manage_cgroup=on) • Memory-weakening booleans forbidden",
+        summary_tr: "Konteyner ve sanallaştırma araçları için gereken SELinux izinlerini açar; güvenlik duvarı etkin kalır",
+        summary_en: "Enables container and virtualization SELinux booleans while keeping the firewall active",
+        policy_tr: "virt_use_kvm=on, container_manage_cgroup=on · Bellek koruması korunur",
+        policy_en: "virt_use_kvm=on, container_manage_cgroup=on · Memory protections intact",
     },
     StaticProfileMeta {
         id: "gaming",
         name_tr: "Oyun",
         name_en: "Gaming",
         zone: "FedoraWorkstation / home",
-        summary_tr: "Yalnızca yerel ağ (RFC1918) Steam Remote Play / LAN keşif portları; WAN'a açık port açılmaz.",
-        summary_en: "RFC1918 private LAN discovery/streaming rules only; zero public WAN port exposure.",
-        policy_tr: "SELinux: Enforcing • Firewalld: Aktif • Yalnızca 10/8, 172.16/12, 192.168/16 LAN kuralları (kalıcı değil)",
-        policy_en: "SELinux: Enforcing • Firewalld: Active • Scoped RFC1918 LAN rich-rules only (runtime)",
+        summary_tr: "Yalnızca yerel ağda Steam Remote Play ve LAN keşif portlarına izin verir; dış ağa port açmaz",
+        summary_en: "Allows local network discovery and Steam Remote Play on private LAN only; no public ports",
+        policy_tr: "Yalnızca özel yerel ağ (10/8, 172.16/12, 192.168/16) · Geçici",
+        policy_en: "Private LAN subnets only (10/8, 172.16/12, 192.168/16) · Temporary",
     },
     StaticProfileMeta {
         id: "public-network",
-        name_tr: "Açık Ağ (Kafe / Havalimanı)",
-        name_en: "Public Network (Untrusted Wi-Fi)",
+        name_tr: "Açık ağ",
+        name_en: "Public network",
         zone: "drop / block",
-        summary_tr: "Güvenilmeyen ortak Wi-Fi ağlarında tüm gelen bağlantıları ve yerel ağ paylaşım servislerini kilitler.",
-        summary_en: "Locks interfaces to drop/block zone and strips incoming discovery services on untrusted Wi-Fi.",
-        policy_tr: "SELinux: Enforcing • Arayüzler -> drop bölgesi • ssh/mdns/samba-client/kdeconnect gelen erişimi kapalı",
-        policy_en: "SELinux: Enforcing • Active interfaces -> drop zone • Incoming ssh/mdns/samba/kdeconnect stripped",
+        summary_tr: "Kafe veya havalimanı gibi ortak Wi-Fi ağlarında tüm gelen bağlantıları ve paylaşım servislerini engeller",
+        summary_en: "Blocks incoming connections and local discovery services on untrusted public Wi-Fi",
+        policy_tr: "Gelen ssh, mdns, samba ve KDE Connect erişimi kapalı",
+        policy_en: "Incoming ssh, mdns, samba and KDE Connect stripped",
     },
 ];
 
@@ -75,50 +76,27 @@ pub fn build_profiles_page(
     let history = st.history_records.clone();
     drop(st);
 
-    let root = GtkBox::new(Orientation::Vertical, 16);
+    let root = GtkBox::new(Orientation::Vertical, 20);
 
-    let hdr_row = GtkBox::new(Orientation::Horizontal, 10);
-    let title = Label::new(Some(lang.pick(
-        "Bildirimsel Güvenlik Profilleri (Dengeli, Geliştirici, Oyun, Açık Ağ)",
-        "Declarative Security Profiles (Balanced, Developer, Gaming, Public Network)",
+    let intro_col = GtkBox::new(Orientation::Vertical, 4);
+    let hdr_row = GtkBox::new(Orientation::Horizontal, 12);
+    hdr_row.set_valign(Align::Center);
+
+    let page_desc = Label::new(Some(lang.pick(
+        "Tüm profillerde SELinux Enforcing ve güvenlik duvarı etkin kalır",
+        "SELinux Enforcing and firewall remain active across all profiles",
     )));
-    title.add_css_class("akrep-title");
-    title.set_xalign(0.0);
-    title.set_hexpand(true);
-    hdr_row.append(&title);
-
-    let load_btn = Button::with_label(lang.pick(
-        "Profil Durumunu Sorgula (Polkit)",
-        "Sync Profile State (Polkit)",
-    ));
-    load_btn.add_css_class("akrep-ghost-btn");
-    let cmd_l = cmd_tx.clone();
-    load_btn.connect_clicked(move |_| {
-        dispatch_cmd(&cmd_l, UiCommand::ListProfiles);
-    });
-    hdr_row.append(&load_btn);
-    root.append(&hdr_row);
-
-    let inv_banner = GtkBox::new(Orientation::Horizontal, 10);
-    inv_banner.add_css_class("akrep-detail-box");
-    let inv_lbl = Label::new(Some(lang.pick(
-        "Değişmez Garanti: Hiçbir profil SELinux'u Permissive/Disabled yapmaz, Firewalld'yi kapatmaz, Flatpak kum havuzunu delmez veya Wayland Portal rızasını atlamaz.",
-        "Profile Invariant: Every profile keeps SELinux Enforcing, keeps Firewalld active, and preserves Flatpak sandboxes and XDG Portal user consent.",
-    )));
-    inv_lbl.add_css_class("akrep-subtitle");
-    inv_lbl.set_xalign(0.0);
-    inv_lbl.set_wrap(true);
-    inv_lbl.set_hexpand(true);
-    inv_banner.append(&inv_lbl);
+    page_desc.add_css_class("akrep-subtitle");
+    page_desc.set_xalign(0.0);
+    page_desc.set_wrap(true);
+    page_desc.set_hexpand(true);
+    hdr_row.append(&page_desc);
 
     if let Some(last_prof_tx) = history.iter().find(|r| {
         r.state == TransactionState::Committed
             && matches!(r.request, ActionRequest::ApplyProfile { .. })
     }) {
-        let rb_btn = Button::with_label(lang.pick(
-            "Son Profil Geçişini Geri Al",
-            "Rollback Last Profile Switch",
-        ));
+        let rb_btn = Button::with_label(lang.pick("Son geçişi geri al", "Rollback last switch"));
         rb_btn.add_css_class("akrep-danger-btn");
         rb_btn.set_valign(Align::Center);
         let cmd_rb = cmd_tx.clone();
@@ -129,36 +107,56 @@ pub fn build_profiles_page(
                 UiCommand::RollbackTransaction { tx_id: tid.clone() },
             );
         });
-        inv_banner.append(&rb_btn);
+        hdr_row.append(&rb_btn);
     }
-    root.append(&inv_banner);
+
+    let load_btn = Button::with_label(lang.pick("Durumu yenile", "Sync state"));
+    load_btn.add_css_class("akrep-ghost-btn");
+    load_btn.set_valign(Align::Center);
+    let cmd_l = cmd_tx.clone();
+    load_btn.connect_clicked(move |_| {
+        dispatch_cmd(&cmd_l, UiCommand::ListProfiles);
+    });
+    hdr_row.append(&load_btn);
+    intro_col.append(&hdr_row);
+    intro_col.append(&build_admin_note(lang));
+    root.append(&intro_col);
 
     for meta in BUILTIN_PROFILES {
         let is_active = active_id == meta.id;
         let pcard = GtkBox::new(Orientation::Vertical, 8);
         pcard.add_css_class("akrep-detail-box");
 
-        let top = GtkBox::new(Orientation::Horizontal, 10);
+        let top = GtkBox::new(Orientation::Horizontal, 12);
+        top.set_valign(Align::Center);
+
+        let name_box = GtkBox::new(Orientation::Horizontal, 8);
+        name_box.set_valign(Align::Center);
+        name_box.set_hexpand(true);
+
         let pname = Label::new(Some(lang.pick(meta.name_tr, meta.name_en)));
         pname.add_css_class("akrep-section-hdr");
         pname.set_xalign(0.0);
-        pname.set_hexpand(true);
-        top.append(&pname);
+        name_box.append(&pname);
 
-        let z_pill = Label::new(Some(&format!("Zone: {}", meta.zone)));
-        z_pill.add_css_class("akrep-ro-pill");
-        top.append(&z_pill);
-
-        if is_active {
-            let act_b = Label::new(Some(lang.pick("ETKİN PROFİL", "ACTIVE")));
-            act_b.add_css_class("akrep-badge");
-            act_b.add_css_class("akrep-sev-protected");
-            top.append(&act_b);
+        if meta.id == "balanced" {
+            let def_tag = Label::new(Some(lang.pick("Varsayılan", "Default")));
+            def_tag.add_css_class("akrep-tag");
+            name_box.append(&def_tag);
         }
 
-        let prev_btn =
-            Button::with_label(lang.pick("Profil Geçişini Önizle", "Preview Profile Switch"));
-        prev_btn.add_css_class("akrep-primary-btn");
+        if is_active {
+            name_box.append(&build_status_indicator(
+                "akrep-sev-protected",
+                lang.pick("Etkin", "Active"),
+                false,
+            ));
+        }
+        top.append(&name_box);
+
+        let prev_btn = Button::with_label(lang.pick("Önizle", "Preview"));
+        prev_btn.add_css_class("akrep-ghost-btn");
+        prev_btn.set_valign(Align::Center);
         let cmd_pv = cmd_tx.clone();
         let pid = meta.id.to_string();
         prev_btn.connect_clicked(move |_| {
@@ -173,44 +171,46 @@ pub fn build_profiles_page(
         pcard.append(&top);
 
         let sum = Label::new(Some(lang.pick(meta.summary_tr, meta.summary_en)));
+        sum.add_css_class("akrep-subtitle");
         sum.set_xalign(0.0);
         sum.set_wrap(true);
+        sum.set_wrap_mode(WrapMode::WordChar);
         pcard.append(&sum);
 
-        let pol = Label::new(Some(lang.pick(meta.policy_tr, meta.policy_en)));
+        let pol = Label::new(Some(&format!(
+            "{}: {} · {}",
+            lang.pick("Bölge", "Zone"),
+            meta.zone,
+            lang.pick(meta.policy_tr, meta.policy_en)
+        )));
         pol.add_css_class("akrep-mono");
         pol.set_xalign(0.0);
         pol.set_wrap(true);
+        pol.set_wrap_mode(WrapMode::WordChar);
         pcard.append(&pol);
 
         root.append(&pcard);
     }
 
-    // Inline Profile Diff Card — re-opens PlanPreviewDialog so user always sees SHA-256 & warnings
+    // Inline Profile Diff Card — re-opens PlanPreviewDialog so user always reviews SHA-256 & warnings
     if let Some(plan) = &preview {
-        let diff_card = GtkBox::new(Orientation::Vertical, 8);
+        let diff_card = GtkBox::new(Orientation::Vertical, 12);
         diff_card.add_css_class("akrep-detail-box");
 
-        let dhdr = GtkBox::new(Orientation::Horizontal, 8);
-        let dtitle = Label::new(Some(&format!(
-            "{} (Plan {})",
-            lang.pick(
-                "Hazırlanan Profil Geçiş Özeti",
-                "Staged Profile Switch Summary"
-            ),
-            plan.plan_id
+        let dhdr = GtkBox::new(Orientation::Horizontal, 12);
+        dhdr.set_valign(Align::Center);
+        let dtitle = Label::new(Some(lang.pick(
+            "Hazırlanan profil geçişi",
+            "Staged profile switch",
         )));
         dtitle.add_css_class("akrep-section-hdr");
         dtitle.set_xalign(0.0);
         dtitle.set_hexpand(true);
         dhdr.append(&dtitle);
 
-        let rbadge = Label::new(Some(risk_label(plan.risk, lang)));
-        rbadge.add_css_class("akrep-badge");
-        rbadge.add_css_class(risk_css_class(plan.risk));
-        dhdr.append(&rbadge);
+        dhdr.append(&build_risk_indicator(plan.risk, lang));
 
-        let clear_btn = Button::with_label(lang.pick("İptal / Temizle", "Dismiss Preview"));
+        let clear_btn = Button::with_label(lang.pick("Temizle", "Dismiss"));
         clear_btn.add_css_class("akrep-ghost-btn");
         let st_clr = Rc::clone(state);
         let rr_clr = Rc::clone(&on_rerender);
@@ -220,10 +220,7 @@ pub fn build_profiles_page(
         });
         dhdr.append(&clear_btn);
 
-        let review_btn = Button::with_label(lang.pick(
-            "Plan Onay Penceresini Aç (Polkit)",
-            "Review & Approve Plan (Polkit)",
-        ));
+        let review_btn = Button::with_label(lang.pick("Onayla", "Approve"));
         review_btn.add_css_class("akrep-primary-btn");
         let win_rev = window.clone();
         let st_rev = Rc::clone(state);
@@ -245,7 +242,7 @@ pub fn build_profiles_page(
 
         for d in &plan.diffs {
             let drow = Label::new(Some(&format!(
-                "[{}] {} -> {} ({})",
+                "{} · {} → {} ({})",
                 d.target,
                 d.current_value,
                 d.desired_value,
@@ -254,6 +251,7 @@ pub fn build_profiles_page(
             drow.add_css_class("akrep-mono");
             drow.set_xalign(0.0);
             drow.set_wrap(true);
+            drow.set_wrap_mode(WrapMode::WordChar);
             diff_card.append(&drow);
         }
         root.append(&diff_card);

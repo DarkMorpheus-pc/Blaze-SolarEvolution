@@ -1,4 +1,7 @@
-use crate::components::{build_kv_row, risk_css_class, risk_label, severity_css_class};
+use crate::components::{
+    build_admin_note, build_kv_row, build_risk_indicator, build_severity_indicator,
+    build_status_indicator, risk_css_class,
+};
 use crate::dbus_client::{dispatch_cmd, UiCommand};
 use crate::i18n::Lang;
 use crate::state::AppUiState;
@@ -7,6 +10,7 @@ use blaze_akrep_common::{
     SuggestedSelinuxFix,
 };
 use blaze_sentinel_core::AkrepSeverity;
+use gtk4::pango::WrapMode;
 use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Button, CheckButton, Entry, Label, Orientation};
 use std::cell::RefCell;
@@ -39,8 +43,8 @@ fn populate_boolean_rows(
 
     if filtered.is_empty() {
         let empty = Label::new(Some(lang.pick(
-            "Arama ölçütüne uyan SELinux boolean anahtarı bulunamadı.",
-            "No SELinux booleans matched the search query.",
+            "Aramayla eşleşen SELinux anahtarı yok",
+            "No matching SELinux booleans found",
         )));
         empty.add_css_class("akrep-subtitle");
         empty.set_xalign(0.0);
@@ -49,25 +53,26 @@ fn populate_boolean_rows(
     }
 
     for b in filtered {
-        let row = GtkBox::new(Orientation::Horizontal, 10);
+        let row = GtkBox::new(Orientation::Horizontal, 12);
         row.add_css_class("akrep-diff-row");
+        row.set_valign(Align::Center);
 
-        let info_col = GtkBox::new(Orientation::Vertical, 3);
+        let info_col = GtkBox::new(Orientation::Vertical, 4);
         info_col.set_hexpand(true);
 
         let top = GtkBox::new(Orientation::Horizontal, 8);
+        top.set_valign(Align::Center);
         let name_lbl = Label::new(Some(&b.name));
         name_lbl.add_css_class("akrep-mono");
         name_lbl.set_xalign(0.0);
+        name_lbl.set_wrap(true);
+        name_lbl.set_wrap_mode(WrapMode::WordChar);
         top.append(&name_lbl);
 
-        let rbadge = Label::new(Some(risk_label(b.risk, lang)));
-        rbadge.add_css_class("akrep-badge");
-        rbadge.add_css_class(risk_css_class(b.risk));
-        top.append(&rbadge);
+        top.append(&build_risk_indicator(b.risk, lang));
 
-        let cat = Label::new(Some(&format!("[{}]", b.category)));
-        cat.add_css_class("akrep-subtitle");
+        let cat = Label::new(Some(&b.category));
+        cat.add_css_class("akrep-tag");
         top.append(&cat);
         info_col.append(&top);
 
@@ -75,44 +80,49 @@ fn populate_boolean_rows(
         desc.add_css_class("akrep-subtitle");
         desc.set_xalign(0.0);
         desc.set_wrap(true);
+        desc.set_wrap_mode(WrapMode::WordChar);
         info_col.append(&desc);
         row.append(&info_col);
 
-        let rt_lbl = Label::new(Some(&format!(
-            "{}: {}",
-            lang.pick("Çalışma", "Runtime"),
-            if b.current { "ON" } else { "OFF" }
-        )));
-        rt_lbl.add_css_class("akrep-badge");
-        rt_lbl.add_css_class(if b.current {
-            "akrep-sev-attention"
-        } else {
-            "akrep-sev-protected"
-        });
-        rt_lbl.set_valign(Align::Center);
-        row.append(&rt_lbl);
+        let state_col = GtkBox::new(Orientation::Vertical, 4);
+        state_col.set_valign(Align::Center);
+        state_col.set_halign(Align::End);
+        state_col.append(&build_status_indicator(
+            if b.current {
+                "akrep-sev-attention"
+            } else {
+                "akrep-sev-protected"
+            },
+            if b.current {
+                lang.pick("Açık", "On")
+            } else {
+                lang.pick("Kapalı", "Off")
+            },
+            false,
+        ));
 
         let pers_str = if !b.persistent_known {
             lang.pick("Varsayılan", "Default")
         } else if b.persistent {
-            "ON"
+            lang.pick("Açık", "On")
         } else {
-            "OFF"
+            lang.pick("Kapalı", "Off")
         };
         let p_lbl = Label::new(Some(&format!(
             "{}: {}",
             lang.pick("Kalıcı", "Persistent"),
             pers_str
         )));
-        p_lbl.add_css_class("akrep-subtitle");
-        p_lbl.set_valign(Align::Center);
-        row.append(&p_lbl);
+        p_lbl.add_css_class("akrep-meta");
+        p_lbl.set_xalign(1.0);
+        state_col.append(&p_lbl);
+        row.append(&state_col);
 
         let target_val = !b.current;
         let btn_txt = if target_val {
-            lang.pick("ON Yap (Önizle)", "Set ON (Preview)")
+            lang.pick("Aç", "Enable")
         } else {
-            lang.pick("OFF Yap (Önizle)", "Set OFF (Preview)")
+            lang.pick("Kapat", "Disable")
         };
         let toggle_btn = Button::with_label(btn_txt);
         toggle_btn.add_css_class("akrep-ghost-btn");
@@ -150,36 +160,28 @@ pub fn build_system_protection_page(
     let draft = st.selinux_draft.clone();
     drop(st);
 
-    let root = GtkBox::new(Orientation::Vertical, 16);
+    let root = GtkBox::new(Orientation::Vertical, 20);
 
-    let title = Label::new(Some(lang.pick(
-        "Sistem Koruması (SELinux Enforcing, Boolean & AVC Tanılama)",
-        "System Protection (SELinux Enforcing, Booleans & AVC Diagnostics)",
+    let page_desc = Label::new(Some(lang.pick(
+        "SELinux erişim kontrolü, politika anahtarları ve dosya bağlamı onarımı",
+        "SELinux access control, policy booleans and file context repair",
     )));
-    title.add_css_class("akrep-title");
-    title.set_xalign(0.0);
-    root.append(&title);
+    page_desc.add_css_class("akrep-subtitle");
+    page_desc.set_xalign(0.0);
+    page_desc.set_wrap(true);
+    root.append(&page_desc);
 
-    // 1. SELinux Mode & Guardrail Status Card (NO disable SELinux button!)
-    let status_box = GtkBox::new(Orientation::Vertical, 8);
+    // 1. SELinux Mode & Guardrail Status Card (NO disable SELinux button)
+    let status_box = GtkBox::new(Orientation::Vertical, 12);
     status_box.add_css_class("akrep-detail-box");
 
-    let top_row = GtkBox::new(Orientation::Horizontal, 8);
-    let st_hdr = Label::new(Some(lang.pick(
-        "Zorunlu Erişim Kontrolü (SELinux) Durumu",
-        "Mandatory Access Control (SELinux) Posture",
-    )));
+    let top_row = GtkBox::new(Orientation::Horizontal, 12);
+    top_row.set_valign(Align::Center);
+    let st_hdr = Label::new(Some(lang.pick("SELinux durumu", "SELinux status")));
     st_hdr.add_css_class("akrep-section-hdr");
     st_hdr.set_xalign(0.0);
     st_hdr.set_hexpand(true);
     top_row.append(&st_hdr);
-
-    let redline_pill = Label::new(Some(lang.pick(
-        "SELinux Kapatma / audit2allow Yasaklı",
-        "SELinux Disable / audit2allow Forbidden",
-    )));
-    redline_pill.add_css_class("akrep-ro-pill");
-    top_row.append(&redline_pill);
 
     if let Some(d) = &diag {
         let m_sev = match d.runtime_mode {
@@ -187,10 +189,7 @@ pub fn build_system_protection_page(
             SelinuxRuntimeMode::Permissive => AkrepSeverity::Attention,
             SelinuxRuntimeMode::Disabled => AkrepSeverity::Critical,
         };
-        let mb = Label::new(Some(d.runtime_mode.as_str()));
-        mb.add_css_class("akrep-badge");
-        mb.add_css_class(severity_css_class(m_sev));
-        top_row.append(&mb);
+        top_row.append(&build_severity_indicator(m_sev, lang));
     }
     status_box.append(&top_row);
 
@@ -205,38 +204,32 @@ pub fn build_system_protection_page(
             }
         }
     }
+
+    let guardrail_note = Label::new(Some(lang.pick(
+        "SELinux tamamen kapatılamaz; politika anahtarları ve dosya bağlamları buradan yönetilebilir",
+        "SELinux cannot be disabled; policy booleans and file contexts can be managed here",
+    )));
+    guardrail_note.add_css_class("akrep-meta");
+    guardrail_note.set_xalign(0.0);
+    guardrail_note.set_wrap(true);
+    status_box.append(&guardrail_note);
     root.append(&status_box);
 
     // 2. Boolean Table & AVC Diagnosis Trigger
-    let bool_card = GtkBox::new(Orientation::Vertical, 10);
+    let bool_card = GtkBox::new(Orientation::Vertical, 12);
     bool_card.add_css_class("akrep-detail-box");
 
-    let b_hdr = GtkBox::new(Orientation::Horizontal, 10);
-    let b_title = Label::new(Some(lang.pick(
-        "SELinux Politika Anahtarları (Booleans)",
-        "SELinux Policy Booleans",
-    )));
+    let b_hdr = GtkBox::new(Orientation::Horizontal, 12);
+    b_hdr.set_valign(Align::Center);
+    let b_title = Label::new(Some(lang.pick("Politika anahtarları", "Policy booleans")));
     b_title.add_css_class("akrep-section-hdr");
     b_title.set_xalign(0.0);
     b_title.set_hexpand(true);
     b_hdr.append(&b_title);
 
-    let pers_chk = CheckButton::with_label(lang.pick(
-        "Kalıcı uygula (-P / disk politikası)",
-        "Apply persistently (-P / disk policy)",
-    ));
-    pers_chk.set_active(draft.persistent_toggle);
-    let st_p = Rc::clone(state);
-    pers_chk.connect_toggled(move |chk| {
-        st_p.borrow_mut().selinux_draft.persistent_toggle = chk.is_active();
-    });
-    b_hdr.append(&pers_chk);
-
-    let diag_btn = Button::with_label(lang.pick(
-        "AVC Günlüklerini ve Anahtarları Tanıla (Yönetici Onayı)",
-        "Diagnose AVC Logs (Admin Auth)",
-    ));
+    let diag_btn = Button::with_label(lang.pick("Tanıla", "Diagnose"));
     diag_btn.add_css_class("akrep-primary-btn");
+    diag_btn.set_valign(Align::Center);
     let cmd_diag = cmd_tx.clone();
     diag_btn.connect_clicked(move |_| {
         dispatch_cmd(
@@ -249,16 +242,32 @@ pub fn build_system_protection_page(
     b_hdr.append(&diag_btn);
     bool_card.append(&b_hdr);
 
+    let filter_row = GtkBox::new(Orientation::Horizontal, 12);
+    filter_row.set_valign(Align::Center);
+
     let search_entry = Entry::new();
     search_entry.add_css_class("akrep-entry");
+    search_entry.set_width_chars(12);
+    search_entry.set_hexpand(true);
     search_entry.set_placeholder_text(Some(lang.pick(
-        "Boolean ara (örn: httpd_can_network_connect, virt_use_kvm, samba)...",
-        "Search boolean (e.g. httpd_can_network_connect, virt_use_kvm, samba)...",
+        "Anahtar ara (virt_use_kvm, httpd, samba)",
+        "Search booleans (virt_use_kvm, httpd, samba)",
     )));
     search_entry.set_text(&draft.boolean_search);
-    bool_card.append(&search_entry);
+    filter_row.append(&search_entry);
 
-    let bool_list_box = GtkBox::new(Orientation::Vertical, 6);
+    let pers_chk = CheckButton::with_label(lang.pick("Kalıcı uygula", "Apply permanently"));
+    pers_chk.set_active(draft.persistent_toggle);
+    let st_p = Rc::clone(state);
+    pers_chk.connect_toggled(move |chk| {
+        st_p.borrow_mut().selinux_draft.persistent_toggle = chk.is_active();
+    });
+    filter_row.append(&pers_chk);
+    bool_card.append(&filter_row);
+
+    bool_card.append(&build_admin_note(lang));
+
+    let bool_list_box = GtkBox::new(Orientation::Vertical, 8);
     if let Some(d) = &diag {
         populate_boolean_rows(
             &bool_list_box,
@@ -290,8 +299,8 @@ pub fn build_system_protection_page(
             st_search.borrow_mut().selinux_draft.boolean_search = ent.text().to_string();
         });
         let prompt = Label::new(Some(lang.pick(
-            "Kataloglanmış SELinux boolean anahtarlarını ve AVC engellemelerini yüklemek için yukarıdaki 'AVC Günlüklerini ve Anahtarları Tanıla' düğmesini kullanın.",
-            "Click 'Diagnose AVC Logs (Admin Auth)' above to load live SELinux boolean states and grouped AVC denial records.",
+            "SELinux anahtarlarını ve engelleme kayıtlarını yüklemek için Tanıla düğmesini kullanın",
+            "Select Diagnose above to load SELinux booleans and grouped access denials",
         )));
         prompt.add_css_class("akrep-subtitle");
         prompt.set_xalign(0.0);
@@ -302,12 +311,9 @@ pub fn build_system_protection_page(
     root.append(&bool_card);
 
     // 3. Grouped AVC Denials Section
-    let avc_card = GtkBox::new(Orientation::Vertical, 8);
+    let avc_card = GtkBox::new(Orientation::Vertical, 12);
     avc_card.add_css_class("akrep-detail-box");
-    let avc_title = Label::new(Some(lang.pick(
-        "Gruplanmış SELinux AVC Engelleme Kayıtları",
-        "Grouped SELinux AVC Denial Records",
-    )));
+    let avc_title = Label::new(Some(lang.pick("Engelleme kayıtları", "Access denials")));
     avc_title.add_css_class("akrep-section-hdr");
     avc_title.set_xalign(0.0);
     avc_card.append(&avc_title);
@@ -315,29 +321,34 @@ pub fn build_system_protection_page(
     match &diag {
         Some(d) if !d.avc_groups.is_empty() => {
             for grp in &d.avc_groups {
-                let grow = GtkBox::new(Orientation::Vertical, 5);
+                let grow = GtkBox::new(Orientation::Vertical, 8);
                 grow.add_css_class("akrep-diff-row");
 
-                let gtop = GtkBox::new(Orientation::Horizontal, 8);
+                let gtop = GtkBox::new(Orientation::Horizontal, 12);
+                gtop.set_valign(Align::Center);
                 let app_lbl = Label::new(Some(&format!(
-                    "{} ({} -> {}:{})",
+                    "{} ({} → {}:{})",
                     grp.app_comm, grp.source_domain, grp.target_type, grp.target_class
                 )));
                 app_lbl.add_css_class("akrep-card-title");
                 app_lbl.set_xalign(0.0);
+                app_lbl.set_wrap(true);
+                app_lbl.set_wrap_mode(WrapMode::WordChar);
                 app_lbl.set_hexpand(true);
                 gtop.append(&app_lbl);
 
-                let cnt_badge = Label::new(Some(&format!("{}x", grp.count)));
-                cnt_badge.add_css_class("akrep-badge");
-                cnt_badge.add_css_class(risk_css_class(grp.severity));
-                gtop.append(&cnt_badge);
+                gtop.append(&build_status_indicator(
+                    risk_css_class(grp.severity),
+                    &format!("{}×", grp.count),
+                    false,
+                ));
                 grow.append(&gtop);
 
                 let exp = Label::new(Some(lang.pick(&grp.explanation_tr, &grp.explanation_en)));
                 exp.add_css_class("akrep-subtitle");
                 exp.set_xalign(0.0);
                 exp.set_wrap(true);
+                exp.set_wrap_mode(WrapMode::WordChar);
                 grow.append(&exp);
 
                 match &grp.suggested_remediation_kind {
@@ -346,13 +357,18 @@ pub fn build_system_protection_page(
                         recursive,
                         ..
                     } => {
-                        let fix_btn = Button::with_label(&format!(
-                            "restorecon {} ({})",
-                            target_path,
-                            lang.pick("Plan Önizle", "Preview Plan")
-                        ));
-                        fix_btn.add_css_class("akrep-primary-btn");
-                        fix_btn.set_halign(Align::Start);
+                        let act_row = GtkBox::new(Orientation::Horizontal, 12);
+                        act_row.set_valign(Align::Center);
+                        let p_lbl = Label::new(Some(&format!("restorecon {}", target_path)));
+                        p_lbl.add_css_class("akrep-mono");
+                        p_lbl.set_xalign(0.0);
+                        p_lbl.set_wrap(true);
+                        p_lbl.set_wrap_mode(WrapMode::WordChar);
+                        p_lbl.set_hexpand(true);
+                        act_row.append(&p_lbl);
+
+                        let fix_btn = Button::with_label(lang.pick("Bağlamı onar", "Repair context"));
+                        fix_btn.add_css_class("akrep-ghost-btn");
                         let cmd_f = cmd_tx.clone();
                         let tp = target_path.clone();
                         let rec = *recursive;
@@ -367,21 +383,27 @@ pub fn build_system_protection_page(
                                 },
                             );
                         });
-                        grow.append(&fix_btn);
+                        act_row.append(&fix_btn);
+                        grow.append(&act_row);
                     }
                     SuggestedSelinuxFix::SetBoolean {
                         boolean_name,
                         recommended_value,
                         ..
                     } => {
-                        let fix_btn = Button::with_label(&format!(
-                            "{} = {} ({})",
-                            boolean_name,
-                            recommended_value,
-                            lang.pick("Plan Önizle", "Preview Plan")
-                        ));
-                        fix_btn.add_css_class("akrep-primary-btn");
-                        fix_btn.set_halign(Align::Start);
+                        let act_row = GtkBox::new(Orientation::Horizontal, 12);
+                        act_row.set_valign(Align::Center);
+                        let b_lbl =
+                            Label::new(Some(&format!("{} = {}", boolean_name, recommended_value)));
+                        b_lbl.add_css_class("akrep-mono");
+                        b_lbl.set_xalign(0.0);
+                        b_lbl.set_wrap(true);
+                        b_lbl.set_hexpand(true);
+                        act_row.append(&b_lbl);
+
+                        let fix_btn =
+                            Button::with_label(lang.pick("Anahtarı uygula", "Apply boolean"));
+                        fix_btn.add_css_class("akrep-ghost-btn");
                         let cmd_f = cmd_tx.clone();
                         let st_f = Rc::clone(state);
                         let bn = boolean_name.clone();
@@ -399,16 +421,18 @@ pub fn build_system_protection_page(
                                 },
                             );
                         });
-                        grow.append(&fix_btn);
+                        act_row.append(&fix_btn);
+                        grow.append(&act_row);
                     }
                     SuggestedSelinuxFix::ManualPolicyReview {
                         guidance_tr,
                         guidance_en,
                     } => {
                         let gl = Label::new(Some(lang.pick(guidance_tr, guidance_en)));
-                        gl.add_css_class("akrep-subtitle");
+                        gl.add_css_class("akrep-meta");
                         gl.set_xalign(0.0);
                         gl.set_wrap(true);
+                        gl.set_wrap_mode(WrapMode::WordChar);
                         grow.append(&gl);
                     }
                 }
@@ -418,8 +442,8 @@ pub fn build_system_protection_page(
         }
         Some(_) => {
             let clean = Label::new(Some(lang.pick(
-                "Son denetim günlüklerinde gruplanmış AVC engellemesi bulunmadı.",
-                "Zero grouped AVC denial events found in audit records.",
+                "Son denetim kayıtlarında engelleme bulunmadı",
+                "No grouped access denials found in recent audit logs",
             )));
             clean.add_css_class("akrep-subtitle");
             clean.set_xalign(0.0);
@@ -427,48 +451,53 @@ pub fn build_system_protection_page(
         }
         None => {
             let unl = Label::new(Some(lang.pick(
-                "AVC engelleme analizi yönetici kimlik doğrulaması sonrası burada listelenir.",
-                "Grouped AVC denial analysis is displayed here after administrator authentication.",
+                "Engelleme kayıtları tanılama sonrasında burada listelenir",
+                "Grouped access denials appear here after diagnosis",
             )));
             unl.add_css_class("akrep-subtitle");
             unl.set_xalign(0.0);
+            unl.set_wrap(true);
             avc_card.append(&unl);
         }
     }
     root.append(&avc_card);
 
     // 4. File Context (restorecon) Inspector & Fixer
-    let ctx_card = GtkBox::new(Orientation::Vertical, 10);
+    let ctx_card = GtkBox::new(Orientation::Vertical, 12);
     ctx_card.add_css_class("akrep-detail-box");
 
     let ctx_title = Label::new(Some(lang.pick(
-        "Dosya Güvenlik Bağlamı Denetleyici ve Onarıcı (restorecon)",
-        "File Security Context Inspector & Fixer (restorecon)",
+        "Dosya bağlamı onarımı",
+        "File context repair",
     )));
     ctx_title.add_css_class("akrep-section-hdr");
     ctx_title.set_xalign(0.0);
     ctx_card.append(&ctx_title);
 
-    let ctx_row = GtkBox::new(Orientation::Horizontal, 8);
+    let ctx_input_row = GtkBox::new(Orientation::Horizontal, 12);
+    ctx_input_row.set_valign(Align::Center);
     let ctx_entry = Entry::new();
     ctx_entry.add_css_class("akrep-entry");
+    ctx_entry.set_width_chars(12);
     ctx_entry.set_hexpand(true);
     ctx_entry.set_text(&draft.restorecon_path);
     let st_cp = Rc::clone(state);
     ctx_entry.connect_changed(move |ent| {
         st_cp.borrow_mut().selinux_draft.restorecon_path = ent.text().to_string();
     });
-    ctx_row.append(&ctx_entry);
+    ctx_input_row.append(&ctx_entry);
 
-    let rec_ctx = CheckButton::with_label(lang.pick("Özyinelemeli (-R)", "Recursive (-R)"));
+    let rec_ctx = CheckButton::with_label(lang.pick("Alt klasörler dahil", "Include subfolders"));
     rec_ctx.set_active(draft.restorecon_recursive);
     let st_cr = Rc::clone(state);
     rec_ctx.connect_toggled(move |chk| {
         st_cr.borrow_mut().selinux_draft.restorecon_recursive = chk.is_active();
     });
-    ctx_row.append(&rec_ctx);
+    ctx_input_row.append(&rec_ctx);
+    ctx_card.append(&ctx_input_row);
 
-    let inspect_ctx_btn = Button::with_label(lang.pick("Bağlamı İncele", "Inspect Context"));
+    let ctx_btn_row = GtkBox::new(Orientation::Horizontal, 8);
+    let inspect_ctx_btn = Button::with_label(lang.pick("Bağlamı incele", "Inspect context"));
     inspect_ctx_btn.add_css_class("akrep-ghost-btn");
     let cmd_ic = cmd_tx.clone();
     let st_ic = Rc::clone(state);
@@ -488,13 +517,10 @@ pub fn build_system_protection_page(
             },
         );
     });
-    ctx_row.append(&inspect_ctx_btn);
+    ctx_btn_row.append(&inspect_ctx_btn);
 
-    let fix_ctx_btn = Button::with_label(lang.pick(
-        "Onarım Planı Oluştur (restorecon)",
-        "Preview Restorecon Plan",
-    ));
-    fix_ctx_btn.add_css_class("akrep-primary-btn");
+    let fix_ctx_btn = Button::with_label(lang.pick("Onarımı önizle", "Preview repair"));
+    fix_ctx_btn.add_css_class("akrep-ghost-btn");
     let cmd_fc = cmd_tx.clone();
     let st_fc = Rc::clone(state);
     fix_ctx_btn.connect_clicked(move |_| {
@@ -509,8 +535,8 @@ pub fn build_system_protection_page(
             },
         );
     });
-    ctx_row.append(&fix_ctx_btn);
-    ctx_card.append(&ctx_row);
+    ctx_btn_row.append(&fix_ctx_btn);
+    ctx_card.append(&ctx_btn_row);
 
     if let Some(d) = &diag {
         for c in d.current_contexts.iter().take(15) {
@@ -519,7 +545,7 @@ pub fn build_system_protection_page(
         for p in d.restorecon_preview.iter().take(15) {
             ctx_card.append(&build_kv_row(
                 &p.path,
-                &format!("{} -> {}", p.from_context, p.to_context),
+                &format!("{} → {}", p.from_context, p.to_context),
             ));
         }
     }

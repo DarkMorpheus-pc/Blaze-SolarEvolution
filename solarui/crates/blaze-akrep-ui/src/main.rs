@@ -27,7 +27,10 @@ use blaze_akrep_common::{
 };
 use blaze_sentinel_core::{AkrepSeverity, AKREP_SCHEMA_VERSION, AKREP_VERSION};
 use gtk4::prelude::*;
-use gtk4::{Application, ApplicationWindow, Box as GtkBox, HeaderBar, Orientation, ScrolledWindow};
+use gtk4::{
+    Application, ApplicationWindow, Box as GtkBox, HeaderBar, Orientation, PolicyType,
+    ScrolledWindow,
+};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -105,6 +108,7 @@ fn render_chrome(
     let cmd_dis = cmd_tx.clone();
 
     let banner = build_header_banner(
+        active_tab,
         snap.as_ref(),
         (&active_prof_tr, &active_prof_en),
         offline.as_deref(),
@@ -177,6 +181,12 @@ fn render_page(
         _ => build_overview_page(state, on_select),
     };
 
+    page_widget.set_margin_top(24);
+    page_widget.set_margin_bottom(24);
+    page_widget.set_margin_start(24);
+    page_widget.set_margin_end(24);
+    page_widget.set_hexpand(true);
+
     widgets.scroller.set_child(Some(&page_widget));
 }
 
@@ -191,7 +201,7 @@ fn render_all(
 
 fn print_help() {
     println!(
-        "akrep-ui {} — BlazeOS Akrep Security Center (GTK4 Dual-Bus Client)",
+        "akrep-ui {} - BlazeOS Akrep Security Center",
         AKREP_VERSION
     );
     println!(
@@ -377,13 +387,9 @@ fn main() {
         let rail_slot = GtkBox::new(Orientation::Vertical, 0);
         root_box.append(&rail_slot);
 
-        let main_col = GtkBox::new(Orientation::Vertical, 14);
+        let main_col = GtkBox::new(Orientation::Vertical, 0);
         main_col.set_hexpand(true);
         main_col.set_vexpand(true);
-        main_col.set_margin_top(16);
-        main_col.set_margin_bottom(16);
-        main_col.set_margin_start(18);
-        main_col.set_margin_end(18);
 
         let banner_slot = GtkBox::new(Orientation::Vertical, 0);
         main_col.append(&banner_slot);
@@ -391,13 +397,14 @@ fn main() {
         let scroller = ScrolledWindow::new();
         scroller.set_vexpand(true);
         scroller.set_hexpand(true);
+        scroller.set_policy(PolicyType::Never, PolicyType::Automatic);
         main_col.append(&scroller);
 
         root_box.append(&main_col);
 
         let window = ApplicationWindow::builder()
             .application(app)
-            .title("Akrep Security Center")
+            .title("Akrep")
             .default_width(1140)
             .default_height(760)
             .child(&root_box)
@@ -490,14 +497,8 @@ fn main() {
                             let sum_en = summarize_action_request(&rec.request, Lang::En);
                             st.notice = Some(NoticeBanner {
                                 kind: NoticeKind::Success,
-                                message_tr: format!(
-                                    "İşlem onaylandı ve doğrulandı ({}): {}",
-                                    rec.tx_id, sum_tr
-                                ),
-                                message_en: format!(
-                                    "Transaction committed & verified ({}): {}",
-                                    rec.tx_id, sum_en
-                                ),
+                                message_tr: format!("Değişiklik uygulandı: {}", sum_tr),
+                                message_en: format!("Change applied: {}", sum_en),
                             });
                             if matches!(rec.request, ActionRequest::ApplyProfile { .. }) {
                                 st.last_profile_preview = None;
@@ -527,11 +528,8 @@ fn main() {
                             let mut st = st_ev.borrow_mut();
                             st.notice = Some(NoticeBanner {
                                 kind: NoticeKind::Info,
-                                message_tr: format!("İşlem başarıyla geri alındı ({}).", rec.tx_id),
-                                message_en: format!(
-                                    "Transaction rolled back cleanly ({}).",
-                                    rec.tx_id
-                                ),
+                                message_tr: "Değişiklik geri alındı".to_string(),
+                                message_en: "Change rolled back".to_string(),
                             });
                             if let Some(existing) =
                                 st.history_records.iter_mut().find(|r| r.tx_id == rec.tx_id)
@@ -577,13 +575,10 @@ fn main() {
                             st.notice = Some(NoticeBanner {
                                 kind: NoticeKind::Info,
                                 message_tr: format!(
-                                    "Sistem Flatpak denetimi yüklendi ({} uygulama).",
+                                    "Sistem uygulamaları yüklendi ({} uygulama)",
                                     count
                                 ),
-                                message_en: format!(
-                                    "System Flatpak audit loaded ({} application(s)).",
-                                    count
-                                ),
+                                message_en: format!("System apps loaded ({} apps)", count),
                             });
                         }
                         render_chrome(&w_ev, &st_ev, &cmd_ev);
@@ -670,14 +665,8 @@ fn main() {
                             }
                             st.notice = Some(NoticeBanner {
                                 kind: NoticeKind::Success,
-                                message_tr: format!(
-                                    "{} kullanıcı izinleri güncellendi (tx={}).",
-                                    tx.app_id, tx.tx_id
-                                ),
-                                message_en: format!(
-                                    "Applied user Flatpak override for {} (tx={}).",
-                                    tx.app_id, tx.tx_id
-                                ),
+                                message_tr: format!("{} izinleri güncellendi", tx.app_id),
+                                message_en: format!("Updated permissions for {}", tx.app_id),
                             });
                         }
                         render_chrome(&w_ev, &st_ev, &cmd_ev);
@@ -687,14 +676,8 @@ fn main() {
                             let mut st = st_ev.borrow_mut();
                             st.notice = Some(NoticeBanner {
                                 kind: NoticeKind::Info,
-                                message_tr: format!(
-                                    "{} kullanıcı izni anahtar düzeyinde geri alındı.",
-                                    tx.app_id
-                                ),
-                                message_en: format!(
-                                    "Reverted key-level user override for {}.",
-                                    tx.app_id
-                                ),
+                                message_tr: format!("{} izin değişikliği geri alındı", tx.app_id),
+                                message_en: format!("Reverted permission change for {}", tx.app_id),
                             });
                         }
                         render_chrome(&w_ev, &st_ev, &cmd_ev);

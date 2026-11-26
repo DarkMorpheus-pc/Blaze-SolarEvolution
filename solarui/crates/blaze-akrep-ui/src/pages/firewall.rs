@@ -1,10 +1,12 @@
-use crate::components::{build_kv_row, severity_css_class};
+use crate::components::{build_admin_note, build_kv_row, build_status_indicator};
 use crate::dbus_client::{dispatch_cmd, UiCommand};
 use crate::state::{AppUiState, FirewallRuleInputKind};
 use blaze_akrep_common::{ActionRequest, FirewallProto, RulePersistence};
-use blaze_sentinel_core::AkrepSeverity;
+use gtk4::pango::WrapMode;
 use gtk4::prelude::*;
-use gtk4::{Align, Box as GtkBox, Button, CheckButton, Entry, Label, Orientation};
+use gtk4::{
+    Align, Box as GtkBox, Button, CheckButton, Entry, FlowBox, Label, Orientation, SelectionMode,
+};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -86,39 +88,36 @@ pub fn build_firewall_page(
     let draft = st.firewall_draft.clone();
     drop(st);
 
-    let root = GtkBox::new(Orientation::Vertical, 16);
+    let root = GtkBox::new(Orientation::Vertical, 20);
 
-    let title = Label::new(Some(lang.pick(
-        "Güvenlik Duvarı (Firewalld Bölgeleri, Süreli Port & LAN CIDR Yönetimi)",
-        "Firewall (Firewalld Zones, Timed Ports & Scoped LAN CIDR Rules)",
+    let page_desc = Label::new(Some(lang.pick(
+        "Firewalld bölgeleri, ağ arayüzleri ve süreli port kuralları",
+        "Firewalld zones, network interfaces and timed port rules",
     )));
-    title.add_css_class("akrep-title");
-    title.set_xalign(0.0);
-    root.append(&title);
+    page_desc.add_css_class("akrep-subtitle");
+    page_desc.set_xalign(0.0);
+    page_desc.set_wrap(true);
+    root.append(&page_desc);
 
-    // 1. Active Zones & Interface Bindings Card (NO disable firewalld button!)
-    let status_card = GtkBox::new(Orientation::Vertical, 10);
+    // 1. Active Zones & Interface Bindings Card (NO disable firewalld button)
+    let status_card = GtkBox::new(Orientation::Vertical, 12);
     status_card.add_css_class("akrep-detail-box");
 
-    let s_hdr = GtkBox::new(Orientation::Horizontal, 8);
+    let s_hdr = GtkBox::new(Orientation::Horizontal, 12);
+    s_hdr.set_valign(Align::Center);
     let s_title = Label::new(Some(lang.pick(
-        "Etkin Bölgeler ve Ağ Arayüzü Bağlamaları",
-        "Active Zones & Network Interface Bindings",
+        "Etkin bölgeler ve arayüzler",
+        "Active zones and interfaces",
     )));
     s_title.add_css_class("akrep-section-hdr");
     s_title.set_xalign(0.0);
+    s_title.set_wrap(true);
     s_title.set_hexpand(true);
     s_hdr.append(&s_title);
 
-    let redline_pill = Label::new(Some(
-        lang.pick("Firewalld Kapatma Yasaklı", "Firewalld Disable Forbidden"),
-    ));
-    redline_pill.add_css_class("akrep-ro-pill");
-    s_hdr.append(&redline_pill);
-
-    let inspect_btn =
-        Button::with_label(lang.pick("Tüm Kuralları Yükle (Polkit)", "Inspect Rules (Polkit)"));
-    inspect_btn.add_css_class("akrep-primary-btn");
+    let inspect_btn = Button::with_label(lang.pick("Kuralları yükle", "Load rules"));
+    inspect_btn.add_css_class("akrep-ghost-btn");
+    inspect_btn.set_valign(Align::Center);
     let cmd_insp = cmd_tx.clone();
     inspect_btn.connect_clicked(move |_| {
         dispatch_cmd(
@@ -132,23 +131,22 @@ pub fn build_firewall_page(
     status_card.append(&s_hdr);
 
     if let Some(fw) = &fw_state {
-        let sev = if fw.running {
-            AkrepSeverity::Protected
-        } else {
-            AkrepSeverity::Critical
-        };
-        let b = Label::new(Some(if fw.running {
-            lang.pick("Firewalld Çalışıyor", "Firewalld Running")
-        } else {
-            lang.pick("Firewalld Pasif", "Firewalld Inactive")
-        }));
-        b.add_css_class("akrep-badge");
-        b.add_css_class(severity_css_class(sev));
-        b.set_halign(Align::Start);
-        status_card.append(&b);
+        status_card.append(&build_status_indicator(
+            if fw.running {
+                "akrep-sev-protected"
+            } else {
+                "akrep-sev-critical"
+            },
+            if fw.running {
+                lang.pick("Firewalld etkin", "Firewalld active")
+            } else {
+                lang.pick("Firewalld pasif", "Firewalld inactive")
+            },
+            false,
+        ));
 
         status_card.append(&build_kv_row(
-            lang.pick("Varsayılan Bölge", "Default Zone"),
+            lang.pick("Varsayılan bölge", "Default zone"),
             &fw.default_zone,
         ));
         let az_str = if fw.active_zones.is_empty() {
@@ -157,12 +155,12 @@ pub fn build_firewall_page(
         } else {
             fw.active_zones
                 .iter()
-                .map(|(iface, z)| format!("{} -> {}", iface, z))
+                .map(|(iface, z)| format!("{} → {}", iface, z))
                 .collect::<Vec<_>>()
                 .join(", ")
         };
         status_card.append(&build_kv_row(
-            lang.pick("Arayüz -> Bölge Eşleşmeleri", "Interface -> Zone Map"),
+            lang.pick("Arayüz eşleşmeleri", "Interface bindings"),
             &az_str,
         ));
     } else if let Some(sn) = &snap {
@@ -173,39 +171,53 @@ pub fn build_firewall_page(
         }
     }
 
-    let bind_row = GtkBox::new(Orientation::Horizontal, 8);
+    let bind_inputs = GtkBox::new(Orientation::Horizontal, 8);
     let iface_entry = Entry::new();
     iface_entry.add_css_class("akrep-entry");
-    iface_entry.set_placeholder_text(Some(
-        lang.pick("Arayüz (örn: eth0, wlan0)", "Interface (e.g. eth0, wlan0)"),
-    ));
+    iface_entry.set_width_chars(10);
+    iface_entry.set_hexpand(true);
+    iface_entry.set_placeholder_text(Some(lang.pick(
+        "Arayüz (eth0, wlan0)",
+        "Interface (eth0, wlan0)",
+    )));
     iface_entry.set_text(&draft.bind_interface);
     let st_if = Rc::clone(state);
     iface_entry.connect_changed(move |ent| {
         st_if.borrow_mut().firewall_draft.bind_interface = ent.text().to_string();
     });
-    bind_row.append(&iface_entry);
+    bind_inputs.append(&iface_entry);
 
     let bzone_entry = Entry::new();
     bzone_entry.add_css_class("akrep-entry");
-    bzone_entry.set_placeholder_text(Some("public / drop / home"));
+    bzone_entry.set_width_chars(10);
+    bzone_entry.set_hexpand(true);
+    bzone_entry.set_placeholder_text(Some(lang.pick(
+        "Bölge (public, home, drop)",
+        "Zone (public, home, drop)",
+    )));
     bzone_entry.set_text(&draft.bind_zone);
     let st_bz = Rc::clone(state);
     bzone_entry.connect_changed(move |ent| {
         st_bz.borrow_mut().firewall_draft.bind_zone = ent.text().to_string();
     });
-    bind_row.append(&bzone_entry);
+    bind_inputs.append(&bzone_entry);
+    status_card.append(&bind_inputs);
 
+    let bind_actions = GtkBox::new(Orientation::Horizontal, 12);
+    bind_actions.set_valign(Align::Center);
     let bperm_chk = CheckButton::with_label(lang.pick("Kalıcı", "Permanent"));
     bperm_chk.set_active(draft.bind_permanent);
     let st_bp = Rc::clone(state);
     bperm_chk.connect_toggled(move |chk| {
         st_bp.borrow_mut().firewall_draft.bind_permanent = chk.is_active();
     });
-    bind_row.append(&bperm_chk);
+    bind_actions.append(&bperm_chk);
 
-    let bind_btn =
-        Button::with_label(lang.pick("Bölgeye Bağla (Önizle)", "Bind Interface (Preview)"));
+    let bind_spacer = GtkBox::new(Orientation::Horizontal, 0);
+    bind_spacer.set_hexpand(true);
+    bind_actions.append(&bind_spacer);
+
+    let bind_btn = Button::with_label(lang.pick("Bölgeye bağla", "Bind to zone"));
     bind_btn.add_css_class("akrep-ghost-btn");
     let cmd_bind = cmd_tx.clone();
     let st_bind = Rc::clone(state);
@@ -222,30 +234,45 @@ pub fn build_firewall_page(
             },
         );
     });
-    bind_row.append(&bind_btn);
-    status_card.append(&bind_row);
+    bind_actions.append(&bind_btn);
+    status_card.append(&bind_actions);
+
+    let guard_lbl = Label::new(Some(lang.pick(
+        "Güvenlik duvarı tamamen kapatılamaz; kural ekleyip çıkarabilirsiniz",
+        "Firewall cannot be disabled; you can add or remove rules",
+    )));
+    guard_lbl.add_css_class("akrep-meta");
+    guard_lbl.set_xalign(0.0);
+    guard_lbl.set_wrap(true);
+    status_card.append(&guard_lbl);
+    status_card.append(&build_admin_note(lang));
     root.append(&status_card);
 
     // 2. Quick Rule Builder Card
-    let builder_card = GtkBox::new(Orientation::Vertical, 10);
+    let builder_card = GtkBox::new(Orientation::Vertical, 12);
     builder_card.add_css_class("akrep-detail-box");
 
-    let b_title = Label::new(Some(lang.pick(
-        "Hızlı ve Kapsamlı Kural Oluşturucu",
-        "Scoped Firewall Rule Builder",
-    )));
+    let b_title = Label::new(Some(lang.pick("Kural oluşturucu", "Rule builder")));
     b_title.add_css_class("akrep-section-hdr");
     b_title.set_xalign(0.0);
     builder_card.append(&b_title);
 
-    let preset_row = GtkBox::new(Orientation::Horizontal, 8);
-    let preset_lbl = Label::new(Some(lang.pick("Hazır Şablonlar:", "Quick Presets:")));
-    preset_lbl.add_css_class("akrep-subtitle");
-    preset_row.append(&preset_lbl);
+    let preset_lbl = Label::new(Some(lang.pick("Hazır şablonlar", "Quick presets")));
+    preset_lbl.add_css_class("akrep-meta");
+    preset_lbl.set_xalign(0.0);
+    builder_card.append(&preset_lbl);
 
-    for (label, kind, spec, proto, cidr) in [
+    let preset_flow = FlowBox::new();
+    preset_flow.set_selection_mode(SelectionMode::None);
+    preset_flow.set_column_spacing(8);
+    preset_flow.set_row_spacing(8);
+    preset_flow.set_max_children_per_line(4);
+    preset_flow.set_min_children_per_line(2);
+
+    for (label_tr, label_en, kind, spec, proto, cidr) in [
         (
-            "Minecraft LAN (25565/tcp)",
+            "Minecraft (25565/tcp)",
+            "Minecraft (25565/tcp)",
             FirewallRuleInputKind::Port,
             "25565",
             FirewallProto::Tcp,
@@ -253,13 +280,15 @@ pub fn build_firewall_page(
         ),
         (
             "KDE Connect (1714-1764/tcp)",
+            "KDE Connect (1714-1764/tcp)",
             FirewallRuleInputKind::Port,
             "1714-1764",
             FirewallProto::Tcp,
             "192.168.1.0/24",
         ),
         (
-            "SSH (LAN)",
+            "SSH (yerel ağ)",
+            "SSH (local network)",
             FirewallRuleInputKind::Service,
             "ssh",
             FirewallProto::Tcp,
@@ -267,13 +296,14 @@ pub fn build_firewall_page(
         ),
         (
             "HTTPS (443/tcp)",
+            "HTTPS (443/tcp)",
             FirewallRuleInputKind::Port,
             "443",
             FirewallProto::Tcp,
             "",
         ),
     ] {
-        let pbtn = Button::with_label(label);
+        let pbtn = Button::with_label(lang.pick(label_tr, label_en));
         pbtn.add_css_class("akrep-ghost-btn");
         let st_pr = Rc::clone(state);
         let rr = Rc::clone(&on_rerender);
@@ -287,14 +317,16 @@ pub fn build_firewall_page(
             }
             rr();
         });
-        preset_row.append(&pbtn);
+        preset_flow.insert(&pbtn, -1);
     }
-    builder_card.append(&preset_row);
+    builder_card.append(&preset_flow);
 
+    // Row 1: Zone, Kind, Target, Proto
     let row1 = GtkBox::new(Orientation::Horizontal, 8);
     let zone_entry = Entry::new();
     zone_entry.add_css_class("akrep-entry");
-    zone_entry.set_placeholder_text(Some("Zone (public / FedoraWorkstation)"));
+    zone_entry.set_width_chars(10);
+    zone_entry.set_placeholder_text(Some(lang.pick("Bölge", "Zone")));
     zone_entry.set_text(&draft.zone);
     let st_z = Rc::clone(state);
     zone_entry.connect_changed(move |ent| {
@@ -304,9 +336,9 @@ pub fn build_firewall_page(
 
     let kind_port_btn = Button::with_label(lang.pick("Port", "Port"));
     kind_port_btn.add_css_class(if draft.input_kind == FirewallRuleInputKind::Port {
-        "akrep-primary-btn"
+        "akrep-seg-active"
     } else {
-        "akrep-ghost-btn"
+        "akrep-seg-btn"
     });
     let st_kp = Rc::clone(state);
     let rr_kp = Rc::clone(&on_rerender);
@@ -318,9 +350,9 @@ pub fn build_firewall_page(
 
     let kind_svc_btn = Button::with_label(lang.pick("Servis", "Service"));
     kind_svc_btn.add_css_class(if draft.input_kind == FirewallRuleInputKind::Service {
-        "akrep-primary-btn"
+        "akrep-seg-active"
     } else {
-        "akrep-ghost-btn"
+        "akrep-seg-btn"
     });
     let st_ks = Rc::clone(state);
     let rr_ks = Rc::clone(&on_rerender);
@@ -332,9 +364,10 @@ pub fn build_firewall_page(
 
     let target_entry = Entry::new();
     target_entry.add_css_class("akrep-entry");
+    target_entry.set_width_chars(10);
     target_entry.set_hexpand(true);
     target_entry.set_placeholder_text(Some(match draft.input_kind {
-        FirewallRuleInputKind::Port => "25565 or 1714-1764",
+        FirewallRuleInputKind::Port => "25565",
         FirewallRuleInputKind::Service => "ssh, http, mdns",
     }));
     target_entry.set_text(&draft.port_or_service);
@@ -348,9 +381,9 @@ pub fn build_firewall_page(
         for (plbl, pval) in [("TCP", FirewallProto::Tcp), ("UDP", FirewallProto::Udp)] {
             let b = Button::with_label(plbl);
             b.add_css_class(if draft.proto == pval {
-                "akrep-primary-btn"
+                "akrep-seg-active"
             } else {
-                "akrep-ghost-btn"
+                "akrep-seg-btn"
             });
             let st_pr = Rc::clone(state);
             let rr_pr = Rc::clone(&on_rerender);
@@ -363,22 +396,20 @@ pub fn build_firewall_page(
     }
     builder_card.append(&row1);
 
+    // Row 2: Persistence mode segmented bar
     let row2 = GtkBox::new(Orientation::Horizontal, 8);
     let modes = [
+        (lang.pick("Geçici", "Temporary"), RulePersistence::Runtime),
         (
-            lang.pick("Geçici (Runtime)", "Runtime"),
-            RulePersistence::Runtime,
-        ),
-        (
-            lang.pick("Süreli 15dk", "Timed 15m"),
+            lang.pick("15 dk", "15m"),
             RulePersistence::TimedRuntime { seconds: 900 },
         ),
         (
-            lang.pick("Süreli 1sa", "Timed 1h"),
+            lang.pick("1 sa", "1h"),
             RulePersistence::TimedRuntime { seconds: 3600 },
         ),
         (
-            lang.pick("Süreli 4sa", "Timed 4h"),
+            lang.pick("4 sa", "4h"),
             RulePersistence::TimedRuntime { seconds: 14400 },
         ),
         (lang.pick("Kalıcı", "Permanent"), RulePersistence::Permanent),
@@ -386,9 +417,9 @@ pub fn build_firewall_page(
     for (mlbl, mval) in modes {
         let mb = Button::with_label(mlbl);
         mb.add_css_class(if draft.persistence == mval {
-            "akrep-primary-btn"
+            "akrep-seg-active"
         } else {
-            "akrep-ghost-btn"
+            "akrep-seg-btn"
         });
         let st_m = Rc::clone(state);
         let rr_m = Rc::clone(&on_rerender);
@@ -398,22 +429,26 @@ pub fn build_firewall_page(
         });
         row2.append(&mb);
     }
+    builder_card.append(&row2);
 
+    // Row 3: Optional source network + primary preview action
+    let row3 = GtkBox::new(Orientation::Horizontal, 8);
     let cidr_entry = Entry::new();
     cidr_entry.add_css_class("akrep-entry");
+    cidr_entry.set_width_chars(12);
     cidr_entry.set_hexpand(true);
     cidr_entry.set_placeholder_text(Some(lang.pick(
-        "İsteğe bağlı kaynak CIDR (örn: 192.168.1.0/24)",
-        "Optional LAN CIDR (e.g. 192.168.1.0/24)",
+        "İsteğe bağlı kaynak ağ (192.168.1.0/24)",
+        "Optional source network (192.168.1.0/24)",
     )));
     cidr_entry.set_text(&draft.source_cidr);
     let st_cd = Rc::clone(state);
     cidr_entry.connect_changed(move |ent| {
         st_cd.borrow_mut().firewall_draft.source_cidr = ent.text().to_string();
     });
-    row2.append(&cidr_entry);
+    row3.append(&cidr_entry);
 
-    let add_btn = Button::with_label(lang.pick("Kural Planını Önizle", "Preview Rule Plan"));
+    let add_btn = Button::with_label(lang.pick("Önizle", "Preview"));
     add_btn.add_css_class("akrep-primary-btn");
     let cmd_add = cmd_tx.clone();
     let st_add = Rc::clone(state);
@@ -444,16 +479,16 @@ pub fn build_firewall_page(
         };
         dispatch_cmd(&cmd_add, UiCommand::CreatePlan { request: req });
     });
-    row2.append(&add_btn);
-    builder_card.append(&row2);
+    row3.append(&add_btn);
+    builder_card.append(&row3);
     root.append(&builder_card);
 
-    // 3. Existing Rules List (Runtime, Runtime+Permanent, and Permanent-Only)
-    let rules_card = GtkBox::new(Orientation::Vertical, 10);
+    // 3. Existing Rules List
+    let rules_card = GtkBox::new(Orientation::Vertical, 12);
     rules_card.add_css_class("akrep-detail-box");
     let r_title = Label::new(Some(lang.pick(
-        "Mevcut Bölge Kuralları (Servisler, Portlar & Rich Rules)",
-        "Existing Zone Rules (Services, Ports & Rich Rules)",
+        "Mevcut bölge kuralları",
+        "Existing zone rules",
     )));
     r_title.add_css_class("akrep-section-hdr");
     r_title.set_xalign(0.0);
@@ -470,17 +505,36 @@ pub fn build_firewall_page(
             if !z.active && !z.is_default && !has_rules {
                 continue;
             }
-            let z_box = GtkBox::new(Orientation::Vertical, 6);
+            let z_box = GtkBox::new(Orientation::Vertical, 8);
             z_box.add_css_class("akrep-diff-row");
+
+            let z_top = GtkBox::new(Orientation::Horizontal, 8);
+            z_top.set_valign(Align::Center);
             let z_hdr = Label::new(Some(&format!(
-                "Zone: {}{}{}",
-                z.name,
-                if z.is_default { " [Default]" } else { "" },
-                if z.active { " [Active]" } else { "" }
+                "{}: {}",
+                lang.pick("Bölge", "Zone"),
+                z.name
             )));
             z_hdr.add_css_class("akrep-card-title");
             z_hdr.set_xalign(0.0);
-            z_box.append(&z_hdr);
+            z_hdr.set_hexpand(true);
+            z_top.append(&z_hdr);
+
+            if z.is_default {
+                let dtag = Label::new(Some(lang.pick("Varsayılan", "Default")));
+                dtag.add_css_class("akrep-tag");
+                z_top.append(&dtag);
+            }
+            if z.active {
+                let atag = Label::new(Some(lang.pick("Etkin", "Active")));
+                atag.add_css_class("akrep-tag");
+                z_top.append(&atag);
+            }
+            z_box.append(&z_top);
+
+            let scope_rt = lang.pick("Geçici", "Temporary");
+            let scope_perm = lang.pick("Kalıcı", "Permanent");
+            let scope_both = lang.pick("Geçici ve kalıcı", "Temporary & permanent");
 
             // Runtime (+ Permanent) ports
             for (port, proto_str) in &z.runtime_ports {
@@ -494,18 +548,18 @@ pub fn build_firewall_page(
                     FirewallProto::Tcp
                 };
                 let prow = GtkBox::new(Orientation::Horizontal, 8);
+                prow.set_valign(Align::Center);
                 let plbl = Label::new(Some(&format!(
-                    "Port: {}/{} ({})",
+                    "{}: {}/{} ({})",
+                    lang.pick("Port", "Port"),
                     port,
                     proto.as_str(),
-                    if is_perm {
-                        "Runtime + Permanent"
-                    } else {
-                        "Runtime"
-                    }
+                    if is_perm { scope_both } else { scope_rt }
                 )));
                 plbl.add_css_class("akrep-mono");
                 plbl.set_xalign(0.0);
+                plbl.set_wrap(true);
+                plbl.set_wrap_mode(WrapMode::WordChar);
                 plbl.set_hexpand(true);
                 prow.append(&plbl);
 
@@ -547,13 +601,18 @@ pub fn build_firewall_page(
                     FirewallProto::Tcp
                 };
                 let prow = GtkBox::new(Orientation::Horizontal, 8);
+                prow.set_valign(Align::Center);
                 let plbl = Label::new(Some(&format!(
-                    "Port: {}/{} [Permanent]",
+                    "{}: {}/{} ({})",
+                    lang.pick("Port", "Port"),
                     port,
-                    proto.as_str()
+                    proto.as_str(),
+                    scope_perm
                 )));
                 plbl.add_css_class("akrep-mono");
                 plbl.set_xalign(0.0);
+                plbl.set_wrap(true);
+                plbl.set_wrap_mode(WrapMode::WordChar);
                 plbl.set_hexpand(true);
                 prow.append(&plbl);
 
@@ -584,17 +643,17 @@ pub fn build_firewall_page(
             for svc in &z.runtime_services {
                 let is_perm = z.permanent_services.contains(svc);
                 let srow = GtkBox::new(Orientation::Horizontal, 8);
+                srow.set_valign(Align::Center);
                 let slbl = Label::new(Some(&format!(
-                    "Service: {} ({})",
+                    "{}: {} ({})",
+                    lang.pick("Servis", "Service"),
                     svc,
-                    if is_perm {
-                        "Runtime + Permanent"
-                    } else {
-                        "Runtime"
-                    }
+                    if is_perm { scope_both } else { scope_rt }
                 )));
                 slbl.add_css_class("akrep-mono");
                 slbl.set_xalign(0.0);
+                slbl.set_wrap(true);
+                slbl.set_wrap_mode(WrapMode::WordChar);
                 slbl.set_hexpand(true);
                 srow.append(&slbl);
 
@@ -626,9 +685,17 @@ pub fn build_firewall_page(
                     continue;
                 }
                 let srow = GtkBox::new(Orientation::Horizontal, 8);
-                let slbl = Label::new(Some(&format!("Service: {} [Permanent]", svc)));
+                srow.set_valign(Align::Center);
+                let slbl = Label::new(Some(&format!(
+                    "{}: {} ({})",
+                    lang.pick("Servis", "Service"),
+                    svc,
+                    scope_perm
+                )));
                 slbl.add_css_class("akrep-mono");
                 slbl.set_xalign(0.0);
+                slbl.set_wrap(true);
+                slbl.set_wrap_mode(WrapMode::WordChar);
                 slbl.set_hexpand(true);
                 srow.append(&slbl);
 
@@ -654,22 +721,21 @@ pub fn build_firewall_page(
                 z_box.append(&srow);
             }
 
-            // Runtime (+ Permanent) rich rules
+            // Runtime (+ Permanent) scoped rules
             for rr in &z.runtime_rich_rules {
                 let is_perm = z.permanent_rich_rules.contains(rr);
                 let rrow = GtkBox::new(Orientation::Horizontal, 8);
+                rrow.set_valign(Align::Center);
                 let rlbl = Label::new(Some(&format!(
-                    "Rich Rule ({}): {}",
-                    if is_perm {
-                        "Runtime + Permanent"
-                    } else {
-                        "Runtime"
-                    },
+                    "{} ({}): {}",
+                    lang.pick("Özel kural", "Custom rule"),
+                    if is_perm { scope_both } else { scope_rt },
                     rr
                 )));
                 rlbl.add_css_class("akrep-mono");
                 rlbl.set_xalign(0.0);
                 rlbl.set_wrap(true);
+                rlbl.set_wrap_mode(WrapMode::WordChar);
                 rlbl.set_hexpand(true);
                 rrow.append(&rlbl);
 
@@ -690,16 +756,23 @@ pub fn build_firewall_page(
                 z_box.append(&rrow);
             }
 
-            // Permanent-only rich rules
+            // Permanent-only scoped rules
             for rr in &z.permanent_rich_rules {
                 if z.runtime_rich_rules.contains(rr) {
                     continue;
                 }
                 let rrow = GtkBox::new(Orientation::Horizontal, 8);
-                let rlbl = Label::new(Some(&format!("Rich Rule [Permanent]: {}", rr)));
+                rrow.set_valign(Align::Center);
+                let rlbl = Label::new(Some(&format!(
+                    "{} ({}): {}",
+                    lang.pick("Özel kural", "Custom rule"),
+                    scope_perm,
+                    rr
+                )));
                 rlbl.add_css_class("akrep-mono");
                 rlbl.set_xalign(0.0);
                 rlbl.set_wrap(true);
+                rlbl.set_wrap_mode(WrapMode::WordChar);
                 rlbl.set_hexpand(true);
                 rrow.append(&rlbl);
 
@@ -724,8 +797,8 @@ pub fn build_firewall_page(
         }
     } else {
         let hint = Label::new(Some(lang.pick(
-            "Tüm bölge portlarını, servislerini ve zengin kuralları listelemek veya kaldırmak için üstteki 'Tüm Kuralları Yükle (Polkit)' düğmesine tıklayın.",
-            "Click 'Inspect Rules (Polkit)' above to load and manage per-zone ports, services, and rich rules.",
+            "Bölge portlarını, servislerini ve özel kuralları görmek için üstteki Kuralları yükle düğmesine tıklayın",
+            "Select Load rules above to inspect and manage per-zone ports, services and custom rules",
         )));
         hint.add_css_class("akrep-subtitle");
         hint.set_xalign(0.0);

@@ -1,268 +1,583 @@
 use gtk4::CssProvider;
 
 pub const SOLARUI_CSS: &str = r#"
+/* Blaze SolarEvolution — Graphite Dark Ramp + Blaze Ember Accent */
 window.akrep-window {
-    background-color: #0b0f16;
-    color: #e6edf3;
+    background-color: #141415;
+    color: #ededed;
+    font-feature-settings: "tnum";
 }
 window.akrep-modal {
-    background-color: #0f1520;
-    color: #e6edf3;
-    border: 1px solid #2b384e;
-    border-radius: 14px;
+    background-color: #141415;
+    color: #ededed;
+    border: 1px solid rgba(237, 237, 237, 0.12);
+    border-radius: 16px;
+    font-feature-settings: "tnum";
 }
 headerbar.akrep-headerbar {
-    background-color: #101622;
-    border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-    color: #e6edf3;
+    background-color: #141415;
+    background-image: none;
+    border-bottom: 1px solid rgba(237, 237, 237, 0.08);
+    color: #ededed;
+    min-height: 40px;
+    box-shadow: none;
 }
+
+/* Visible keyboard focus ring everywhere */
+window.akrep-window button:focus-visible,
+window.akrep-window entry:focus-visible,
+window.akrep-window checkbutton:focus-visible,
+window.akrep-window switch:focus-visible,
+window.akrep-window expander title:focus-visible,
+window.akrep-modal button:focus-visible,
+window.akrep-modal entry:focus-visible,
+window.akrep-modal checkbutton:focus-visible,
+window.akrep-modal switch:focus-visible,
+window.akrep-modal expander title:focus-visible {
+    outline: 2px solid rgba(224, 87, 60, 0.65);
+    outline-offset: 2px;
+}
+
+/* Sidebar navigation rail */
 .akrep-rail {
-    background-color: #0e141f;
-    border-right: 1px solid rgba(148, 163, 184, 0.14);
-    padding: 14px 10px;
+    background-color: #0f0f10;
+    border-right: 1px solid rgba(237, 237, 237, 0.08);
+    padding: 16px 12px;
 }
-.akrep-nav-btn {
-    background: transparent;
-    color: #9da9bb;
-    border-radius: 10px;
-    padding: 8px 12px;
+.akrep-brand-title {
+    font-size: 16px;
+    font-weight: 500;
+    color: #ededed;
+}
+.akrep-brand-sub {
+    font-size: 12px;
+    font-weight: 400;
+    color: #85858b;
+}
+button.akrep-nav-btn {
+    background-color: transparent;
+    background-image: none;
+    color: #a1a1a6;
+    border-radius: 8px;
+    padding: 0 12px;
+    min-height: 36px;
     border: 1px solid transparent;
+    font-size: 14px;
+    font-weight: 400;
+    box-shadow: none;
+    transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                color 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+button.akrep-nav-btn image {
+    color: #85858b;
+}
+button.akrep-nav-btn:hover {
+    background-color: #19191b;
+    color: #ededed;
+}
+button.akrep-nav-btn:hover image {
+    color: #a1a1a6;
+}
+button.akrep-nav-btn-active {
+    background-color: #232325;
+    color: #ededed;
+    border-color: rgba(237, 237, 237, 0.08);
     font-weight: 500;
 }
-.akrep-nav-btn:hover {
-    background-color: rgba(59, 130, 246, 0.10);
-    color: #f0f6fc;
+button.akrep-nav-btn-active:hover {
+    background-color: #232325;
+    color: #ededed;
 }
-.akrep-nav-btn-active {
-    background-color: rgba(59, 130, 246, 0.18);
-    color: #93c5fd;
-    border: 1px solid rgba(59, 130, 246, 0.42);
-    font-weight: 600;
+button.akrep-nav-btn-active image {
+    color: #ededed;
 }
-.akrep-banner {
-    background-color: #131a26;
-    border: 1px solid rgba(148, 163, 184, 0.18);
-    border-radius: 14px;
+.akrep-nav-indicator {
+    min-width: 3px;
+    min-height: 16px;
+    border-radius: 2px;
+    background-color: transparent;
+    transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+button.akrep-nav-btn-active .akrep-nav-indicator {
+    background-color: #e0573c;
+}
+
+/* Compact single-line top bar */
+.akrep-topbar {
+    background-color: #141415;
+    border-bottom: 1px solid rgba(237, 237, 237, 0.08);
+    padding: 12px 24px;
+    min-height: 52px;
+}
+.akrep-topbar-notices {
+    padding: 12px 24px 0 24px;
+}
+
+/* Overview overall status block (single visual moment) */
+.akrep-hero-card {
+    background-color: #19191b;
+    border: 1px solid rgba(237, 237, 237, 0.08);
+    border-radius: 12px;
+    padding: 20px 24px;
+}
+.akrep-hero-title {
+    font-size: 24px;
+    font-weight: 500;
+    color: #ededed;
+}
+
+/* Cards & nested rows */
+.akrep-detail-box {
+    background-color: #19191b;
+    border: 1px solid rgba(237, 237, 237, 0.08);
+    border-radius: 12px;
     padding: 16px 20px;
 }
-.akrep-offline-banner {
-    background-color: rgba(217, 119, 6, 0.14);
-    border: 1px solid rgba(245, 158, 11, 0.45);
-    border-radius: 12px;
-    padding: 10px 14px;
-}
-.akrep-toast-ok {
-    background-color: rgba(16, 185, 129, 0.14);
-    border: 1px solid rgba(52, 211, 153, 0.42);
-    border-radius: 10px;
-    padding: 10px 14px;
-    color: #a7f3d0;
-}
-.akrep-toast-err {
-    background-color: rgba(220, 38, 38, 0.16);
-    border: 1px solid rgba(248, 113, 113, 0.45);
-    border-radius: 10px;
-    padding: 10px 14px;
-    color: #fecaca;
-}
-.akrep-toast-info {
-    background-color: rgba(59, 130, 246, 0.14);
-    border: 1px solid rgba(96, 165, 250, 0.40);
-    border-radius: 10px;
-    padding: 10px 14px;
-    color: #bfdbfe;
-}
-.akrep-ro-pill {
-    background-color: rgba(99, 102, 241, 0.16);
-    color: #c7d2fe;
-    border: 1px solid rgba(129, 140, 248, 0.35);
-    border-radius: 999px;
-    padding: 4px 10px;
-    font-size: 11px;
-    font-weight: 700;
-}
-.akrep-profile-pill {
-    background-color: rgba(14, 165, 233, 0.16);
-    color: #7dd3fc;
-    border: 1px solid rgba(56, 189, 248, 0.38);
-    border-radius: 999px;
-    padding: 4px 12px;
-    font-size: 11px;
-    font-weight: 700;
+.akrep-diff-row {
+    background-color: #141415;
+    border: 1px solid rgba(237, 237, 237, 0.08);
+    border-radius: 8px;
+    padding: 12px;
 }
 button.akrep-card {
-    background-color: #131a26;
-    border: 1px solid rgba(148, 163, 184, 0.16);
-    border-radius: 14px;
-    padding: 15px;
-    color: #e6edf3;
-    transition: all 140ms ease;
+    background-color: #19191b;
+    background-image: none;
+    border: 1px solid rgba(237, 237, 237, 0.08);
+    border-radius: 12px;
+    padding: 16px 20px;
+    color: #ededed;
+    box-shadow: none;
+    transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 button.akrep-card:hover {
-    background-color: #192232;
-    border-color: rgba(96, 165, 250, 0.55);
+    background-color: #232325;
+    border-color: rgba(237, 237, 237, 0.14);
 }
-button.akrep-primary-btn {
-    background-color: #1d4ed8;
-    color: #f8fafc;
-    border: 1px solid rgba(147, 197, 253, 0.40);
+button.akrep-card:active {
+    transform: scale(0.98);
+}
+
+/* Quiet inline notices */
+.akrep-offline-banner {
+    background-color: #19191b;
+    border: 1px solid rgba(217, 160, 63, 0.35);
     border-radius: 8px;
-    padding: 6px 14px;
-    font-weight: 600;
+    padding: 12px 16px;
+    color: #ededed;
+}
+.akrep-toast-ok {
+    background-color: #19191b;
+    border: 1px solid rgba(76, 195, 138, 0.35);
+    border-radius: 8px;
+    padding: 12px 16px;
+    color: #ededed;
+}
+.akrep-toast-err {
+    background-color: #19191b;
+    border: 1px solid rgba(229, 72, 77, 0.40);
+    border-radius: 8px;
+    padding: 12px 16px;
+    color: #ededed;
+}
+.akrep-toast-info {
+    background-color: #19191b;
+    border: 1px solid rgba(237, 237, 237, 0.12);
+    border-radius: 8px;
+    padding: 12px 16px;
+    color: #ededed;
+}
+
+/* Compact header tags & icon buttons */
+button.akrep-tag-btn {
+    background-color: #19191b;
+    background-image: none;
+    color: #a1a1a6;
+    border: 1px solid rgba(237, 237, 237, 0.08);
+    border-radius: 6px;
+    padding: 4px 12px;
+    min-height: 28px;
+    font-size: 12px;
+    font-weight: 400;
+    box-shadow: none;
+    transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+button.akrep-tag-btn:hover {
+    background-color: #232325;
+    border-color: rgba(237, 237, 237, 0.14);
+    color: #ededed;
+}
+button.akrep-tag-btn:active {
+    transform: scale(0.98);
+}
+button.akrep-icon-btn {
+    background-color: #19191b;
+    background-image: none;
+    color: #a1a1a6;
+    border: 1px solid rgba(237, 237, 237, 0.08);
+    border-radius: 6px;
+    padding: 4px 8px;
+    min-width: 28px;
+    min-height: 28px;
+    box-shadow: none;
+    transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+button.akrep-icon-btn:hover {
+    background-color: #232325;
+    border-color: rgba(237, 237, 237, 0.14);
+    color: #ededed;
+}
+button.akrep-icon-btn:active {
+    transform: scale(0.98);
+}
+
+/* Primary, secondary, segmented and destructive buttons */
+button.akrep-primary-btn {
+    background-color: #ededed;
+    background-image: none;
+    color: #141415;
+    border: 1px solid #ededed;
+    border-radius: 8px;
+    padding: 8px 16px;
+    min-height: 36px;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: none;
+    transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 button.akrep-primary-btn:hover {
-    background-color: #2563eb;
+    background-color: #dcdce0;
+    border-color: #dcdce0;
+    color: #141415;
 }
-button.akrep-danger-btn {
-    background-color: rgba(185, 28, 28, 0.30);
-    color: #fca5a5;
-    border: 1px solid rgba(248, 113, 113, 0.45);
-    border-radius: 8px;
-    padding: 6px 12px;
-    font-weight: 600;
-}
-button.akrep-danger-btn:hover {
-    background-color: rgba(220, 38, 38, 0.45);
+button.akrep-primary-btn:active {
+    transform: scale(0.98);
 }
 button.akrep-ghost-btn {
-    background-color: rgba(30, 41, 59, 0.65);
-    color: #cbd5e1;
-    border: 1px solid rgba(148, 163, 184, 0.24);
+    background-color: #232325;
+    background-image: none;
+    color: #ededed;
+    border: 1px solid rgba(237, 237, 237, 0.10);
     border-radius: 8px;
-    padding: 6px 12px;
-    font-weight: 500;
+    padding: 8px 12px;
+    min-height: 36px;
+    font-size: 13px;
+    font-weight: 400;
+    box-shadow: none;
+    transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 button.akrep-ghost-btn:hover {
-    background-color: rgba(51, 65, 85, 0.80);
-    color: #f8fafc;
+    background-color: #2c2c2f;
+    border-color: rgba(237, 237, 237, 0.16);
+    color: #ededed;
 }
+button.akrep-ghost-btn:active {
+    transform: scale(0.98);
+}
+button.akrep-seg-btn {
+    background-color: #141415;
+    background-image: none;
+    color: #a1a1a6;
+    border: 1px solid rgba(237, 237, 237, 0.08);
+    border-radius: 8px;
+    padding: 8px 12px;
+    min-height: 36px;
+    font-size: 13px;
+    font-weight: 400;
+    box-shadow: none;
+    transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+button.akrep-seg-btn:hover {
+    background-color: #232325;
+    border-color: rgba(237, 237, 237, 0.12);
+    color: #ededed;
+}
+button.akrep-seg-btn:active {
+    transform: scale(0.98);
+}
+button.akrep-seg-active {
+    background-color: #232325;
+    background-image: none;
+    color: #ededed;
+    border: 1px solid rgba(224, 87, 60, 0.65);
+    border-radius: 8px;
+    padding: 8px 12px;
+    min-height: 36px;
+    font-size: 13px;
+    font-weight: 500;
+    box-shadow: none;
+    transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+button.akrep-seg-active:hover {
+    background-color: #2c2c2f;
+}
+button.akrep-seg-active:active {
+    transform: scale(0.98);
+}
+button.akrep-danger-btn {
+    background-color: #232325;
+    background-image: none;
+    color: #e5484d;
+    border: 1px solid rgba(229, 72, 77, 0.35);
+    border-radius: 8px;
+    padding: 8px 12px;
+    min-height: 36px;
+    font-size: 13px;
+    font-weight: 500;
+    box-shadow: none;
+    transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+button.akrep-danger-btn:hover {
+    background-color: #2a1d1e;
+    border-color: rgba(229, 72, 77, 0.55);
+    color: #e5484d;
+}
+button.akrep-danger-btn:active {
+    transform: scale(0.98);
+}
+button.akrep-danger-solid-btn {
+    background-color: #c62f34;
+    background-image: none;
+    color: #ededed;
+    border: 1px solid #c62f34;
+    border-radius: 8px;
+    padding: 8px 16px;
+    min-height: 36px;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: none;
+    transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+button.akrep-danger-solid-btn:hover {
+    background-color: #d63a3f;
+    border-color: #d63a3f;
+}
+button.akrep-danger-solid-btn:active {
+    transform: scale(0.98);
+}
+
+/* Type scale (400/500; 600 only on page title) */
 .akrep-title {
     font-size: 20px;
-    font-weight: 700;
-    color: #f8fafc;
+    font-weight: 600;
+    color: #ededed;
 }
 .akrep-section-hdr {
     font-size: 16px;
-    font-weight: 700;
-    color: #f1f5f9;
-}
-.akrep-subtitle {
-    font-size: 13px;
-    color: #94a3b8;
-}
-.akrep-mono {
-    font-family: "JetBrains Mono", monospace;
-    font-size: 12px;
-    color: #cbd5e1;
+    font-weight: 500;
+    color: #ededed;
 }
 .akrep-card-title {
     font-size: 14px;
-    font-weight: 700;
-    color: #f1f5f9;
+    font-weight: 500;
+    color: #ededed;
 }
-.akrep-badge {
-    border-radius: 999px;
-    padding: 3px 10px;
-    font-size: 11px;
-    font-weight: 700;
+.akrep-subtitle {
+    font-size: 13px;
+    font-weight: 400;
+    color: #a1a1a6;
 }
-/* 5 Distinct Severity States: Protected, Attention, Critical, Unavailable, Unknown */
-.akrep-sev-protected,
-.akrep-sev-normal {
-    background-color: rgba(16, 185, 129, 0.18);
-    color: #34d399;
-    border: 1px solid rgba(52, 211, 153, 0.38);
+.akrep-meta {
+    font-size: 12px;
+    font-weight: 400;
+    color: #85858b;
+    font-feature-settings: "tnum";
 }
-.akrep-sev-attention,
-.akrep-sev-warning {
-    background-color: rgba(217, 119, 6, 0.20);
-    color: #fbbf24;
-    border: 1px solid rgba(245, 158, 11, 0.42);
-}
-.akrep-sev-critical {
-    background-color: rgba(220, 38, 38, 0.22);
-    color: #f87171;
-    border: 1px solid rgba(239, 68, 68, 0.45);
-}
-.akrep-sev-unavailable {
-    background-color: rgba(71, 85, 105, 0.28);
-    color: #94a3b8;
-    border: 1px dashed rgba(148, 163, 184, 0.45);
-}
-.akrep-sev-unknown {
-    background-color: rgba(147, 51, 234, 0.18);
-    color: #d8b4fe;
-    border: 1px solid rgba(192, 132, 252, 0.40);
-}
-/* Risk Level Badges */
-.akrep-risk-low {
-    background-color: rgba(14, 165, 233, 0.16);
-    color: #7dd3fc;
-    border: 1px solid rgba(56, 189, 248, 0.35);
-}
-.akrep-risk-medium {
-    background-color: rgba(234, 179, 8, 0.18);
-    color: #fde047;
-    border: 1px solid rgba(250, 204, 21, 0.38);
-}
-.akrep-risk-high {
-    background-color: rgba(249, 115, 22, 0.20);
-    color: #fdba74;
-    border: 1px solid rgba(251, 146, 60, 0.42);
-}
-.akrep-risk-critical {
-    background-color: rgba(220, 38, 38, 0.24);
-    color: #fca5a5;
-    border: 1px solid rgba(248, 113, 113, 0.48);
-}
-/* Transaction State Badges */
-.akrep-tx-committed {
-    background-color: rgba(16, 185, 129, 0.18);
-    color: #6ee7b7;
-    border: 1px solid rgba(52, 211, 153, 0.35);
-}
-.akrep-tx-rolledback {
-    background-color: rgba(59, 130, 246, 0.18);
-    color: #93c5fd;
-    border: 1px solid rgba(96, 165, 250, 0.38);
-}
-.akrep-tx-failed {
-    background-color: rgba(220, 38, 38, 0.22);
-    color: #fca5a5;
-    border: 1px solid rgba(248, 113, 113, 0.45);
-}
-.akrep-tx-interrupted {
-    background-color: rgba(217, 119, 6, 0.20);
-    color: #fcd34d;
-    border: 1px solid rgba(245, 158, 11, 0.42);
-}
-.akrep-detail-box {
-    background-color: #131a26;
-    border: 1px solid rgba(148, 163, 184, 0.16);
-    border-radius: 12px;
-    padding: 14px 16px;
-}
-.akrep-diff-row {
-    background-color: #0e1420;
-    border: 1px solid rgba(148, 163, 184, 0.15);
-    border-radius: 8px;
-    padding: 10px 12px;
+.akrep-mono {
+    font-family: monospace;
+    font-size: 12px;
+    font-weight: 400;
+    color: #a1a1a6;
+    font-feature-settings: "tnum";
 }
 .akrep-metric-key {
-    color: #94a3b8;
+    color: #85858b;
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 400;
 }
 .akrep-metric-val {
-    color: #f1f5f9;
+    color: #ededed;
+    font-size: 13px;
+    font-weight: 400;
+    font-feature-settings: "tnum";
+}
+.akrep-tag {
+    background-color: #232325;
+    color: #a1a1a6;
+    border: 1px solid rgba(237, 237, 237, 0.08);
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-size: 12px;
+    font-weight: 400;
+}
+
+/* Quiet status dots (8px) + plain text labels */
+.akrep-dot {
+    min-width: 8px;
+    min-height: 8px;
+    border-radius: 999px;
+}
+.akrep-dot.akrep-sev-protected,
+.akrep-dot.akrep-sev-normal {
+    background-color: #4cc38a;
+}
+.akrep-dot.akrep-sev-attention,
+.akrep-dot.akrep-sev-warning {
+    background-color: #d9a03f;
+}
+.akrep-dot.akrep-sev-critical {
+    background-color: #e5484d;
+}
+.akrep-dot.akrep-sev-unavailable {
+    min-width: 5px;
+    min-height: 5px;
+    background-color: transparent;
+    border: 1.5px solid #85858b;
+}
+.akrep-dot.akrep-sev-unknown {
+    min-width: 5px;
+    min-height: 5px;
+    background-color: transparent;
+    border: 1.5px dashed #85858b;
+}
+
+/* Risk dot states */
+.akrep-dot.akrep-risk-low {
+    background-color: #4cc38a;
+}
+.akrep-dot.akrep-risk-medium {
+    background-color: #d9a03f;
+}
+.akrep-dot.akrep-risk-high {
+    background-color: #e0573c;
+}
+.akrep-dot.akrep-risk-critical {
+    background-color: #e5484d;
+}
+
+/* Transaction dot states */
+.akrep-dot.akrep-tx-committed {
+    background-color: #4cc38a;
+}
+.akrep-dot.akrep-tx-rolledback {
+    min-width: 5px;
+    min-height: 5px;
+    background-color: transparent;
+    border: 1.5px solid #a1a1a6;
+}
+.akrep-dot.akrep-tx-failed {
+    background-color: #e5484d;
+}
+.akrep-dot.akrep-tx-interrupted {
+    background-color: #d9a03f;
+}
+
+.akrep-status-text {
+    font-size: 12px;
+    font-weight: 400;
+    color: #ededed;
+}
+.akrep-status-text-muted {
+    font-size: 12px;
+    font-weight: 400;
+    color: #85858b;
+}
+.akrep-icon-muted {
+    color: #85858b;
+}
+.akrep-icon-secondary {
+    color: #a1a1a6;
+}
+
+/* Form controls */
+entry.akrep-entry {
+    background-color: #232325;
+    background-image: none;
+    color: #ededed;
+    border: 1px solid rgba(237, 237, 237, 0.10);
+    border-radius: 8px;
+    padding: 4px 12px;
+    min-height: 36px;
+    font-size: 13px;
+    box-shadow: none;
+    transition: border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                background-color 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+entry.akrep-entry:focus-within {
+    border-color: rgba(224, 87, 60, 0.65);
+}
+checkbutton {
+    color: #a1a1a6;
     font-size: 13px;
 }
-entry.akrep-entry {
-    background-color: #0d131d;
-    color: #f1f5f9;
-    border: 1px solid rgba(148, 163, 184, 0.28);
-    border-radius: 8px;
-    padding: 4px 10px;
+checkbutton check {
+    background-color: #232325;
+    background-image: none;
+    border: 1px solid rgba(237, 237, 237, 0.16);
+    border-radius: 4px;
+    box-shadow: none;
+}
+checkbutton check:checked {
+    background-color: #c83b22;
+    border-color: #c83b22;
+    color: #ededed;
+}
+switch {
+    background-color: #232325;
+    border: 1px solid rgba(237, 237, 237, 0.12);
+    border-radius: 999px;
+}
+switch:checked {
+    background-color: #c83b22;
+    border-color: #c83b22;
+}
+progressbar trough {
+    background-color: #232325;
+    border-radius: 6px;
+    min-height: 8px;
+}
+progressbar progress {
+    background-color: #c83b22;
+    background-image: none;
+    border-radius: 6px;
+}
+progressbar text {
+    color: #a1a1a6;
+    font-size: 12px;
+    font-feature-settings: "tnum";
+}
+expander title {
+    color: #a1a1a6;
+    font-size: 13px;
+    padding: 4px 0;
+}
+expander title:hover {
+    color: #ededed;
 }
 "#;
 

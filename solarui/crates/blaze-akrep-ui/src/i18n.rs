@@ -29,8 +29,8 @@ impl Lang {
 
     pub fn display_name(self) -> &'static str {
         match self {
-            Self::Tr => "Türkçe (TR)",
-            Self::En => "English (EN)",
+            Self::Tr => "Türkçe",
+            Self::En => "English",
         }
     }
 

@@ -1,12 +1,13 @@
-use crate::components::{build_kv_row, risk_css_class, risk_label};
+use crate::components::{build_admin_note, build_kv_row, build_risk_indicator};
 use crate::dbus_client::{dispatch_cmd, UiCommand};
 use crate::i18n::Lang;
 use crate::state::AppUiState;
 use blaze_akrep_common::ActionPlan;
+use gtk4::pango::WrapMode;
 use gtk4::prelude::*;
 use gtk4::{
-    Align, ApplicationWindow, Box as GtkBox, Button, HeaderBar, Image, Label, Orientation,
-    ScrolledWindow, Window,
+    Align, ApplicationWindow, Box as GtkBox, Button, Expander, HeaderBar, Image, Label,
+    Orientation, PolicyType, ScrolledWindow, Window,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -26,12 +27,9 @@ pub fn present_plan_preview_dialog(
     let dialog = Window::builder()
         .transient_for(parent)
         .modal(true)
-        .default_width(680)
-        .default_height(520)
-        .title(lang.pick(
-            "İşlem Planı Önizlemesi (Polkit Onayı)",
-            "Action Plan Preview (Polkit Authorization)",
-        ))
+        .default_width(640)
+        .default_height(500)
+        .title(lang.pick("İşlem önizlemesi", "Action preview"))
         .build();
     dialog.add_css_class("akrep-modal");
     state.borrow_mut().active_plan_dialog = Some(dialog.clone());
@@ -42,62 +40,46 @@ pub fn present_plan_preview_dialog(
     hb.add_css_class("akrep-headerbar");
     dialog.set_titlebar(Some(&hb));
 
-    let root = GtkBox::new(Orientation::Vertical, 14);
-    root.set_margin_top(16);
-    root.set_margin_bottom(16);
-    root.set_margin_start(18);
-    root.set_margin_end(18);
+    let root = GtkBox::new(Orientation::Vertical, 16);
+    root.set_margin_top(20);
+    root.set_margin_bottom(20);
+    root.set_margin_start(24);
+    root.set_margin_end(24);
 
-    let hdr_row = GtkBox::new(Orientation::Horizontal, 10);
+    let hdr_col = GtkBox::new(Orientation::Vertical, 4);
+    let hdr_row = GtkBox::new(Orientation::Horizontal, 12);
+    hdr_row.set_valign(Align::Center);
+
     let icon = Image::from_icon_name("security-high-symbolic");
-    icon.set_pixel_size(28);
+    icon.set_pixel_size(16);
+    icon.add_css_class("akrep-icon-secondary");
     hdr_row.append(&icon);
 
     let title_lbl = Label::new(Some(lang.pick(
-        "Uygulanacak Değişiklikleri Doğrulayın",
-        "Review Staged Security Changes Before Commit",
+        "Değişiklikleri gözden geçir",
+        "Review changes",
     )));
     title_lbl.add_css_class("akrep-section-hdr");
     title_lbl.set_xalign(0.0);
     title_lbl.set_hexpand(true);
+    title_lbl.set_wrap(true);
     hdr_row.append(&title_lbl);
 
-    let risk_badge = Label::new(Some(risk_label(plan.risk, lang)));
-    risk_badge.add_css_class("akrep-badge");
-    risk_badge.add_css_class(risk_css_class(plan.risk));
-    hdr_row.append(&risk_badge);
-    root.append(&hdr_row);
-
-    let meta_box = GtkBox::new(Orientation::Vertical, 6);
-    meta_box.add_css_class("akrep-detail-box");
-    meta_box.append(&build_kv_row(
-        lang.pick("Plan Kimliği (UUID)", "Plan ID (UUID)"),
-        &plan.plan_id,
-    ));
-    meta_box.append(&build_kv_row(
-        lang.pick("Polkit Eylemi", "Required Polkit Action"),
-        &plan.polkit_action,
-    ));
-    let digest_short = plan.plan_sha256.chars().take(24).collect::<String>();
-    meta_box.append(&build_kv_row(
-        lang.pick("Kanonik SHA-256 Özeti", "Canonical SHA-256 Digest"),
-        &format!("{}...", digest_short),
-    ));
-    meta_box.append(&build_kv_row(
-        lang.pick("Son Geçerlilik (TTL)", "Plan Expires At (TTL)"),
-        &plan.expires_at,
-    ));
-    root.append(&meta_box);
+    hdr_row.append(&build_risk_indicator(plan.risk, lang));
+    hdr_col.append(&hdr_row);
+    hdr_col.append(&build_admin_note(lang));
+    root.append(&hdr_col);
 
     let scroller = ScrolledWindow::new();
     scroller.set_vexpand(true);
     scroller.set_hexpand(true);
+    scroller.set_policy(PolicyType::Never, PolicyType::Automatic);
 
-    let content = GtkBox::new(Orientation::Vertical, 10);
+    let content = GtkBox::new(Orientation::Vertical, 12);
 
     let diff_hdr = Label::new(Some(&format!(
         "{} ({})",
-        lang.pick("Önce -> Sonra Fark Özeti", "Before -> After Diff Items"),
+        lang.pick("Değişiklikler", "Changes"),
         plan.diffs.len()
     )));
     diff_hdr.add_css_class("akrep-card-title");
@@ -106,11 +88,12 @@ pub fn present_plan_preview_dialog(
 
     if plan.diffs.is_empty() {
         let none_lbl = Label::new(Some(lang.pick(
-            "Durum zaten hedef değerde (fark yok).",
-            "Current state already matches desired target (no diff).",
+            "Mevcut durum zaten hedef değerde",
+            "Current state already matches the target",
         )));
         none_lbl.add_css_class("akrep-subtitle");
         none_lbl.set_xalign(0.0);
+        none_lbl.set_wrap(true);
         content.append(&none_lbl);
     } else {
         for item in &plan.diffs {
@@ -121,23 +104,27 @@ pub fn present_plan_preview_dialog(
             t_lbl.add_css_class("akrep-mono");
             t_lbl.set_xalign(0.0);
             t_lbl.set_wrap(true);
+            t_lbl.set_wrap_mode(WrapMode::WordChar);
             d_card.append(&t_lbl);
 
             let desc_lbl = Label::new(Some(lang.pick(&item.description_tr, &item.description_en)));
+            desc_lbl.add_css_class("akrep-subtitle");
             desc_lbl.set_xalign(0.0);
             desc_lbl.set_wrap(true);
+            desc_lbl.set_wrap_mode(WrapMode::WordChar);
             d_card.append(&desc_lbl);
 
             let change_lbl = Label::new(Some(&format!(
-                "{}: {}   ->   {}: {}",
+                "{}: {}  →  {}: {}",
                 lang.pick("Mevcut", "Current"),
                 item.current_value,
-                lang.pick("Hedef", "Desired"),
+                lang.pick("Hedef", "Target"),
                 item.desired_value
             )));
-            change_lbl.add_css_class("akrep-subtitle");
+            change_lbl.add_css_class("akrep-meta");
             change_lbl.set_xalign(0.0);
             change_lbl.set_wrap(true);
+            change_lbl.set_wrap_mode(WrapMode::WordChar);
             d_card.append(&change_lbl);
 
             content.append(&d_card);
@@ -156,18 +143,44 @@ pub fn present_plan_preview_dialog(
         w_hdr.set_xalign(0.0);
         warn_box.append(&w_hdr);
         for w in warnings {
-            let wl = Label::new(Some(&format!("- {}", w)));
+            let wl = Label::new(Some(&format!("· {}", w)));
+            wl.add_css_class("akrep-subtitle");
             wl.set_xalign(0.0);
             wl.set_wrap(true);
+            wl.set_wrap_mode(WrapMode::WordChar);
             warn_box.append(&wl);
         }
         content.append(&warn_box);
     }
 
+    let tech_exp = Expander::new(Some(lang.pick(
+        "Teknik doğrulama bilgileri",
+        "Technical verification details",
+    )));
+    let meta_box = GtkBox::new(Orientation::Vertical, 8);
+    meta_box.add_css_class("akrep-detail-box");
+    meta_box.set_margin_top(8);
+    meta_box.append(&build_kv_row(
+        lang.pick("Plan kimliği", "Plan ID"),
+        &plan.plan_id,
+    ));
+    meta_box.append(&build_kv_row(
+        lang.pick("Yetki eylemi", "Auth action"),
+        &plan.polkit_action,
+    ));
+    let digest_short = plan.plan_sha256.chars().take(24).collect::<String>();
+    meta_box.append(&build_kv_row("SHA-256", &format!("{}...", digest_short)));
+    meta_box.append(&build_kv_row(
+        lang.pick("Geçerlilik sonu", "Expires at"),
+        &plan.expires_at,
+    ));
+    tech_exp.set_child(Some(&meta_box));
+    content.append(&tech_exp);
+
     scroller.set_child(Some(&content));
     root.append(&scroller);
 
-    let footer = GtkBox::new(Orientation::Horizontal, 10);
+    let footer = GtkBox::new(Orientation::Horizontal, 8);
     footer.set_halign(Align::End);
 
     let cancel_btn = Button::with_label(lang.pick("İptal", "Cancel"));
@@ -178,10 +191,7 @@ pub fn present_plan_preview_dialog(
     });
     footer.append(&cancel_btn);
 
-    let approve_btn = Button::with_label(lang.pick(
-        "Onayla ve Doğrula (Polkit)",
-        "Approve & Authenticate (Polkit)",
-    ));
+    let approve_btn = Button::with_label(lang.pick("Onayla ve uygula", "Approve and apply"));
     approve_btn.add_css_class("akrep-primary-btn");
     let plan_id = plan.plan_id.clone();
     let plan_sha256 = plan.plan_sha256.clone();

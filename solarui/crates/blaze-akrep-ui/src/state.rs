@@ -128,7 +128,7 @@ pub fn localized_profile_names(profile_id: &str) -> (&'static str, &'static str)
     match profile_id {
         "developer" => ("Geliştirici", "Developer"),
         "gaming" => ("Oyun", "Gaming"),
-        "public-network" => ("Açık Ağ", "Public Network"),
+        "public-network" => ("Açık ağ", "Public network"),
         _ => ("Dengeli", "Balanced"),
     }
 }

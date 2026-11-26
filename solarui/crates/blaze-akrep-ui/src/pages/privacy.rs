@@ -1,8 +1,11 @@
-use crate::components::{availability_css_class, build_kv_row};
+use crate::components::{
+    availability_css_class, build_availability_indicator, build_kv_row, build_status_indicator,
+};
 use crate::dbus_client::{dispatch_cmd, UiCommand};
 use crate::state::AppUiState;
 use blaze_akrep_common::PrivacyStreamKind;
 use blaze_sentinel_core::Availability;
+use gtk4::pango::WrapMode;
 use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Button, Image, Label, Orientation};
 use std::cell::RefCell;
@@ -17,40 +20,48 @@ pub fn build_privacy_page(
     let priv_snap = st.privacy_snapshot.clone();
     drop(st);
 
-    let root = GtkBox::new(Orientation::Vertical, 16);
+    let root = GtkBox::new(Orientation::Vertical, 20);
 
-    let hdr_row = GtkBox::new(Orientation::Horizontal, 10);
-    let title = Label::new(Some(lang.pick(
-        "Gizlilik ve Masaüstü Koruması (PipeWire Canlı Akışlar & XDG Portal)",
-        "Privacy & Desktop Protection (Live PipeWire Streams & XDG Portals)",
+    let intro_col = GtkBox::new(Orientation::Vertical, 4);
+    let hdr_row = GtkBox::new(Orientation::Horizontal, 12);
+    hdr_row.set_valign(Align::Center);
+
+    let page_desc = Label::new(Some(lang.pick(
+        "Canlı mikrofon, kamera ve ekran paylaşımı akışları ile uygulama izinleri",
+        "Live microphone, camera and screen share streams and app permissions",
     )));
-    title.add_css_class("akrep-title");
-    title.set_xalign(0.0);
-    title.set_hexpand(true);
-    hdr_row.append(&title);
+    page_desc.add_css_class("akrep-subtitle");
+    page_desc.set_xalign(0.0);
+    page_desc.set_wrap(true);
+    page_desc.set_hexpand(true);
+    hdr_row.append(&page_desc);
 
-    let consent_pill = Label::new(Some(lang.pick(
-        "Sessiz Portal İzni Yasaklı (Yalnızca Geri Alma)",
-        "Silent Portal Grant Forbidden (Revoke-Only)",
-    )));
-    consent_pill.add_css_class("akrep-ro-pill");
-    hdr_row.append(&consent_pill);
-
-    let refresh_btn = Button::with_label(lang.pick("Akışları Yenile", "Refresh Streams"));
+    let refresh_btn = Button::with_label(lang.pick("Akışları yenile", "Refresh streams"));
     refresh_btn.add_css_class("akrep-primary-btn");
+    refresh_btn.set_valign(Align::Center);
     let cmd_ref = cmd_tx.clone();
     refresh_btn.connect_clicked(move |_| {
         dispatch_cmd(&cmd_ref, UiCommand::RefreshPrivacySession);
     });
     hdr_row.append(&refresh_btn);
-    root.append(&hdr_row);
+    intro_col.append(&hdr_row);
 
-    // 1. Live PipeWire Active Microphone, Camera & Screen Share Stream Cards
-    let streams_card = GtkBox::new(Orientation::Vertical, 10);
+    let consent_note = Label::new(Some(lang.pick(
+        "Uygulamalara sessiz erişim verilmez; kayıtlı izinleri buradan geri alabilirsiniz",
+        "Apps cannot be granted silent access; you can revoke saved grants here",
+    )));
+    consent_note.add_css_class("akrep-meta");
+    consent_note.set_xalign(0.0);
+    consent_note.set_wrap(true);
+    intro_col.append(&consent_note);
+    root.append(&intro_col);
+
+    // 1. Live PipeWire Active Microphone, Camera & Screen Share Streams
+    let streams_card = GtkBox::new(Orientation::Vertical, 12);
     streams_card.add_css_class("akrep-detail-box");
     let st_hdr = Label::new(Some(lang.pick(
-        "Canlı Mikrofon, Kamera ve Ekran Paylaşımı Akışları (PipeWire)",
-        "Active Microphone, Camera & Screen Share Streams (PipeWire)",
+        "Canlı erişim akışları",
+        "Live capture streams",
     )));
     st_hdr.add_css_class("akrep-section-hdr");
     st_hdr.set_xalign(0.0);
@@ -60,20 +71,20 @@ pub fn build_privacy_page(
         for (kind, label_tr, label_en, icon_name) in [
             (
                 PrivacyStreamKind::Microphone,
-                "Mikrofon Yakalama",
-                "Microphone Capture",
+                "Mikrofon",
+                "Microphone",
                 "audio-input-microphone-symbolic",
             ),
             (
                 PrivacyStreamKind::Camera,
-                "Kamera Akışı",
-                "Camera Capture",
+                "Kamera",
+                "Camera",
                 "camera-web-symbolic",
             ),
             (
                 PrivacyStreamKind::ScreenCast,
-                "Ekran Paylaşımı (ScreenCast)",
-                "Screen Share (ScreenCast)",
+                "Ekran paylaşımı",
+                "Screen share",
                 "video-display-symbolic",
             ),
         ] {
@@ -83,12 +94,14 @@ pub fn build_privacy_page(
                 .filter(|s| s.kind == kind)
                 .collect();
 
-            let k_box = GtkBox::new(Orientation::Vertical, 6);
+            let k_box = GtkBox::new(Orientation::Vertical, 8);
             k_box.add_css_class("akrep-diff-row");
 
             let k_top = GtkBox::new(Orientation::Horizontal, 8);
+            k_top.set_valign(Align::Center);
             let k_ico = Image::from_icon_name(icon_name);
-            k_ico.set_pixel_size(20);
+            k_ico.set_pixel_size(16);
+            k_ico.add_css_class("akrep-icon-secondary");
             k_top.append(&k_ico);
 
             let k_lbl = Label::new(Some(lang.pick(label_tr, label_en)));
@@ -97,35 +110,42 @@ pub fn build_privacy_page(
             k_lbl.set_hexpand(true);
             k_top.append(&k_lbl);
 
-            let badge_txt = if ps.pipewire_availability != Availability::Available {
-                match lang {
-                    crate::i18n::Lang::Tr => ps.pipewire_availability.label_tr().to_string(),
-                    crate::i18n::Lang::En => ps.pipewire_availability.label_en().to_string(),
-                }
+            let (dot_cls, badge_txt, muted) = if ps.pipewire_availability != Availability::Available {
+                (
+                    availability_css_class(ps.pipewire_availability),
+                    match lang {
+                        crate::i18n::Lang::Tr => ps.pipewire_availability.label_tr().to_string(),
+                        crate::i18n::Lang::En => ps.pipewire_availability.label_en().to_string(),
+                    },
+                    true,
+                )
             } else if matching.is_empty() {
-                lang.pick("Etkin Akış Yok", "Idle (0 Active)").to_string()
+                (
+                    "akrep-sev-protected",
+                    lang.pick("Etkin akış yok", "Idle").to_string(),
+                    false,
+                )
             } else {
-                format!("{} {}", matching.len(), lang.pick("Etkin Akış", "Active"))
+                (
+                    "akrep-sev-attention",
+                    format!("{} {}", matching.len(), lang.pick("etkin", "active")),
+                    false,
+                )
             };
-            let kb = Label::new(Some(&badge_txt));
-            kb.add_css_class("akrep-badge");
-            kb.add_css_class(if ps.pipewire_availability != Availability::Available {
-                availability_css_class(ps.pipewire_availability)
-            } else if matching.is_empty() {
-                "akrep-sev-protected"
-            } else {
-                "akrep-sev-attention"
-            });
-            k_top.append(&kb);
+            k_top.append(&build_status_indicator(dot_cls, &badge_txt, muted));
             k_box.append(&k_top);
 
             for stream in matching {
-                let srow = GtkBox::new(Orientation::Horizontal, 8);
+                let srow = GtkBox::new(Orientation::Horizontal, 12);
+                srow.set_valign(Align::Center);
                 let slbl = Label::new(Some(&format!(
-                    "Node #{} — {} ({}) <- {} (PID: {})",
+                    "#{} · {} ({}) ← {} (PID {})",
                     stream.node_id,
                     stream.application_name,
-                    stream.application_id.as_deref().unwrap_or("native"),
+                    stream
+                        .application_id
+                        .as_deref()
+                        .unwrap_or(lang.pick("yerel", "native")),
                     stream.source_node_name,
                     stream
                         .process_id
@@ -135,10 +155,11 @@ pub fn build_privacy_page(
                 slbl.add_css_class("akrep-mono");
                 slbl.set_xalign(0.0);
                 slbl.set_wrap(true);
+                slbl.set_wrap_mode(WrapMode::WordChar);
                 slbl.set_hexpand(true);
                 srow.append(&slbl);
 
-                let stop_btn = Button::with_label(lang.pick("Akışı Durdur", "Stop Stream"));
+                let stop_btn = Button::with_label(lang.pick("Durdur", "Stop"));
                 stop_btn.add_css_class("akrep-danger-btn");
                 stop_btn.set_valign(Align::Center);
                 let cmd_stop = cmd_tx.clone();
@@ -156,8 +177,8 @@ pub fn build_privacy_page(
         }
     } else {
         let info = Label::new(Some(lang.pick(
-            "Kullanıcı oturumu PipeWire grafiği yükleniyor veya bu ortamda aktif oturum veriyolu yok.",
-            "Loading user-session PipeWire graph (or no desktop session bus present in headless mode).",
+            "PipeWire oturum bilgisi bekleniyor",
+            "Waiting for PipeWire session state",
         )));
         info.add_css_class("akrep-subtitle");
         info.set_xalign(0.0);
@@ -166,12 +187,12 @@ pub fn build_privacy_page(
     }
     root.append(&streams_card);
 
-    // 2. XDG Desktop Portal Capability Matrix
-    let portal_card = GtkBox::new(Orientation::Vertical, 10);
+    // 2. Desktop Portal Capabilities
+    let portal_card = GtkBox::new(Orientation::Vertical, 12);
     portal_card.add_css_class("akrep-detail-box");
     let p_hdr = Label::new(Some(lang.pick(
-        "XDG Desktop Portal Yetenek Matrisi (Wayland Etkileşimli Rıza)",
-        "XDG Desktop Portal Capability Matrix (Wayland Interactive Consent)",
+        "Masaüstü portal yetenekleri",
+        "Desktop portal capabilities",
     )));
     p_hdr.add_css_class("akrep-section-hdr");
     p_hdr.set_xalign(0.0);
@@ -179,32 +200,36 @@ pub fn build_privacy_page(
 
     if let Some(ps) = &priv_snap {
         let pt = &ps.portals;
-        let rows: Vec<(&str, Availability, String)> = vec![
+        let rows: Vec<(&str, &str, &str, Availability, String)> = vec![
             (
+                "Ekran paylaşımı",
+                "Screen share",
                 "org.freedesktop.portal.ScreenCast",
                 pt.screencast.availability,
                 format!(
-                    "v{} • sources: {:?}",
+                    "v{}",
                     pt.screencast
                         .version
                         .map(|v| v.to_string())
-                        .unwrap_or_else(|| "-".to_string()),
-                    pt.screencast.source_types
+                        .unwrap_or_else(|| "-".to_string())
                 ),
             ),
             (
+                "Uzak masaüstü",
+                "Remote desktop",
                 "org.freedesktop.portal.RemoteDesktop",
                 pt.remote_desktop.availability,
                 format!(
-                    "v{} • devices: {:?}",
+                    "v{}",
                     pt.remote_desktop
                         .version
                         .map(|v| v.to_string())
-                        .unwrap_or_else(|| "-".to_string()),
-                    pt.remote_desktop.device_types
+                        .unwrap_or_else(|| "-".to_string())
                 ),
             ),
             (
+                "Genel kısayollar",
+                "Global shortcuts",
                 "org.freedesktop.portal.GlobalShortcuts",
                 pt.global_shortcuts.availability,
                 format!(
@@ -216,18 +241,21 @@ pub fn build_privacy_page(
                 ),
             ),
             (
+                "Kamera",
+                "Camera",
                 "org.freedesktop.portal.Camera",
                 pt.camera.availability,
                 format!(
-                    "v{} • camera_present={:?}",
+                    "v{}",
                     pt.camera
                         .version
                         .map(|v| v.to_string())
-                        .unwrap_or_else(|| "-".to_string()),
-                    pt.camera.is_camera_present
+                        .unwrap_or_else(|| "-".to_string())
                 ),
             ),
             (
+                "USB erişimi",
+                "USB access",
                 "org.freedesktop.portal.Usb",
                 pt.usb.availability,
                 format!(
@@ -240,46 +268,43 @@ pub fn build_privacy_page(
             ),
         ];
 
-        for (iface_name, avail, detail_str) in rows {
-            let rbox = GtkBox::new(Orientation::Horizontal, 10);
+        for (name_tr, name_en, iface_name, avail, ver_str) in rows {
+            let rbox = GtkBox::new(Orientation::Horizontal, 12);
             rbox.add_css_class("akrep-diff-row");
+            rbox.set_valign(Align::Center);
 
-            let ilbl = Label::new(Some(iface_name));
+            let left = GtkBox::new(Orientation::Vertical, 2);
+            left.set_hexpand(true);
+            let nlbl = Label::new(Some(lang.pick(name_tr, name_en)));
+            nlbl.add_css_class("akrep-card-title");
+            nlbl.set_xalign(0.0);
+            left.append(&nlbl);
+
+            let ilbl = Label::new(Some(&format!("{} · {}", iface_name, ver_str)));
             ilbl.add_css_class("akrep-mono");
             ilbl.set_xalign(0.0);
-            ilbl.set_size_request(310, -1);
-            rbox.append(&ilbl);
+            ilbl.set_wrap(true);
+            ilbl.set_wrap_mode(WrapMode::WordChar);
+            left.append(&ilbl);
+            rbox.append(&left);
 
-            let dlbl = Label::new(Some(&detail_str));
-            dlbl.add_css_class("akrep-subtitle");
-            dlbl.set_xalign(0.0);
-            dlbl.set_hexpand(true);
-            rbox.append(&dlbl);
-
-            let ab = Label::new(Some(match lang {
-                crate::i18n::Lang::Tr => avail.label_tr(),
-                crate::i18n::Lang::En => avail.label_en(),
-            }));
-            ab.add_css_class("akrep-badge");
-            ab.add_css_class(availability_css_class(avail));
-            rbox.append(&ab);
-
+            rbox.append(&build_availability_indicator(avail, lang));
             portal_card.append(&rbox);
         }
     } else {
         portal_card.append(&build_kv_row(
             "org.freedesktop.portal.Desktop",
-            lang.pick("Oturum veriyolu bekleniyor", "Awaiting session D-Bus"),
+            lang.pick("Oturum servisi bekleniyor", "Waiting for session service"),
         ));
     }
     root.append(&portal_card);
 
-    // 3. PermissionStore Saved App Grants with Revoke Button
-    let store_card = GtkBox::new(Orientation::Vertical, 10);
+    // 3. Saved Portal Permissions with Revoke Button
+    let store_card = GtkBox::new(Orientation::Vertical, 12);
     store_card.add_css_class("akrep-detail-box");
     let s_title = Label::new(Some(lang.pick(
-        "Kayıtlı Portal Uygulama İzinleri (PermissionStore)",
-        "Saved Portal App Grants (PermissionStore)",
+        "Kayıtlı uygulama izinleri",
+        "Saved app permissions",
     )));
     s_title.add_css_class("akrep-section-hdr");
     s_title.set_xalign(0.0);
@@ -290,11 +315,12 @@ pub fn build_privacy_page(
         for tbl in &ps.permission_tables {
             for entry in &tbl.entries {
                 total_grants += 1;
-                let erow = GtkBox::new(Orientation::Horizontal, 10);
+                let erow = GtkBox::new(Orientation::Horizontal, 12);
                 erow.add_css_class("akrep-diff-row");
+                erow.set_valign(Align::Center);
 
                 let elbl = Label::new(Some(&format!(
-                    "[{}] {} (resource='{}') -> {}",
+                    "{} · {} ({}) → {}",
                     entry.table,
                     entry.app_id,
                     entry.resource_id,
@@ -303,10 +329,11 @@ pub fn build_privacy_page(
                 elbl.add_css_class("akrep-mono");
                 elbl.set_xalign(0.0);
                 elbl.set_wrap(true);
+                elbl.set_wrap_mode(WrapMode::WordChar);
                 elbl.set_hexpand(true);
                 erow.append(&elbl);
 
-                let rev_btn = Button::with_label(lang.pick("İzni Geri Al", "Revoke"));
+                let rev_btn = Button::with_label(lang.pick("Geri al", "Revoke"));
                 rev_btn.add_css_class("akrep-danger-btn");
                 let cmd_rev = cmd_tx.clone();
                 let t = entry.table.clone();
@@ -328,8 +355,8 @@ pub fn build_privacy_page(
         }
         if total_grants == 0 {
             let empty = Label::new(Some(lang.pick(
-                "PermissionStore tablolarında kalıcı olarak kaydedilmiş uygulama izni bulunmuyor.",
-                "Zero persisted application grants currently stored in XDG PermissionStore.",
+                "Kalıcı olarak kaydedilmiş uygulama izni yok",
+                "No saved application permissions",
             )));
             empty.add_css_class("akrep-subtitle");
             empty.set_xalign(0.0);

@@ -1,12 +1,13 @@
-use crate::components::{tx_state_css_class, tx_state_label};
+use crate::components::{build_admin_note, build_status_indicator, build_tx_state_indicator};
 use crate::dbus_client::{dispatch_cmd, UiCommand};
 use crate::i18n::Lang;
 use crate::state::{AppFilterTab, AppUiState};
 use blaze_akrep_common::{
     ActionRequest, BusKind, FlatpakAppRecord, FlatpakScope, PermissionSourceLayer, TransactionState,
 };
+use gtk4::pango::WrapMode;
 use gtk4::prelude::*;
-use gtk4::{Box as GtkBox, Button, Entry, Label, Orientation};
+use gtk4::{Align, Box as GtkBox, Button, Entry, Label, Orientation};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -41,10 +42,8 @@ pub fn compute_capability_override_delta(
 fn source_layer_label(layer: Option<PermissionSourceLayer>, lang: Lang) -> &'static str {
     match layer {
         Some(PermissionSourceLayer::Manifest) => lang.pick("Manifest", "Manifest"),
-        Some(PermissionSourceLayer::GlobalOverride) => {
-            lang.pick("Genel Override", "Global Override")
-        }
-        Some(PermissionSourceLayer::AppOverride) => lang.pick("Uygulama Override", "App Override"),
+        Some(PermissionSourceLayer::GlobalOverride) => lang.pick("Genel kural", "Global rule"),
+        Some(PermissionSourceLayer::AppOverride) => lang.pick("Özel kural", "App rule"),
         None => lang.pick("Varsayılan", "Default"),
     }
 }
@@ -94,52 +93,53 @@ pub fn build_applications_page(
     let draft = st.apps_draft.clone();
     drop(st);
 
-    let root = GtkBox::new(Orientation::Vertical, 16);
+    let root = GtkBox::new(Orientation::Vertical, 20);
 
-    let hdr_row = GtkBox::new(Orientation::Horizontal, 10);
-    let title = Label::new(Some(lang.pick(
-        "Uygulama Güvenliği (Flatpak Kum Havuzu & Yerel Paket Kökeni)",
-        "Application Security (Flatpak Sandbox Overrides & Native Provenance)",
+    let intro_row = GtkBox::new(Orientation::Horizontal, 12);
+    intro_row.set_valign(Align::Center);
+    let page_desc = Label::new(Some(lang.pick(
+        "Flatpak kum havuzu izinleri ve yerel uygulama kökeni",
+        "Flatpak sandbox permissions and native app provenance",
     )));
-    title.add_css_class("akrep-title");
-    title.set_xalign(0.0);
-    title.set_hexpand(true);
-    hdr_row.append(&title);
+    page_desc.add_css_class("akrep-subtitle");
+    page_desc.set_xalign(0.0);
+    page_desc.set_wrap(true);
+    page_desc.set_hexpand(true);
+    intro_row.append(&page_desc);
 
-    let sys_insp_btn = Button::with_label(lang.pick(
-        "Sistem Flatpak Denetimi (Polkit)",
-        "Audit System Flatpaks (Polkit)",
-    ));
+    let sys_insp_btn = Button::with_label(lang.pick("Sistem denetimi", "Audit system"));
     sys_insp_btn.add_css_class("akrep-ghost-btn");
     let cmd_sys = cmd_tx.clone();
     sys_insp_btn.connect_clicked(move |_| {
         dispatch_cmd(&cmd_sys, UiCommand::InspectSystemFlatpaks);
     });
-    hdr_row.append(&sys_insp_btn);
+    intro_row.append(&sys_insp_btn);
 
-    let refresh_btn = Button::with_label(lang.pick("Envanteri Yenile", "Refresh Inventory"));
+    let refresh_btn = Button::with_label(lang.pick("Yenile", "Refresh"));
     refresh_btn.add_css_class("akrep-ghost-btn");
     let cmd_ref = cmd_tx.clone();
     refresh_btn.connect_clicked(move |_| {
         dispatch_cmd(&cmd_ref, UiCommand::RefreshUserApplications);
     });
-    hdr_row.append(&refresh_btn);
-    root.append(&hdr_row);
+    intro_row.append(&refresh_btn);
+    root.append(&intro_row);
 
     if let Some(restart_app) = &draft.restart_needed_app {
-        let notice = GtkBox::new(Orientation::Horizontal, 8);
+        let notice = GtkBox::new(Orientation::Horizontal, 12);
         notice.add_css_class("akrep-offline-banner");
         let nlbl = Label::new(Some(&format!(
-            "{}: {} — {}",
-            lang.pick("Yeniden Başlatma Gerekli", "Restart Required"),
+            "{}: {} · {}",
+            lang.pick("Yeniden başlatma gerekli", "Restart required"),
             restart_app,
             lang.pick(
-                "Uygulama şu anda çalışıyor; kum havuzu izin değişiklikleri uygulama yeniden başlatıldığında devreye girer.",
-                "Application is currently running; sandbox permission changes take effect after restarting the app."
+                "İzin değişiklikleri uygulamayı kapatıp açtığınızda geçerli olur",
+                "Permission changes take effect the next time the app restarts"
             )
         )));
+        nlbl.add_css_class("akrep-subtitle");
         nlbl.set_xalign(0.0);
         nlbl.set_wrap(true);
+        nlbl.set_wrap_mode(WrapMode::WordChar);
         nlbl.set_hexpand(true);
         notice.append(&nlbl);
         root.append(&notice);
@@ -149,24 +149,15 @@ pub fn build_applications_page(
     let filter_bar = GtkBox::new(Orientation::Horizontal, 8);
     for (lbl, tab) in [
         (lang.pick("Tümü", "All"), AppFilterTab::All),
-        (
-            lang.pick("Kullanıcı Flatpak", "User Flatpak"),
-            AppFilterTab::UserFlatpak,
-        ),
-        (
-            lang.pick("Sistem Flatpak", "System Flatpak"),
-            AppFilterTab::SystemFlatpak,
-        ),
-        (
-            lang.pick("Yerel Paket (Native)", "Native Package"),
-            AppFilterTab::Native,
-        ),
+        (lang.pick("Kullanıcı", "User"), AppFilterTab::UserFlatpak),
+        (lang.pick("Sistem", "System"), AppFilterTab::SystemFlatpak),
+        (lang.pick("Yerel", "Native"), AppFilterTab::Native),
     ] {
         let b = Button::with_label(lbl);
         b.add_css_class(if draft.filter == tab {
-            "akrep-primary-btn"
+            "akrep-seg-active"
         } else {
-            "akrep-ghost-btn"
+            "akrep-seg-btn"
         });
         let st_f = Rc::clone(state);
         let rr_f = Rc::clone(&on_rerender);
@@ -179,11 +170,9 @@ pub fn build_applications_page(
 
     let search_ent = Entry::new();
     search_ent.add_css_class("akrep-entry");
+    search_ent.set_width_chars(12);
     search_ent.set_hexpand(true);
-    search_ent.set_placeholder_text(Some(lang.pick(
-        "Uygulama adı veya kimliği ara...",
-        "Filter by app name or ID...",
-    )));
+    search_ent.set_placeholder_text(Some(lang.pick("Uygulama ara", "Search apps")));
     search_ent.set_text(&draft.search_query);
     let st_sq = Rc::clone(state);
     search_ent.connect_changed(move |ent| {
@@ -195,12 +184,13 @@ pub fn build_applications_page(
     root.append(&filter_bar);
 
     let Some(inv) = inv_opt else {
-        let loading = GtkBox::new(Orientation::Vertical, 6);
+        let loading = GtkBox::new(Orientation::Vertical, 8);
         loading.add_css_class("akrep-detail-box");
         let l = Label::new(Some(lang.pick(
-            "Uygulama envanteri okunuyor...",
-            "Loading application inventory...",
+            "Uygulama listesi yükleniyor",
+            "Loading application inventory",
         )));
+        l.add_css_class("akrep-subtitle");
         l.set_xalign(0.0);
         loading.append(&l);
         root.append(&loading);
@@ -227,13 +217,20 @@ pub fn build_applications_page(
         }));
     }
 
-    let list_card = GtkBox::new(Orientation::Vertical, 8);
+    let selected_flatpak = draft
+        .selected_app_key
+        .as_ref()
+        .and_then(|(id, sc_opt)| sc_opt.and_then(|sc| inv.find_flatpak(id, sc)))
+        .or_else(|| flatpak_candidates.first().copied());
+
+    let list_card = GtkBox::new(Orientation::Vertical, 12);
     list_card.add_css_class("akrep-detail-box");
     let list_hdr = Label::new(Some(&format!(
-        "{} ({} Flatpak, {} Native)",
-        lang.pick("Kurulu Uygulamalar", "Installed Applications"),
+        "{} ({} Flatpak, {} {})",
+        lang.pick("Kurulu uygulamalar", "Installed applications"),
         inv.user_apps.len() + inv.system_apps.len(),
-        inv.native_apps.len()
+        inv.native_apps.len(),
+        lang.pick("yerel", "native")
     )));
     list_hdr.add_css_class("akrep-section-hdr");
     list_hdr.set_xalign(0.0);
@@ -241,8 +238,8 @@ pub fn build_applications_page(
 
     if flatpak_candidates.is_empty() && draft.filter != AppFilterTab::Native {
         let none_fp = Label::new(Some(lang.pick(
-            "Bu kapsamda kurulu Flatpak uygulaması bulunmuyor.",
-            "No installed Flatpak applications found in this scope.",
+            "Bu kapsamda kurulu Flatpak uygulaması yok",
+            "No installed Flatpak applications in this scope",
         )));
         none_fp.add_css_class("akrep-subtitle");
         none_fp.set_xalign(0.0);
@@ -250,35 +247,50 @@ pub fn build_applications_page(
     }
 
     for app in flatpak_candidates.iter().take(25) {
-        let arow = GtkBox::new(Orientation::Horizontal, 8);
+        let is_selected = selected_flatpak
+            .is_some_and(|sel| sel.app_id == app.app_id && sel.scope == app.scope);
+        let arow = GtkBox::new(Orientation::Horizontal, 12);
         arow.add_css_class("akrep-diff-row");
+        arow.set_valign(Align::Center);
 
-        let scope_badge = Label::new(Some(match app.scope {
-            FlatpakScope::User => "USER",
-            FlatpakScope::System => "SYSTEM",
+        let scope_tag = Label::new(Some(match app.scope {
+            FlatpakScope::User => lang.pick("Kullanıcı", "User"),
+            FlatpakScope::System => lang.pick("Sistem", "System"),
         }));
-        scope_badge.add_css_class("akrep-badge");
-        scope_badge.add_css_class(match app.scope {
-            FlatpakScope::User => "akrep-risk-low",
-            FlatpakScope::System => "akrep-risk-medium",
-        });
-        arow.append(&scope_badge);
+        scope_tag.add_css_class("akrep-tag");
+        arow.append(&scope_tag);
 
-        let name_lbl = Label::new(Some(&format!("{} ({})", app.display_name, app.app_id)));
+        let name_col = GtkBox::new(Orientation::Vertical, 2);
+        name_col.set_hexpand(true);
+        let name_lbl = Label::new(Some(&app.display_name));
         name_lbl.add_css_class("akrep-card-title");
         name_lbl.set_xalign(0.0);
-        name_lbl.set_hexpand(true);
-        arow.append(&name_lbl);
+        name_lbl.set_wrap(true);
+        name_col.append(&name_lbl);
+
+        let id_lbl = Label::new(Some(&app.app_id));
+        id_lbl.add_css_class("akrep-mono");
+        id_lbl.set_xalign(0.0);
+        id_lbl.set_wrap(true);
+        id_lbl.set_wrap_mode(WrapMode::WordChar);
+        name_col.append(&id_lbl);
+        arow.append(&name_col);
 
         if app.running {
-            let run_b = Label::new(Some(lang.pick("Çalışıyor", "Running")));
-            run_b.add_css_class("akrep-badge");
-            run_b.add_css_class("akrep-sev-attention");
-            arow.append(&run_b);
+            arow.append(&build_status_indicator(
+                "akrep-sev-attention",
+                lang.pick("Çalışıyor", "Running"),
+                false,
+            ));
         }
 
-        let sel_btn = Button::with_label(lang.pick("İzinleri Yönet", "Manage Permissions"));
-        sel_btn.add_css_class("akrep-primary-btn");
+        let sel_btn = Button::with_label(lang.pick("Yönet", "Manage"));
+        sel_btn.add_css_class(if is_selected {
+            "akrep-seg-active"
+        } else {
+            "akrep-ghost-btn"
+        });
+        sel_btn.set_valign(Align::Center);
         let st_sel = Rc::clone(state);
         let rr_sel = Rc::clone(&on_rerender);
         let aid = app.app_id.clone();
@@ -302,73 +314,80 @@ pub fn build_applications_page(
             })
             .take(15)
         {
-            let nrow = GtkBox::new(Orientation::Horizontal, 8);
+            let nrow = GtkBox::new(Orientation::Horizontal, 12);
             nrow.add_css_class("akrep-diff-row");
+            nrow.set_valign(Align::Center);
 
-            let nb = Label::new(Some("NATIVE RPM"));
-            nb.add_css_class("akrep-badge");
-            nb.add_css_class("akrep-sev-unavailable");
+            let nb = Label::new(Some(lang.pick("Yerel", "Native")));
+            nb.add_css_class("akrep-tag");
             nrow.append(&nb);
 
-            let nl = Label::new(Some(&format!(
-                "{} ({}) -> {}",
-                nat.display_name, nat.desktop_id, nat.exec_bin
-            )));
+            let ncol = GtkBox::new(Orientation::Vertical, 2);
+            ncol.set_hexpand(true);
+            let nl = Label::new(Some(&format!("{} ({})", nat.display_name, nat.desktop_id)));
+            nl.add_css_class("akrep-card-title");
             nl.set_xalign(0.0);
             nl.set_wrap(true);
-            nl.set_hexpand(true);
-            nrow.append(&nl);
+            nl.set_wrap_mode(WrapMode::WordChar);
+            ncol.append(&nl);
 
-            let note = Label::new(Some(lang.pick(
-                "SELinux + Wayland Portal ile korunur (Flatpak kum havuzu değil)",
-                "Governed by SELinux + Wayland Portals (sandbox_supported=false)",
+            let note = Label::new(Some(&format!(
+                "{} · {}",
+                nat.exec_bin,
+                lang.pick(
+                    "SELinux ve masaüstü portalı ile korunur",
+                    "Protected by SELinux and desktop portals",
+                )
             )));
-            note.add_css_class("akrep-subtitle");
-            nrow.append(&note);
+            note.add_css_class("akrep-meta");
+            note.set_xalign(0.0);
+            note.set_wrap(true);
+            note.set_wrap_mode(WrapMode::WordChar);
+            ncol.append(&note);
+            nrow.append(&ncol);
             list_card.append(&nrow);
         }
     }
     root.append(&list_card);
 
     // Selected Flatpak App Detailed Permission Editor
-    let selected_flatpak = draft
-        .selected_app_key
-        .as_ref()
-        .and_then(|(id, sc_opt)| sc_opt.and_then(|sc| inv.find_flatpak(id, sc)))
-        .or_else(|| flatpak_candidates.first().copied());
-
     if let Some(app) = selected_flatpak {
-        let perm_card = GtkBox::new(Orientation::Vertical, 10);
+        let perm_card = GtkBox::new(Orientation::Vertical, 12);
         perm_card.add_css_class("akrep-detail-box");
 
-        let phdr = GtkBox::new(Orientation::Horizontal, 8);
         let ptitle = Label::new(Some(&format!(
-            "{}: {} ({}) — {}",
-            lang.pick("Seçili Uygulama İzinleri", "Selected App Sandbox"),
-            app.display_name,
-            app.app_id,
-            match app.scope {
-                FlatpakScope::User => lang.pick(
-                    "Kullanıcı Kapsamı (Anında Atomik INI + Anahtar Düzeyinde Geri Alma)",
-                    "User Scope (Instant Atomic INI + Key-Level Rollback)",
-                ),
-                FlatpakScope::System => lang.pick(
-                    "Sistem Kapsamı (Plan Önizleme + Polkit Onayı)",
-                    "System Scope (Plan Preview + Polkit Authorization)",
-                ),
-            }
+            "{}: {}",
+            lang.pick("İzinler", "Permissions"),
+            app.display_name
         )));
         ptitle.add_css_class("akrep-section-hdr");
         ptitle.set_xalign(0.0);
         ptitle.set_wrap(true);
-        ptitle.set_hexpand(true);
-        phdr.append(&ptitle);
-        perm_card.append(&phdr);
+        perm_card.append(&ptitle);
+
+        let scope_note = Label::new(Some(match app.scope {
+            FlatpakScope::User => lang.pick(
+                "Kullanıcı uygulaması · değişiklikler anında uygulanır ve geri alınabilir",
+                "User app · changes apply immediately and can be rolled back",
+            ),
+            FlatpakScope::System => lang.pick(
+                "Sistem uygulaması · değişiklikler önizleme onayı ile uygulanır",
+                "System app · changes are reviewed before applying",
+            ),
+        }));
+        scope_note.add_css_class("akrep-meta");
+        scope_note.set_xalign(0.0);
+        scope_note.set_wrap(true);
+        perm_card.append(&scope_note);
+
+        if app.scope == FlatpakScope::System {
+            perm_card.append(&build_admin_note(lang));
+        }
 
         if app.running {
             let rwarn = Label::new(Some(lang.pick(
-                "Bu uygulama şu anda açık — yapacağınız izin değişiklikleri uygulamayı kapatıp yeniden açtığınızda geçerli olur.",
-                "This app is currently running — override changes will apply the next time the app restarts.",
+                "Uygulama şu anda açık; değişiklikler uygulamayı yeniden başlattığınızda geçerli olur",
+                "App is currently running; changes apply after restarting the app",
             )));
             rwarn.add_css_class("akrep-offline-banner");
             rwarn.set_xalign(0.0);
@@ -379,31 +398,25 @@ pub fn build_applications_page(
         let ep = &app.effective_permissions;
         let toggles: Vec<CapabilityToggleSpec<'_>> = vec![
             (
-                lang.pick("Ağ Erişimi (Network)", "Network Access"),
+                lang.pick("Ağ erişimi", "Network access"),
                 ep.network.granted,
                 ep.network.source,
                 ("Context.shared", "network", "!network"),
             ),
             (
-                lang.pick(
-                    "Mikrofon (PulseAudio/PipeWire)",
-                    "Microphone (Audio Socket)",
-                ),
+                lang.pick("Mikrofon", "Microphone"),
                 ep.microphone.granted,
                 ep.microphone.source,
                 ("Context.sockets", "pulseaudio", "!pulseaudio"),
             ),
             (
-                lang.pick(
-                    "Doğrudan Kamera/Cihazlar (!all ile Kısıtla)",
-                    "Direct Camera/Devices",
-                ),
+                lang.pick("Doğrudan kamera ve cihazlar", "Direct camera and devices"),
                 ep.camera.direct_devices_all,
                 ep.camera.source,
                 ("Context.devices", "all", "!all"),
             ),
             (
-                lang.pick("USB Cihazları", "USB Devices"),
+                lang.pick("USB aygıtları", "USB devices"),
                 ep.usb.granted,
                 ep.usb.source,
                 ("Context.devices", "usb", "!usb"),
@@ -415,7 +428,7 @@ pub fn build_applications_page(
                 ("Context.features", "bluetooth", "!bluetooth"),
             ),
             (
-                lang.pick("GPU Donanım Hızlandırma (DRI)", "GPU Acceleration (DRI)"),
+                lang.pick("GPU hızlandırma", "GPU acceleration"),
                 ep.gpu.granted,
                 ep.gpu.source,
                 ("Context.devices", "dri", "!dri"),
@@ -423,38 +436,41 @@ pub fn build_applications_page(
         ];
 
         for (cap_lbl, granted, src_layer, (spec_key, pos_tok, neg_tok)) in toggles {
-            let crow = GtkBox::new(Orientation::Horizontal, 10);
+            let crow = GtkBox::new(Orientation::Horizontal, 12);
             crow.add_css_class("akrep-diff-row");
+            crow.set_valign(Align::Center);
 
             let clbl = Label::new(Some(cap_lbl));
             clbl.add_css_class("akrep-card-title");
             clbl.set_xalign(0.0);
+            clbl.set_wrap(true);
             clbl.set_hexpand(true);
             crow.append(&clbl);
 
             let src_b = Label::new(Some(source_layer_label(src_layer, lang)));
-            src_b.add_css_class("akrep-subtitle");
+            src_b.add_css_class("akrep-meta");
             crow.append(&src_b);
 
-            let st_b = Label::new(Some(if granted {
-                lang.pick("İzinli", "Granted")
-            } else {
-                lang.pick("Kısıtlı / Portal", "Restricted / Portal")
-            }));
-            st_b.add_css_class("akrep-badge");
-            st_b.add_css_class(if granted {
-                "akrep-sev-attention"
-            } else {
-                "akrep-sev-protected"
-            });
-            crow.append(&st_b);
+            crow.append(&build_status_indicator(
+                if granted {
+                    "akrep-sev-attention"
+                } else {
+                    "akrep-sev-protected"
+                },
+                if granted {
+                    lang.pick("İzinli", "Granted")
+                } else {
+                    lang.pick("Kısıtlı", "Restricted")
+                },
+                false,
+            ));
 
-            // Blanket `devices=all` is a forbidden red-line grant, so only tightening (`!all` + remove `all`) is offered!
+            // Blanket `devices=all` is forbidden to grant, so only tightening (`!all` + remove `all`) is offered
             if !(spec_key == "Context.devices" && pos_tok == "all" && !granted) {
                 let btn_txt = if granted {
                     lang.pick("Kısıtla", "Restrict")
                 } else {
-                    lang.pick("İzin Ver", "Grant")
+                    lang.pick("İzin ver", "Grant")
                 };
                 let act_btn = Button::with_label(btn_txt);
                 act_btn.add_css_class("akrep-ghost-btn");
@@ -474,29 +490,41 @@ pub fn build_applications_page(
 
         // Narrow Filesystem Grants
         let fs_hdr = Label::new(Some(lang.pick(
-            "Dosya Sistemi Erişimleri (Geniş host/home izinleri kırmızı çizgiyle engellenir)",
-            "Filesystem Grants (Blanket host/home grants blocked by red-line policy)",
+            "Dosya sistemi erişimleri",
+            "Filesystem access",
         )));
         fs_hdr.add_css_class("akrep-card-title");
         fs_hdr.set_xalign(0.0);
+        fs_hdr.set_margin_top(4);
         perm_card.append(&fs_hdr);
+
+        let fs_note = Label::new(Some(lang.pick(
+            "Geniş sistem veya ev dizini erişimi güvenlik gereği engellenir",
+            "Broad host or home directory access is blocked by policy",
+        )));
+        fs_note.add_css_class("akrep-meta");
+        fs_note.set_xalign(0.0);
+        fs_note.set_wrap(true);
+        perm_card.append(&fs_note);
 
         for fgrant in &ep.filesystems {
             let frow = GtkBox::new(Orientation::Horizontal, 8);
             frow.add_css_class("akrep-diff-row");
+            frow.set_valign(Align::Center);
             let fl = Label::new(Some(&format!(
-                "{} ({:?}, {})",
+                "{} ({:?} · {})",
                 fgrant.raw_token,
                 fgrant.mode,
                 source_layer_label(Some(fgrant.source), lang)
             )));
             fl.add_css_class("akrep-mono");
             fl.set_xalign(0.0);
+            fl.set_wrap(true);
+            fl.set_wrap_mode(WrapMode::WordChar);
             fl.set_hexpand(true);
             frow.append(&fl);
 
-            let revoke_fs_btn =
-                Button::with_label(lang.pick("Kaldır / Kısıtla", "Remove / Restrict"));
+            let revoke_fs_btn = Button::with_label(lang.pick("Kaldır", "Remove"));
             revoke_fs_btn.add_css_class("akrep-danger-btn");
             let app_clone = app.clone();
             let cmd_f = cmd_tx.clone();
@@ -517,8 +545,9 @@ pub fn build_applications_page(
         let add_fs_row = GtkBox::new(Orientation::Horizontal, 8);
         let fs_ent = Entry::new();
         fs_ent.add_css_class("akrep-entry");
+        fs_ent.set_width_chars(12);
         fs_ent.set_hexpand(true);
-        fs_ent.set_placeholder_text(Some("~/Projects:ro or xdg-download:ro"));
+        fs_ent.set_placeholder_text(Some("~/Projects:ro"));
         fs_ent.set_text(&draft.narrow_fs_input);
         let st_fs = Rc::clone(state);
         fs_ent.connect_changed(move |ent| {
@@ -526,7 +555,7 @@ pub fn build_applications_page(
         });
         add_fs_row.append(&fs_ent);
 
-        let add_fs_btn = Button::with_label(lang.pick("Dar Klasör İzni Ekle", "Add Narrow Folder"));
+        let add_fs_btn = Button::with_label(lang.pick("Klasör ekle", "Add folder"));
         add_fs_btn.add_css_class("akrep-primary-btn");
         let app_fs = app.clone();
         let cmd_afs = cmd_tx.clone();
@@ -548,34 +577,36 @@ pub fn build_applications_page(
         add_fs_row.append(&add_fs_btn);
         perm_card.append(&add_fs_row);
 
-        // D-Bus policies viewer & restriction controls
+        // Bus policies viewer & restriction controls
         let bus_hdr = Label::new(Some(lang.pick(
-            "D-Bus Oturum ve Sistem Politikaları",
-            "D-Bus Session & System Policies",
+            "Uygulama veriyolu izinleri",
+            "App bus permissions",
         )));
         bus_hdr.add_css_class("akrep-card-title");
         bus_hdr.set_xalign(0.0);
+        bus_hdr.set_margin_top(4);
         perm_card.append(&bus_hdr);
 
         if ep.bus_policies.is_empty() {
             let empty_bus = Label::new(Some(lang.pick(
-                "Özel D-Bus oturum/sistem veriyolu izni yok (varsayılan portal izolasyonu aktif).",
-                "No custom D-Bus session/system bus grants (default portal isolation active).",
+                "Özel veriyolu izni yok; varsayılan portal izolasyonu etkin",
+                "No custom bus grants; default portal isolation active",
             )));
             empty_bus.add_css_class("akrep-subtitle");
             empty_bus.set_xalign(0.0);
+            empty_bus.set_wrap(true);
             perm_card.append(&empty_bus);
         } else {
             for bp in &ep.bus_policies {
-                let brow = GtkBox::new(Orientation::Horizontal, 8);
+                let brow = GtkBox::new(Orientation::Horizontal, 12);
                 brow.add_css_class("akrep-diff-row");
+                brow.set_valign(Align::Center);
                 let sec_name = match bp.bus_kind {
                     BusKind::Session => "Session Bus Policy",
                     BusKind::System => "System Bus Policy",
                 };
                 let blbl = Label::new(Some(&format!(
-                    "[{}].{} = {} ({})",
-                    sec_name,
+                    "{} = {} ({})",
                     bp.bus_name,
                     bp.policy,
                     source_layer_label(Some(bp.source), lang)
@@ -583,19 +614,20 @@ pub fn build_applications_page(
                 blbl.add_css_class("akrep-mono");
                 blbl.set_xalign(0.0);
                 blbl.set_wrap(true);
+                blbl.set_wrap_mode(WrapMode::WordChar);
                 blbl.set_hexpand(true);
                 brow.append(&blbl);
 
                 if bp.is_sensitive_warning {
-                    let wb = Label::new(Some(lang.pick("Hassas Veriyolu", "Sensitive Bus")));
-                    wb.add_css_class("akrep-badge");
-                    wb.add_css_class("akrep-sev-critical");
-                    brow.append(&wb);
+                    brow.append(&build_status_indicator(
+                        "akrep-sev-critical",
+                        lang.pick("Hassas erişim", "Sensitive"),
+                        false,
+                    ));
                 }
 
                 if matches!(bp.policy.to_ascii_lowercase().as_str(), "talk" | "own") {
-                    let restrict_bus_btn =
-                        Button::with_label(lang.pick("Kısıtla (none)", "Restrict (none)"));
+                    let restrict_bus_btn = Button::with_label(lang.pick("Kısıtla", "Restrict"));
                     restrict_bus_btn.add_css_class("akrep-danger-btn");
                     let app_clone = app.clone();
                     let cmd_b = cmd_tx.clone();
@@ -619,39 +651,43 @@ pub fn build_applications_page(
         root.append(&perm_card);
     }
 
-    // Recent User-Scope Override Transactions (Key-Level Rollback)
+    // Recent User-Scope Override Transactions
     if !user_txs.is_empty() {
-        let utx_card = GtkBox::new(Orientation::Vertical, 8);
+        let utx_card = GtkBox::new(Orientation::Vertical, 12);
         utx_card.add_css_class("akrep-detail-box");
         let utx_hdr = Label::new(Some(lang.pick(
-            "Son Kullanıcı Flatpak İzin İşlemleri (Anahtar Düzeyinde Geri Alma)",
-            "Recent User-Scope Flatpak Transactions (Key-Level Rollback)",
+            "Son izin değişiklikleri",
+            "Recent permission changes",
         )));
         utx_hdr.add_css_class("akrep-section-hdr");
         utx_hdr.set_xalign(0.0);
         utx_card.append(&utx_hdr);
 
         for utx in user_txs.iter().take(10) {
-            let trow = GtkBox::new(Orientation::Horizontal, 8);
+            let trow = GtkBox::new(Orientation::Horizontal, 12);
             trow.add_css_class("akrep-diff-row");
+            trow.set_valign(Align::Center);
 
-            let sb = Label::new(Some(tx_state_label(utx.state, lang)));
-            sb.add_css_class("akrep-badge");
-            sb.add_css_class(tx_state_css_class(utx.state));
-            trow.append(&sb);
+            trow.append(&build_tx_state_indicator(utx.state, lang));
 
             let tl = Label::new(Some(&format!(
-                "{} • {}",
+                "{} · {}",
                 utx.app_id,
-                utx.created_at.chars().take(19).collect::<String>()
+                utx.created_at
+                    .chars()
+                    .take(16)
+                    .collect::<String>()
+                    .replace('T', " ")
             )));
             tl.add_css_class("akrep-mono");
             tl.set_xalign(0.0);
+            tl.set_wrap(true);
+            tl.set_wrap_mode(WrapMode::WordChar);
             tl.set_hexpand(true);
             trow.append(&tl);
 
             if utx.state == TransactionState::Committed {
-                let rb = Button::with_label(lang.pick("Geri Al", "Rollback"));
+                let rb = Button::with_label(lang.pick("Geri al", "Rollback"));
                 rb.add_css_class("akrep-ghost-btn");
                 let cmd_rb = cmd_tx.clone();
                 let tid = utx.tx_id.clone();
