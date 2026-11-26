@@ -18,22 +18,89 @@ use std::process::Command;
 use std::rc::Rc;
 
 const LOGO_PNG: &[u8] = include_bytes!("../../../data/icons/solar-logo-256.png");
-const SETTINGS_EMBLEM_PNG: &[u8] =
-    include_bytes!("../../../data/icons/living-flow/solar-settings-64.png");
-const NAV_CLOCK_PNG: &[u8] = include_bytes!("../../../data/icons/living-flow/nav-clock.png");
-const NAV_TASKBAR_PNG: &[u8] = include_bytes!("../../../data/icons/living-flow/nav-taskbar.png");
-const NAV_DISPLAY_PNG: &[u8] = include_bytes!("../../../data/icons/living-flow/nav-display.png");
-const NAV_SHELL_PNG: &[u8] = include_bytes!("../../../data/icons/living-flow/nav-shell.png");
-const NAV_CAELESTIA_PNG: &[u8] = include_bytes!("../../../data/icons/living-flow/nav-caelestia.png");
-const NAV_NOCTALIA_PNG: &[u8] = include_bytes!("../../../data/icons/living-flow/nav-noctalia.png");
-const NAV_PERF_PNG: &[u8] = include_bytes!("../../../data/icons/living-flow/nav-perf.png");
-const NAV_HEALTH_PNG: &[u8] = include_bytes!("../../../data/icons/living-flow/nav-health.png");
-const NAV_OMNIBAR_PNG: &[u8] = include_bytes!("../../../data/icons/living-flow/nav-omnibar.png");
-const NAV_HUD_PNG: &[u8] = include_bytes!("../../../data/icons/living-flow/nav-hud.png");
-const NAV_ABOUT_PNG: &[u8] = include_bytes!("../../../data/icons/living-flow/nav-about.png");
 
 fn create_logo_image(size: i32) -> Image {
     load_png_emblem(LOGO_PNG, size)
+}
+
+fn create_symbolic_icon(icon_name: &str, css_class: &str) -> Image {
+    let img = Image::from_icon_name(icon_name);
+    img.set_pixel_size(16);
+    img.set_size_request(16, 16);
+    img.set_valign(gtk4::Align::Center);
+    img.add_css_class(css_class);
+    img
+}
+
+fn build_page_header(title: &str, subtitle: &str) -> GtkBox {
+    let header = GtkBox::new(Orientation::Vertical, 4);
+    header.add_css_class("settings-page-header");
+
+    let t = Label::new(Some(title));
+    t.add_css_class("settings-page-title");
+    t.set_halign(gtk4::Align::Start);
+    header.append(&t);
+
+    if !subtitle.trim().is_empty() {
+        let s = Label::new(Some(subtitle));
+        s.add_css_class("settings-page-subtitle");
+        s.set_wrap(true);
+        s.set_xalign(0.0);
+        s.set_halign(gtk4::Align::Start);
+        header.append(&s);
+    }
+
+    header
+}
+
+fn build_kv_row(key: &str, value: &str) -> GtkBox {
+    let row = GtkBox::new(Orientation::Horizontal, 16);
+    row.add_css_class("settings-kv-row");
+
+    let k_lbl = Label::new(Some(key));
+    k_lbl.add_css_class("kv-key");
+    k_lbl.set_halign(gtk4::Align::Start);
+    k_lbl.set_hexpand(true);
+    row.append(&k_lbl);
+
+    let v_lbl = Label::new(Some(value));
+    v_lbl.add_css_class("kv-val");
+    v_lbl.set_halign(gtk4::Align::End);
+    v_lbl.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    row.append(&v_lbl);
+
+    row
+}
+
+fn build_keycap_combo(chords: &[&[&str]]) -> GtkBox {
+    let combo = GtkBox::new(Orientation::Horizontal, 4);
+    combo.set_halign(gtk4::Align::Start);
+    combo.set_valign(gtk4::Align::Center);
+
+    for (chord_idx, chord) in chords.iter().enumerate() {
+        if chord_idx > 0 {
+            let sep = Label::new(Some("/"));
+            sep.add_css_class("lf-keycap-sep");
+            sep.set_valign(gtk4::Align::Center);
+            combo.append(&sep);
+        }
+
+        for (key_idx, key) in chord.iter().enumerate() {
+            if key_idx > 0 {
+                let plus = Label::new(Some("+"));
+                plus.add_css_class("lf-keycap-plus");
+                plus.set_valign(gtk4::Align::Center);
+                combo.append(&plus);
+            }
+
+            let cap = Label::new(Some(key));
+            cap.add_css_class("lf-keycap");
+            cap.set_valign(gtk4::Align::Center);
+            combo.append(&cap);
+        }
+    }
+
+    combo
 }
 
 pub fn launch_settings_window() {
@@ -42,7 +109,7 @@ pub fn launch_settings_window() {
 
 pub fn launch_settings_window_with_tab(initial_tab: Option<&str>) {
     glib::set_prgname(Some("solar-settings"));
-    glib::set_application_name("SolarUI Settings");
+    glib::set_application_name("SolarUI ayarları");
 
     if let Err(err) = gtk4::init() {
         eprintln!("Failed to initialize GTK4: {}", err);
@@ -73,57 +140,260 @@ fn restart_taskbar_if_enabled() {
 fn build_settings_ui(main_loop: glib::MainLoop, initial_tab: Option<&str>) {
     let extra_css = r#"
         .settings-stage {
-            padding: 18px 22px;
+            padding: 24px;
         }
 
-        .settings-title {
-            color: #f5f5f7;
-            font-size: 19px;
-            font-weight: 700;
+        .settings-page-header {
+            margin-bottom: 16px;
         }
 
-        .settings-subtitle {
-            color: #a1a1aa;
-            font-size: 12.5px;
-            font-weight: 500;
+        .settings-page-title {
+            color: #ededed;
+            font-size: 20px;
+            font-weight: 600;
+            letter-spacing: 0px;
+        }
+
+        .settings-page-subtitle {
+            color: #a1a1a6;
+            font-size: 13px;
+            font-weight: 400;
+            letter-spacing: 0px;
         }
 
         .settings-cat-header {
-            color: #71717a;
-            font-size: 10.2px;
-            font-weight: 700;
-            letter-spacing: 1.1px;
-            margin: 10px 10px 4px 10px;
+            color: #85858b;
+            font-size: 12px;
+            font-weight: 500;
+            letter-spacing: 0px;
+            margin: 20px 12px 8px 12px;
+        }
+
+        .settings-cat-header-first {
+            margin-top: 4px;
+        }
+
+        .settings-nav-icon {
+            color: #85858b;
+            -gtk-icon-size: 16px;
+            transition: color 150ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        .lf-nav-pill:hover .settings-nav-icon,
+        .lf-nav-pill.active .settings-nav-icon {
+            color: #ededed;
+        }
+
+        .settings-row-icon {
+            color: #85858b;
+            -gtk-icon-size: 16px;
+        }
+
+        .settings-mono {
+            font-feature-settings: "tnum";
+        }
+
+        .settings-meta {
+            color: #85858b;
+            font-size: 12px;
+            font-weight: 400;
+            letter-spacing: 0px;
+            font-feature-settings: "tnum";
+        }
+
+        .settings-kv-row {
+            padding: 4px 0px;
+        }
+
+        .kv-key {
+            color: #85858b;
+            font-size: 13px;
+            font-weight: 400;
+            letter-spacing: 0px;
+        }
+
+        .kv-val {
+            color: #ededed;
+            font-size: 13px;
+            font-weight: 400;
+            letter-spacing: 0px;
+            font-feature-settings: "tnum";
+        }
+
+        .monitor-card {
+            background-color: #141415;
+            border: 1px solid rgba(237, 237, 237, 0.08);
+            border-radius: 8px;
+            padding: 16px;
+            transition: border-color 150ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        .monitor-card:hover {
+            border-color: rgba(237, 237, 237, 0.12);
+        }
+
+        .monitor-name {
+            color: #ededed;
+            font-size: 14px;
+            font-weight: 500;
+            letter-spacing: 0px;
         }
 
         .wp-card {
-            background-color: rgba(255, 255, 255, 0.04);
-            border: 1px solid rgba(255, 255, 255, 0.09);
-            border-radius: 14px;
-            padding: 8px;
-            transition: all 160ms ease;
+            background-color: #141415;
+            border: 1px solid rgba(237, 237, 237, 0.08);
+            border-radius: 12px;
+            padding: 0px;
+            transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        border-color 150ms cubic-bezier(0.22, 1, 0.36, 1);
         }
 
         .wp-card:hover {
-            background-color: rgba(255, 255, 255, 0.09);
-            border-color: rgba(255, 255, 255, 0.24);
+            background-color: #232325;
+            border-color: rgba(237, 237, 237, 0.16);
         }
 
-        .swatch-red     { background-color: #e81123; color: #ffffff; border-radius: 10px; padding: 6px 12px; font-weight: 700; border: 1px solid rgba(255,255,255,0.22); }
-        .swatch-blue    { background-color: #0078d7; color: #ffffff; border-radius: 10px; padding: 6px 12px; font-weight: 700; border: 1px solid rgba(255,255,255,0.22); }
-        .swatch-dark    { background-color: #2d2d30; color: #ffffff; border-radius: 10px; padding: 6px 12px; font-weight: 700; border: 1px solid rgba(255,255,255,0.22); }
-        .swatch-green   { background-color: #107c10; color: #ffffff; border-radius: 10px; padding: 6px 12px; font-weight: 700; border: 1px solid rgba(255,255,255,0.22); }
-        .swatch-purple  { background-color: #881798; color: #ffffff; border-radius: 10px; padding: 6px 12px; font-weight: 700; border: 1px solid rgba(255,255,255,0.22); }
-        .swatch-amber   { background-color: #ff6a00; color: #ffffff; border-radius: 10px; padding: 6px 12px; font-weight: 700; border: 1px solid rgba(255,255,255,0.22); }
-        .swatch-teal    { background-color: #008272; color: #ffffff; border-radius: 10px; padding: 6px 12px; font-weight: 700; border: 1px solid rgba(255,255,255,0.22); }
+        .wp-card.wp-active {
+            border-color: rgba(224, 87, 60, 0.70);
+        }
+
+        .wp-footer {
+            padding: 8px 12px 12px 12px;
+        }
+
+        .wp-title {
+            color: #ededed;
+            font-size: 13px;
+            font-weight: 500;
+            letter-spacing: 0px;
+        }
+
+        .wp-apply-btn {
+            min-height: 28px;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .swatch-chip {
+            background-color: #232325;
+            background-image: none;
+            color: #ededed;
+            border: 1px solid rgba(237, 237, 237, 0.12);
+            border-radius: 8px;
+            padding: 6px 12px;
+            min-height: 32px;
+            font-size: 13px;
+            font-weight: 500;
+            letter-spacing: 0px;
+            box-shadow: none;
+            transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        .swatch-chip:hover {
+            background-color: #2c2c2f;
+            border-color: rgba(237, 237, 237, 0.18);
+        }
+
+        .swatch-chip:active {
+            transform: scale(0.98);
+        }
+
+        .swatch-chip.swatch-active {
+            background-color: #2c2c2f;
+            border-color: rgba(224, 87, 60, 0.70);
+        }
+
+        .swatch-dot {
+            min-width: 12px;
+            min-height: 12px;
+            border-radius: 999px;
+            border: 1px solid rgba(237, 237, 237, 0.24);
+        }
+
+        .swatch-dot-red    { background-color: #e81123; }
+        .swatch-dot-blue   { background-color: #0078d7; }
+        .swatch-dot-dark   { background-color: #2d2d30; }
+        .swatch-dot-green  { background-color: #107c10; }
+        .swatch-dot-purple { background-color: #881798; }
+        .swatch-dot-amber  { background-color: #ff6a00; }
+        .swatch-dot-teal   { background-color: #008272; }
+
+        .status-dot {
+            min-width: 8px;
+            min-height: 8px;
+            border-radius: 999px;
+        }
+
+        .status-dot-ok     { background-color: #4cc38a; }
+        .status-dot-warn   { background-color: #d9a03f; }
+        .status-dot-danger { background-color: #e5484d; }
+        .status-dot-muted  { background-color: #85858b; }
+
+        .status-text {
+            color: #a1a1a6;
+            font-size: 13px;
+            font-weight: 400;
+            letter-spacing: 0px;
+            font-feature-settings: "tnum";
+        }
+
+        .status-text-ok {
+            color: #4cc38a;
+            font-size: 13px;
+            font-weight: 400;
+            letter-spacing: 0px;
+            font-feature-settings: "tnum";
+        }
+
+        .status-text-warn {
+            color: #d9a03f;
+            font-size: 13px;
+            font-weight: 400;
+            letter-spacing: 0px;
+            font-feature-settings: "tnum";
+        }
+
+        .status-text-danger {
+            color: #e5484d;
+            font-size: 13px;
+            font-weight: 400;
+            letter-spacing: 0px;
+            font-feature-settings: "tnum";
+        }
+
+        flowboxchild {
+            padding: 0px;
+            background-color: transparent;
+            border: none;
+        }
+
+        flowboxchild:hover,
+        flowboxchild:selected {
+            background-color: transparent;
+        }
+
+        colorbutton > button,
+        button.color {
+            background-color: #232325;
+            background-image: none;
+            border: 1px solid rgba(237, 237, 237, 0.12);
+            border-radius: 8px;
+            min-height: 36px;
+            padding: 4px;
+            box-shadow: none;
+        }
     "#;
     apply_living_flow_theme(extra_css);
 
     let window = Window::builder()
-        .title("SolarUI Ayarları — Masaüstü ve Görev Çubuğu")
+        .title("SolarUI ayarları")
         .decorated(false)
-        .default_width(1020)
-        .default_height(620)
+        .default_width(1040)
+        .default_height(660)
         .resizable(true)
         .build();
 
@@ -149,20 +419,20 @@ fn build_settings_ui(main_loop: glib::MainLoop, initial_tab: Option<&str>) {
     let shell_box = GtkBox::new(Orientation::Vertical, 0);
     shell_box.add_css_class("lf-window-shell");
 
-    let fluid_cloud = FluidCloud::new("Ayarlar Senkronize");
-    let emblem = load_png_emblem(SETTINGS_EMBLEM_PNG, 34);
+    let fluid_cloud = FluidCloud::new("Ayarlar güncel");
+    let emblem = create_symbolic_icon("preferences-system-symbolic", "lf-topbar-icon");
     let loop_top = main_loop.clone();
     let topbar = build_living_flow_topbar(
         &window,
         Some(emblem),
-        "SolarUI Masaüstü Ayarları",
-        "Blaze Universe • Kontrol Paneli",
+        "SolarUI ayarları",
+        "Blaze SolarEvolution",
         Some(&fluid_cloud),
         Some(Box::new(move || loop_top.quit())),
     );
     shell_box.append(&topbar);
 
-    // Two-Pane Living Flow Layout: Left Capsule Navigation Rail + Right Fluid Stack
+    // Two-Pane Graphite Layout: Left Navigation Rail + Right Settings Stage
     let split_box = GtkBox::new(Orientation::Horizontal, 0);
     split_box.set_vexpand(true);
     split_box.set_hexpand(true);
@@ -170,12 +440,12 @@ fn build_settings_ui(main_loop: glib::MainLoop, initial_tab: Option<&str>) {
     let sidebar_scroll = ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Never)
         .vscrollbar_policy(gtk4::PolicyType::Automatic)
-        .min_content_width(228)
+        .min_content_width(240)
         .vexpand(true)
         .build();
     sidebar_scroll.add_css_class("lf-sidebar");
 
-    let nav_list = GtkBox::new(Orientation::Vertical, 2);
+    let nav_list = GtkBox::new(Orientation::Vertical, 0);
 
     let stage_scroll = ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Never)
@@ -187,8 +457,8 @@ fn build_settings_ui(main_loop: glib::MainLoop, initial_tab: Option<&str>) {
     let stack = Stack::new();
     stack.set_hhomogeneous(false);
     stack.set_vhomogeneous(false);
-    stack.set_transition_type(StackTransitionType::SlideUpDown);
-    stack.set_transition_duration(240);
+    stack.set_transition_type(StackTransitionType::Crossfade);
+    stack.set_transition_duration(150);
     stack.add_css_class("settings-stage");
 
     // ── BUILD ALL PAGES ───────────────────────────────────────────────────────
@@ -202,17 +472,22 @@ fn build_settings_ui(main_loop: glib::MainLoop, initial_tab: Option<&str>) {
     let caelestia_tab = build_caelestia_tab();
 
     // Noctalia Bar Quick Control Page
-    let noctalia_tab = GtkBox::new(Orientation::Vertical, 12);
+    let noctalia_tab = GtkBox::new(Orientation::Vertical, 8);
+    noctalia_tab.append(&build_page_header(
+        "Noctalia Bar",
+        "Üst çubuk ayarlarını ve hızlı kontrol panellerini doğrudan açın",
+    ));
+
     let n_sec = GtkBox::new(Orientation::Vertical, 12);
     n_sec.add_css_class("section-box");
 
-    let n_title = Label::new(Some("Noctalia Bar ve Hızlı Kontrol Panelleri"));
+    let n_title = Label::new(Some("Hızlı erişim"));
     n_title.add_css_class("section-title");
     n_title.set_halign(gtk4::Align::Start);
     n_sec.append(&n_title);
 
     let n_desc = Label::new(Some(
-        "Noctalia Bar, SolarUI'ın üst bilgi ve kontrol merkezidir. Tüm ayarlarını ve panellerini aşağıdan doğrudan açabilirsiniz.",
+        "Noctalia Bar panelleri etkin oturum üzerinde anında açılır",
     ));
     n_desc.add_css_class("setting-subtext");
     n_desc.set_wrap(true);
@@ -220,9 +495,9 @@ fn build_settings_ui(main_loop: glib::MainLoop, initial_tab: Option<&str>) {
     n_desc.set_halign(gtk4::Align::Start);
     n_sec.append(&n_desc);
 
-    let btn_grid = GtkBox::new(Orientation::Horizontal, 10);
+    let btn_grid = GtkBox::new(Orientation::Horizontal, 8);
     let cloud_noc = fluid_cloud.clone();
-    let btn_settings = Button::with_label("Noctalia Ayarları");
+    let btn_settings = Button::with_label("Ayarları aç");
     btn_settings.add_css_class("action-btn");
     btn_settings.connect_clicked(move |_| {
         cloud_noc.pulse("Noctalia ayar paneli açıldı", FluidCloudTone::Info, false);
@@ -230,7 +505,7 @@ fn build_settings_ui(main_loop: glib::MainLoop, initial_tab: Option<&str>) {
     });
     btn_grid.append(&btn_settings);
 
-    let btn_cc = Button::with_label("Kontrol Merkezi");
+    let btn_cc = Button::with_label("Kontrol merkezi");
     btn_cc.add_css_class("secondary-btn");
     btn_cc.connect_clicked(|_| {
         let _ = Command::new("noctalia")
@@ -239,7 +514,7 @@ fn build_settings_ui(main_loop: glib::MainLoop, initial_tab: Option<&str>) {
     });
     btn_grid.append(&btn_cc);
 
-    let btn_wp = Button::with_label("Duvar Kağıdı");
+    let btn_wp = Button::with_label("Duvar kağıdı");
     btn_wp.add_css_class("secondary-btn");
     btn_wp.connect_clicked(|_| {
         let _ = Command::new("noctalia")
@@ -248,7 +523,7 @@ fn build_settings_ui(main_loop: glib::MainLoop, initial_tab: Option<&str>) {
     });
     btn_grid.append(&btn_wp);
 
-    let btn_audio = Button::with_label("Ses & Mikser");
+    let btn_audio = Button::with_label("Ses mikseri");
     btn_audio.add_css_class("secondary-btn");
     btn_audio.connect_clicked(|_| {
         let _ = Command::new("noctalia")
@@ -263,17 +538,22 @@ fn build_settings_ui(main_loop: glib::MainLoop, initial_tab: Option<&str>) {
     let omnibar_tab = build_omnibar_tab();
 
     // Shortcuts & Welcome HUD Page
-    let hud_tab = GtkBox::new(Orientation::Vertical, 12);
+    let hud_tab = GtkBox::new(Orientation::Vertical, 8);
+    hud_tab.append(&build_page_header(
+        "Kısayollar",
+        "Başlangıç karşılama penceresi ve sistem klavye kısayolları",
+    ));
+
     let h_sec = GtkBox::new(Orientation::Vertical, 12);
     h_sec.add_css_class("section-box");
 
-    let h_title = Label::new(Some("Açılış Karşılama ve Kısayollar Ekranı"));
+    let h_title = Label::new(Some("Karşılama ve kısayol rehberi"));
     h_title.add_css_class("section-title");
     h_title.set_halign(gtk4::Align::Start);
     h_sec.append(&h_title);
 
     let h_sub = Label::new(Some(
-        "Başlangıç karşılama ekranını, sistem klavye kısayollarını ve kurulum yardımcısını yapılandırın.",
+        "Klavye kısayol özetini ve ilk kurulum rehberini istediğiniz zaman açabilirsiniz",
     ));
     h_sub.add_css_class("setting-subtext");
     h_sub.set_wrap(true);
@@ -281,7 +561,7 @@ fn build_settings_ui(main_loop: glib::MainLoop, initial_tab: Option<&str>) {
     h_sub.set_halign(gtk4::Align::Start);
     h_sec.append(&h_sub);
 
-    let open_welcome_btn = Button::with_label("Kısayol ve Karşılama Ekranını Şimdi Aç");
+    let open_welcome_btn = Button::with_label("Rehberi aç");
     open_welcome_btn.add_css_class("action-btn");
     open_welcome_btn.set_halign(gtk4::Align::Start);
     open_welcome_btn.connect_clicked(|_| {
@@ -290,7 +570,7 @@ fn build_settings_ui(main_loop: glib::MainLoop, initial_tab: Option<&str>) {
     h_sec.append(&open_welcome_btn);
 
     let cfg = SolarConfig::load();
-    let chk_startup = CheckButton::with_label("Oturum açıldığında karşılama ekranını otomatik göster");
+    let chk_startup = CheckButton::with_label("Oturum açılışında karşılama penceresini göster");
     chk_startup.set_active(cfg.shortcuts_hud.show_at_startup);
     let cloud_hud = fluid_cloud.clone();
     chk_startup.connect_toggled(move |cb| {
@@ -303,49 +583,54 @@ fn build_settings_ui(main_loop: glib::MainLoop, initial_tab: Option<&str>) {
     hud_tab.append(&h_sec);
 
     // About Page
-    let about_tab = GtkBox::new(Orientation::Vertical, 12);
+    let about_tab = GtkBox::new(Orientation::Vertical, 8);
+    about_tab.append(&build_page_header(
+        "Hakkında",
+        "SolarUI sürüm ve sistem altyapı bilgileri",
+    ));
+
     let a_sec = GtkBox::new(Orientation::Vertical, 12);
     a_sec.add_css_class("section-box");
     a_sec.set_halign(gtk4::Align::Fill);
 
-    let big_logo = create_logo_image(80);
-    big_logo.set_halign(gtk4::Align::Center);
-    a_sec.append(&big_logo);
+    let about_id = GtkBox::new(Orientation::Horizontal, 16);
+    let big_logo = create_logo_image(56);
+    big_logo.set_valign(gtk4::Align::Center);
+    about_id.append(&big_logo);
 
-    let a_name = Label::new(Some("SolarUI Masaüstü Ortamı (Blaze Universe Edition)"));
-    a_name.add_css_class("settings-title");
-    a_name.set_halign(gtk4::Align::Center);
-    a_sec.append(&a_name);
+    let about_titles = GtkBox::new(Orientation::Vertical, 4);
+    about_titles.set_valign(gtk4::Align::Center);
 
-    let a_sig = Label::new(Some("Luminous Rendering & Aurora Physics"));
-    a_sig.add_css_class("settings-subtitle");
-    a_sig.set_halign(gtk4::Align::Center);
-    a_sec.append(&a_sig);
+    let a_name = Label::new(Some("SolarUI"));
+    a_name.add_css_class("section-title");
+    a_name.set_halign(gtk4::Align::Start);
+    about_titles.append(&a_name);
 
-    let kern_ver = std::fs::read_to_string("/proc/sys/kernel/osrelease")
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|_| "7.2.x".to_string());
-    let a_ver = Label::new(Some(&format!(
-        "Sürüm 1.1.0 (Rust + GTK4 + Niri Wayland + Linux {})",
-        kern_ver
-    )));
-    a_ver.add_css_class("setting-subtext");
-    a_ver.set_halign(gtk4::Align::Center);
-    a_sec.append(&a_ver);
+    let a_sig = Label::new(Some("Blaze SolarEvolution 5.05 masaüstü ortamı"));
+    a_sig.add_css_class("setting-subtext");
+    a_sig.set_halign(gtk4::Align::Start);
+    about_titles.append(&a_sig);
+    about_id.append(&about_titles);
+    a_sec.append(&about_id);
 
     let sep = Separator::new(Orientation::Horizontal);
     a_sec.append(&sep);
 
-    let a_dev = Label::new(Some(
-        "Geliştirici: Bulut Ars. E. (DarkMorpheus) & BlazeOS Project\nBlazeOS SolarEvolution 5.05 • Portadora (.blz) & Flathub Hibrit Mimari",
+    let kern_ver = std::fs::read_to_string("/proc/sys/kernel/osrelease")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| "7.2.x".to_string());
+
+    a_sec.append(&build_kv_row("Sürüm", "1.1.0"));
+    a_sec.append(&build_kv_row("Çekirdek", &format!("Linux {}", kern_ver)));
+    a_sec.append(&build_kv_row("Altyapı", "Rust, GTK4, Niri Wayland"));
+    a_sec.append(&build_kv_row("Paket sistemi", "Portadora (.blz), Flathub"));
+    a_sec.append(&build_kv_row(
+        "Geliştirici",
+        "Bulut Ars. E. (DarkMorpheus), BlazeOS Project",
     ));
-    a_dev.add_css_class("setting-label");
-    a_dev.set_justify(gtk4::Justification::Center);
-    a_dev.set_halign(gtk4::Align::Center);
-    a_sec.append(&a_dev);
     about_tab.append(&a_sec);
 
-    // Register pages and build ColorOS 17 Two-Pane Squircle Navigation Rows (Zero Unicode Tofu!)
+    // Register pages and build uniform symbolic navigation rail
     let default_page = match initial_tab.map(|t| t.trim().to_ascii_lowercase()) {
         Some(ref t) if t == "display" || t == "resolution" || t == "ekran" => "display",
         Some(ref t) if t == "personalize" || t == "wallpaper" || t == "theme" || t == "we10x" => "personalize",
@@ -360,26 +645,31 @@ fn build_settings_ui(main_loop: glib::MainLoop, initial_tab: Option<&str>) {
         _ => "personalize",
     };
 
-    let pages: Vec<(&str, &str, &[u8], &str, GtkBox)> = vec![
-        ("GÖRÜNÜM & KİŞİSELLEŞTİRME", "personalize", NAV_CAELESTIA_PNG, "Duvar Kağıdı & Tema", personalize_tab),
-        ("", "display", NAV_DISPLAY_PNG, "Ekran, Çözünürlük & Hz", display_tab),
-        ("", "clock", NAV_CLOCK_PNG, "Pixel Saat & Widget", clock_tab),
-        ("", "taskbar", NAV_TASKBAR_PNG, "Görev Çubuğu", taskbar_tab),
-        ("KABUK MOTORLARI", "shell", NAV_SHELL_PNG, "Kabuk Motoru & Yüzeyler", shell_tab),
-        ("", "caelestia", NAV_CAELESTIA_PNG, "Caelestia Düzeni", caelestia_tab),
-        ("", "noctalia", NAV_NOCTALIA_PNG, "Noctalia Bar", noctalia_tab),
-        ("SİSTEM & GÜVENLİK", "perf", NAV_PERF_PNG, "Performans & Aurora", perf_tab),
-        ("", "health", NAV_HEALTH_PNG, "Sistem Sağlığı & Kalkan", health_tab),
-        ("", "omnibar", NAV_OMNIBAR_PNG, "Omnibar & Akıllı Arama", omnibar_tab),
-        ("", "hud", NAV_HUD_PNG, "Kısayollar & Rehber", hud_tab),
-        ("", "about", NAV_ABOUT_PNG, "Hakkında", about_tab),
+    let pages: Vec<(&str, &str, &str, &str, GtkBox)> = vec![
+        ("Görünüm", "personalize", "preferences-desktop-wallpaper-symbolic", "Kişiselleştirme", personalize_tab),
+        ("", "display", "video-display-symbolic", "Ekran", display_tab),
+        ("", "clock", "preferences-system-time-symbolic", "Masaüstü saati", clock_tab),
+        ("", "taskbar", "view-paged-symbolic", "Görev çubuğu", taskbar_tab),
+        ("Kabuk", "shell", "user-desktop-symbolic", "Masaüstü kabuğu", shell_tab),
+        ("", "caelestia", "view-grid-symbolic", "Caelestia", caelestia_tab),
+        ("", "noctalia", "weather-clear-night-symbolic", "Noctalia Bar", noctalia_tab),
+        ("Sistem", "perf", "power-profile-performance-symbolic", "Performans", perf_tab),
+        ("", "health", "security-high-symbolic", "Sistem sağlığı", health_tab),
+        ("", "omnibar", "system-search-symbolic", "Omnibar", omnibar_tab),
+        ("", "hud", "input-keyboard-symbolic", "Kısayollar", hud_tab),
+        ("", "about", "help-about-symbolic", "Hakkında", about_tab),
     ];
 
     let mut nav_buttons: Vec<(String, String, Button)> = Vec::new();
-    for (group_hdr, page_id, icon_bytes, label_txt, widget_box) in pages {
+    let mut is_first_group = true;
+    for (group_hdr, page_id, icon_name, label_txt, widget_box) in pages {
         if !group_hdr.is_empty() {
             let hdr = Label::new(Some(group_hdr));
             hdr.add_css_class("settings-cat-header");
+            if is_first_group {
+                hdr.add_css_class("settings-cat-header-first");
+                is_first_group = false;
+            }
             hdr.set_halign(gtk4::Align::Start);
             nav_list.append(&hdr);
         }
@@ -387,9 +677,8 @@ fn build_settings_ui(main_loop: glib::MainLoop, initial_tab: Option<&str>) {
 
         let btn = Button::new();
         btn.add_css_class("lf-nav-pill");
-        let row_box = GtkBox::new(Orientation::Horizontal, 10);
-        let nav_icon = load_png_emblem(icon_bytes, 24);
-        nav_icon.set_valign(gtk4::Align::Center);
+        let row_box = GtkBox::new(Orientation::Horizontal, 8);
+        let nav_icon = create_symbolic_icon(icon_name, "settings-nav-icon");
         row_box.append(&nav_icon);
 
         let b_lbl = Label::new(Some(label_txt));
@@ -440,9 +729,11 @@ fn build_settings_ui(main_loop: glib::MainLoop, initial_tab: Option<&str>) {
 }
 
 fn build_performance_tab() -> GtkBox {
-    let tab = GtkBox::new(Orientation::Vertical, 12);
-    tab.set_margin_top(10);
-    tab.set_margin_bottom(10);
+    let tab = GtkBox::new(Orientation::Vertical, 8);
+    tab.append(&build_page_header(
+        "Performans",
+        "Donanım profili, efekt düzeyi ve arka plan kaynak yönetimi",
+    ));
 
     let hw = HardwareDetector::detect();
     let current_profile = HardwareTuningProfile::load();
@@ -451,35 +742,44 @@ fn build_performance_tab() -> GtkBox {
     let hw_sec = GtkBox::new(Orientation::Vertical, 8);
     hw_sec.add_css_class("section-box");
 
-    let hw_title = Label::new(Some("Algılanan Donanım Mimarisi"));
+    let hw_title = Label::new(Some("Algılanan donanım"));
     hw_title.add_css_class("section-title");
     hw_title.set_halign(gtk4::Align::Start);
     hw_sec.append(&hw_title);
 
-    let dev_label = Label::new(Some(&format!(
-        "GPU: {}\nCihazlar: {}\nToplam RAM: {:.1} GB | İşlemci: {} Çekirdek\nGüç: {}",
-        hw.gpu_vendor,
-        if hw.gpu_devices.is_empty() {
-            "Tümleşik / Standart DRM".to_string()
-        } else {
-            hw.gpu_devices.join(", ")
-        },
-        (hw.total_ram_mb as f64) / 1024.0,
-        hw.cpu_cores,
-        if hw.on_battery {
-            "Batarya Gücünde"
-        } else {
-            "Şebeke Gücünde (AC Bağlı)"
-        }
-    )));
-    dev_label.add_css_class("setting-label");
-    dev_label.set_halign(gtk4::Align::Start);
-    dev_label.set_margin_bottom(6);
-    hw_sec.append(&dev_label);
+    let gpu_devices = if hw.gpu_devices.is_empty() {
+        "Tümleşik DRM".to_string()
+    } else {
+        hw.gpu_devices.join(", ")
+    };
+    let power_str = if hw.on_battery {
+        "Pil"
+    } else {
+        "AC adaptör"
+    };
+
+    hw_sec.append(&build_kv_row("GPU", &hw.gpu_vendor));
+    hw_sec.append(&build_kv_row("Aygıtlar", &gpu_devices));
+    hw_sec.append(&build_kv_row(
+        "Bellek",
+        &format!("{:.1} GB", (hw.total_ram_mb as f64) / 1024.0),
+    ));
+    hw_sec.append(&build_kv_row(
+        "İşlemci",
+        &format!("{} çekirdek", hw.cpu_cores),
+    ));
+    hw_sec.append(&build_kv_row("Güç kaynağı", power_str));
+
+    let sep_hw = Separator::new(Orientation::Horizontal);
+    sep_hw.set_margin_top(4);
+    sep_hw.set_margin_bottom(4);
+    hw_sec.append(&sep_hw);
 
     let rec_box = GtkBox::new(Orientation::Horizontal, 8);
-    let rec_title = Label::new(Some("Donanımınıza Özel Önerilen Profil:"));
-    rec_title.add_css_class("setting-subtext");
+    let rec_title = Label::new(Some("Önerilen profil"));
+    rec_title.add_css_class("kv-key");
+    rec_title.set_hexpand(true);
+    rec_title.set_halign(gtk4::Align::Start);
     rec_box.append(&rec_title);
 
     let rec_val = Label::new(Some(hw.recommended_tier.name_tr()));
@@ -490,26 +790,27 @@ fn build_performance_tab() -> GtkBox {
     tab.append(&hw_sec);
 
     // 2. Profile Selection Card
-    let prof_sec = GtkBox::new(Orientation::Vertical, 10);
+    let prof_sec = GtkBox::new(Orientation::Vertical, 12);
     prof_sec.add_css_class("section-box");
 
-    let prof_title = Label::new(Some("Aktif Performans Profili"));
+    let prof_title = Label::new(Some("Performans profili"));
     prof_title.add_css_class("section-title");
     prof_title.set_halign(gtk4::Align::Start);
     prof_sec.append(&prof_title);
 
     let prof_sub = Label::new(Some(
-        "Görsel efektler (blur, gölgeler, animasyon süreleri) donanım gücüne göre uyarlanır. Ekran yenileme hızı (Hz) profilden bağımsız olup daima monitörün native frekansında kalır.",
+        "Bulanıklık ve geçiş süreleri donanıma göre ayarlanır; ekran yenileme hızı monitörün yerel frekansında kalır",
     ));
     prof_sub.add_css_class("setting-subtext");
     prof_sub.set_wrap(true);
+    prof_sub.set_xalign(0.0);
     prof_sub.set_halign(gtk4::Align::Start);
     prof_sec.append(&prof_sub);
 
     let tier_items = StringList::new(&[
-        "Hafif / Eski Donanım (Legacy) — Sıfır blur, sıfır gölge, anlık 0ms geçişler",
-        "Dengeli (Balanced) — Optimize edilmiş akıcı animasyonlar, hafif cam efekti",
-        "Yüksek Performans (Ultra) — Tam cam blur efekti, derin gölgeler, yay fiziği",
+        "Hafif (bulanıklık ve gölge kapalı, eski donanım)",
+        "Dengeli (standart geçişler, hafif bulanıklık)",
+        "Yüksek (tam bulanıklık ve derinlik efektleri)",
     ]);
     let tier_dropdown = DropDown::new(Some(tier_items), None::<gtk4::Expression>);
 
@@ -533,25 +834,28 @@ fn build_performance_tab() -> GtkBox {
     prof_sec.append(&tier_dropdown);
     tab.append(&prof_sec);
 
-    // 3. ChromeOS Ash Stability & Resource Optimization Card
-    let ash_sec = GtkBox::new(Orientation::Vertical, 10);
+    // 3. Stability & Resource Optimization Card
+    let ash_sec = GtkBox::new(Orientation::Vertical, 12);
     ash_sec.add_css_class("section-box");
 
-    let ash_title = Label::new(Some("ChromeOS Ash Seviyesi Kararlılık & Güç Tasarrufu"));
+    let ash_title = Label::new(Some("Kararlılık ve kaynak yönetimi"));
     ash_title.add_css_class("section-title");
     ash_title.set_halign(gtk4::Align::Start);
     ash_sec.append(&ash_title);
 
     let ash_sub = Label::new(Some(
-        "Aura/Ash esintili akıllı kaynak yönetimi: Boşta CPU/GPU kullanımını minimuma indirir, çöken kabukları otomatik iyileştirir ve arayüzü OOM krizlerine karşı korur.",
+        "Çöken kabuk süreçlerini otomatik yeniden başlatır ve boşta arka plan yükünü azaltır",
     ));
     ash_sub.add_css_class("setting-subtext");
     ash_sub.set_wrap(true);
+    ash_sub.set_xalign(0.0);
     ash_sub.set_halign(gtk4::Align::Start);
     ash_sec.append(&ash_sub);
 
     // Watchdog Auto-Healing
-    let chk_watchdog = CheckButton::with_label("Sıfır-Çökme Watchdog (Çöken arayüz motorlarını 3sn içinde sessizce onarır)");
+    let chk_watchdog = CheckButton::with_label(
+        "Çöken arayüz süreçlerini 3 sn içinde otomatik yeniden başlat",
+    );
     chk_watchdog.set_active(current_profile.watchdog_enabled);
     chk_watchdog.connect_toggled(|cb| {
         let mut p = HardwareTuningProfile::load();
@@ -561,7 +865,7 @@ fn build_performance_tab() -> GtkBox {
     ash_sec.append(&chk_watchdog);
 
     // Idle Resource Throttling
-    let chk_idle = CheckButton::with_label("Boşta Akıllı Kaynak Kısma (Kullanıcı boştayken CPU/RAM polling ve render'ı frenler)");
+    let chk_idle = CheckButton::with_label("Boşta arka plan yoklamasını ve çizimi azalt");
     chk_idle.set_active(current_profile.idle_throttling_enabled);
     chk_idle.connect_toggled(|cb| {
         let mut p = HardwareTuningProfile::load();
@@ -571,7 +875,9 @@ fn build_performance_tab() -> GtkBox {
     ash_sec.append(&chk_idle);
 
     // OOM Killer Shield
-    let chk_oom = CheckButton::with_label("OOM Bellek Kalkanı (Ağır RAM yükünde pencere yöneticisi ve kabuğun öldürülmesini engeller)");
+    let chk_oom = CheckButton::with_label(
+        "Bellek baskısında pencere yöneticisi ve kabuk süreçlerini koru",
+    );
     chk_oom.set_active(current_profile.oom_shield_enabled);
     chk_oom.connect_toggled(|cb| {
         let mut p = HardwareTuningProfile::load();
@@ -641,20 +947,20 @@ fn probe_live_health_components() -> Vec<(&'static str, String, &'static str)> {
         .map(|o| o.status.success())
         .unwrap_or(false);
     let core_status = if has_sock {
-        ("Aktif (Unix IPC Soketi Hazır)".to_string(), "status-badge-ok")
+        ("Çalışıyor (IPC soketi)".to_string(), "status-dot-ok")
     } else if has_core_proc {
-        ("Aktif (Otonom Denetleyici Çalışıyor)".to_string(), "status-badge-ok")
+        ("Çalışıyor".to_string(), "status-dot-ok")
     } else {
-        ("Beklemede (İstemci Modu)".to_string(), "status-badge-info")
+        ("Beklemede".to_string(), "status-dot-muted")
     };
 
     // 2. Active Shell Engine check
     let shell_status = if Command::new("pgrep").args(["-x", "noctalia"]).output().map(|o| o.status.success()).unwrap_or(false) {
-        ("Canlı (Noctalia QML Motoru Aktif)".to_string(), "status-badge-ok")
+        ("Etkin (Noctalia)".to_string(), "status-dot-ok")
     } else if Command::new("pgrep").args(["-f", "quickshell"]).output().map(|o| o.status.success()).unwrap_or(false) {
-        ("Canlı (Quickshell / Caelestia / end4 Aktif)".to_string(), "status-badge-ok")
+        ("Etkin (Quickshell)".to_string(), "status-dot-ok")
     } else {
-        ("Canlı (SolarShell Yerel Yüzey)".to_string(), "status-badge-ok")
+        ("Etkin (SolarShell)".to_string(), "status-dot-ok")
     };
 
     // 3. Wayland Compositor (Niri) check
@@ -663,9 +969,9 @@ fn probe_live_health_components() -> Vec<(&'static str, String, &'static str)> {
         .unwrap_or(false)
         || Command::new("pgrep").args(["-x", "niri"]).output().map(|o| o.status.success()).unwrap_or(false);
     let wm_status = if niri_alive {
-        ("Canlı (Niri Wayland Compositor)".to_string(), "status-badge-ok")
+        ("Etkin (Niri Wayland)".to_string(), "status-dot-ok")
     } else {
-        ("Wayland Oturumu Aktif".to_string(), "status-badge-info")
+        ("Wayland oturumu".to_string(), "status-dot-muted")
     };
 
     // 4. Blaze Sentinel Live Security Audit
@@ -674,52 +980,55 @@ fn probe_live_health_components() -> Vec<(&'static str, String, &'static str)> {
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(&txt) {
                 let (passed, total) = parse_sentinel_posture_counts(&val);
                 (
-                    format!("Tam Kalkan ({}/{} Güvenlik Kontrolü Aktif)", passed, total),
-                    if passed == total { "status-badge-ok" } else { "status-badge-info" },
+                    format!("{}/{} güvenlik kontrolü geçti", passed, total),
+                    if passed == total { "status-dot-ok" } else { "status-dot-warn" },
                 )
             } else {
-                ("Aktif (Blaze Sentinel Kalkanı)".to_string(), "status-badge-ok")
+                ("Etkin".to_string(), "status-dot-ok")
             }
         } else {
-            ("Aktif (Blaze Sentinel Kalkanı)".to_string(), "status-badge-ok")
+            ("Etkin".to_string(), "status-dot-ok")
         }
     } else {
-        ("Senkronize (Atomik Durum Makinesi)".to_string(), "status-badge-info")
+        ("Hazır".to_string(), "status-dot-muted")
     };
 
     vec![
-        ("SolarCore Platform Servisi", core_status.0, core_status.1),
-        ("SolarUI Kabuk Motoru", shell_status.0, shell_status.1),
-        ("SolarUI Pencere Yöneticisi", wm_status.0, wm_status.1),
-        ("Blaze Sentinel Güvenlik Kalkanı", sentinel_status.0, sentinel_status.1),
+        ("SolarCore servisi", core_status.0, core_status.1),
+        ("Masaüstü kabuğu", shell_status.0, shell_status.1),
+        ("Pencere yöneticisi", wm_status.0, wm_status.1),
+        ("Blaze Sentinel", sentinel_status.0, sentinel_status.1),
     ]
 }
 
 fn build_health_tab() -> GtkBox {
-    let tab = GtkBox::new(Orientation::Vertical, 12);
-    tab.set_margin_top(10);
-    tab.set_margin_bottom(10);
+    let tab = GtkBox::new(Orientation::Vertical, 8);
+    tab.append(&build_page_header(
+        "Sistem sağlığı",
+        "Temel masaüstü süreçleri, USB depolama kilidi ve kurtarma testi",
+    ));
 
     // 1. Health Status Card
-    let stat_sec = GtkBox::new(Orientation::Vertical, 10);
+    let stat_sec = GtkBox::new(Orientation::Vertical, 12);
     stat_sec.add_css_class("section-box");
 
-    let stat_title = Label::new(Some("Platform Durumu ve Süreç İzolasyonu (Canlı Telemetri)"));
+    let stat_title = Label::new(Some("Bileşen durumu"));
     stat_title.add_css_class("section-title");
     stat_title.set_halign(gtk4::Align::Start);
     stat_sec.append(&stat_title);
 
     let stat_desc = Label::new(Some(
-        "SolarUI mimarisi bileşenleri izole eder ve Blaze Sentinel çekirdek güvenlik kontrollerini gerçek zamanlı denetler.",
+        "Çalışan oturum bileşenlerinin ve Blaze Sentinel denetimlerinin anlık durumu",
     ));
     stat_desc.add_css_class("setting-subtext");
     stat_desc.set_wrap(true);
+    stat_desc.set_xalign(0.0);
     stat_desc.set_halign(gtk4::Align::Start);
     stat_sec.append(&stat_desc);
 
     let components = probe_live_health_components();
 
-    for (comp, status, badge_cls) in components {
+    for (comp, status, dot_cls) in components {
         let row = GtkBox::new(Orientation::Horizontal, 12);
         row.set_margin_top(4);
         row.set_margin_bottom(4);
@@ -730,37 +1039,53 @@ fn build_health_tab() -> GtkBox {
         c_lbl.set_halign(gtk4::Align::Start);
         row.append(&c_lbl);
 
-        let s_lbl = Label::new(Some(&status));
-        s_lbl.add_css_class(badge_cls);
-        s_lbl.set_halign(gtk4::Align::End);
-        row.append(&s_lbl);
+        let state_box = GtkBox::new(Orientation::Horizontal, 8);
+        state_box.set_halign(gtk4::Align::End);
+        state_box.set_valign(gtk4::Align::Center);
 
+        let dot = GtkBox::new(Orientation::Horizontal, 0);
+        dot.add_css_class("status-dot");
+        dot.add_css_class(dot_cls);
+        dot.set_size_request(8, 8);
+        dot.set_halign(gtk4::Align::Center);
+        dot.set_valign(gtk4::Align::Center);
+        dot.set_hexpand(false);
+        dot.set_vexpand(false);
+        state_box.append(&dot);
+
+        let s_lbl = Label::new(Some(&status));
+        s_lbl.add_css_class("status-text");
+        s_lbl.set_halign(gtk4::Align::End);
+        state_box.append(&s_lbl);
+
+        row.append(&state_box);
         stat_sec.append(&row);
     }
 
     tab.append(&stat_sec);
 
-    // 1.5 USB Storage Guard (Paranoid Mode vs Desktop Mode)
-    let usb_sec = GtkBox::new(Orientation::Vertical, 10);
+    // 1.5 USB Storage Guard
+    let usb_sec = GtkBox::new(Orientation::Vertical, 12);
     usb_sec.add_css_class("section-box");
 
-    let usb_title = Label::new(Some("USB Depolama Kalkanı (Fiziksel Port Güvenliği)"));
+    let usb_title = Label::new(Some("USB depolama kilidi"));
     usb_title.add_css_class("section-title");
     usb_title.set_halign(gtk4::Align::Start);
     usb_sec.append(&usb_title);
 
     let usb_desc = Label::new(Some(
-        "Etkinleştirildiğinde (Paranoid Mod) yeni takılan yabancı USB belleklerin çekirdek düzeyinde bağlanması engellenir. Günlük masaüstü ve ofis kullanımı için kapalı tutabilirsiniz.",
+        "Yeni takılan USB belleklerin çekirdek düzeyinde bağlanmasını engeller",
     ));
     usb_desc.add_css_class("setting-subtext");
     usb_desc.set_wrap(true);
+    usb_desc.set_xalign(0.0);
     usb_desc.set_halign(gtk4::Align::Start);
     usb_sec.append(&usb_desc);
 
     let usb_locked = std::fs::read_to_string("/etc/modprobe.d/blaze-usb-guard.conf")
         .map(|c| c.contains("install usb-storage /bin/true"))
         .unwrap_or(false);
-    let chk_usb_guard = CheckButton::with_label("Yabancı USB Depolama Aygıtlarını Kilitle (Paranoid Mod / Lynis STRG-1846)");
+    let chk_usb_guard = CheckButton::with_label("Yeni USB depolama aygıtlarını engelle");
     chk_usb_guard.set_active(usb_locked);
     chk_usb_guard.connect_toggled(|cb| {
         let lock = cb.is_active();
@@ -774,26 +1099,37 @@ fn build_health_tab() -> GtkBox {
         });
     });
     usb_sec.append(&chk_usb_guard);
+
+    let usb_note_row = GtkBox::new(Orientation::Horizontal, 8);
+    let lock_icon = create_symbolic_icon("changes-prevent-symbolic", "settings-row-icon");
+    usb_note_row.append(&lock_icon);
+    let usb_note = Label::new(Some("Günlük kullanım için kapalı tutmanız önerilir"));
+    usb_note.add_css_class("settings-meta");
+    usb_note.set_halign(gtk4::Align::Start);
+    usb_note_row.append(&usb_note);
+    usb_sec.append(&usb_note_row);
+
     tab.append(&usb_sec);
 
     // 2. Self-Healing Crash Test Card
-    let test_sec = GtkBox::new(Orientation::Vertical, 10);
+    let test_sec = GtkBox::new(Orientation::Vertical, 12);
     test_sec.add_css_class("section-box");
 
-    let test_title = Label::new(Some("Self-Healing Watchdog Testi"));
+    let test_title = Label::new(Some("Kurtarma testi"));
     test_title.add_css_class("section-title");
     test_title.set_halign(gtk4::Align::Start);
     test_sec.append(&test_title);
 
     let test_info = Label::new(Some(
-        "Aşağıdaki butona tıkladığınızda `solar-shell` süreci aniden sonlandırılır. SolarUI pencere yöneticisi ve SolarCore çalışmaya devam eder. Görev çubuğu yeniden başlatıldığında açık uygulamalarınızın durumu yeniden yüklenir.",
+        "Görev çubuğu sürecini sonlandırıp otomatik yeniden başlatmayı doğrular; açık pencereleriniz etkilenmez",
     ));
     test_info.add_css_class("setting-subtext");
     test_info.set_wrap(true);
+    test_info.set_xalign(0.0);
     test_info.set_halign(gtk4::Align::Start);
     test_sec.append(&test_info);
 
-    let crash_btn = Button::with_label("Kabuğu Test Amaçlı Sonlandır (Self-Healing Crash Test)");
+    let crash_btn = Button::with_label("Kabuk kurtarmayı test et");
     crash_btn.add_css_class("danger-btn");
     crash_btn.set_halign(gtk4::Align::Start);
     crash_btn.connect_clicked(|_| {
@@ -815,31 +1151,35 @@ fn build_health_tab() -> GtkBox {
 }
 
 fn build_pixel_clock_tab() -> GtkBox {
-    let tab = GtkBox::new(Orientation::Vertical, 10);
-    tab.set_margin_top(10);
-    tab.set_margin_bottom(10);
+    let tab = GtkBox::new(Orientation::Vertical, 8);
+    tab.append(&build_page_header(
+        "Masaüstü saati",
+        "Duvar kağıdı üzerinde çalışan saat bileşeninin stilini ve renklerini ayarlayın",
+    ));
 
-    // Section 1: Style Selection Cards (Matching user screenshots 1, 2, 4)
-    let style_sec = GtkBox::new(Orientation::Vertical, 10);
+    // Section 1: Style Selection
+    let style_sec = GtkBox::new(Orientation::Vertical, 12);
     style_sec.add_css_class("section-box");
 
-    let s_title = Label::new(Some("Google Pixel / Material You Saat Stili"));
+    let s_title = Label::new(Some("Saat stili"));
     s_title.add_css_class("section-title");
     s_title.set_halign(gtk4::Align::Start);
     style_sec.append(&s_title);
 
-    let s_sub = Label::new(Some("Masaüstü duvar kağıdı üzerinde çalışan Google Pixel saat stilleri:"));
+    let s_sub = Label::new(Some("Masaüstü saat görünümü için dijital veya analog kadran seçin"));
     s_sub.add_css_class("setting-subtext");
+    s_sub.set_wrap(true);
+    s_sub.set_xalign(0.0);
     s_sub.set_halign(gtk4::Align::Start);
     style_sec.append(&s_sub);
 
     let style_choices = StringList::new(&[
-        "Pixel Kalın Yatay (16:49 + Pil Kapsülü & Tarih)",
-        "Pixel İki Katlı Dikey (16 / 49 Büyük Balon Rakam)",
-        "Pixel İçi Boş Kontur (Outline Minimalist)",
-        "Pixel Analog Kalın (12, 3, 6, 9 Kalın Rakamlar)",
-        "Pixel Analog Kontur (12, 3, 6, 9 İçi Boş Rakamlar)",
-        "Pixel Analog Takimetre (Hız Göstergesi Kadranı)",
+        "Kalın yatay (saat, pil ve tarih)",
+        "Dikey iki satır (büyük rakamlar)",
+        "İçi boş kontur",
+        "Analog kalın (12, 3, 6, 9)",
+        "Analog kontur",
+        "Analog takimetre",
     ]);
     let style_dd = DropDown::new(Some(style_choices), None::<gtk4::Expression>);
 
@@ -868,22 +1208,22 @@ fn build_pixel_clock_tab() -> GtkBox {
     style_sec.append(&style_dd);
     tab.append(&style_sec);
 
-    // Section 2: Colors & Material You (Matching screenshot 3)
-    let color_sec = GtkBox::new(Orientation::Vertical, 10);
+    // Section 2: Colors & Material You
+    let color_sec = GtkBox::new(Orientation::Vertical, 12);
     color_sec.add_css_class("section-box");
 
-    let c_title = Label::new(Some("Renklendirme Seçenekleri (Coloring Options)"));
+    let c_title = Label::new(Some("Renklendirme"));
     c_title.add_css_class("section-title");
     c_title.set_halign(gtk4::Align::Start);
     color_sec.append(&c_title);
 
     let color_choices = StringList::new(&[
-        "Dinamik: Material You (Duvar kağıdından otomatik uyarlanan ton)",
-        "Özel Renk: Elektrik Camgöbeği (Cyan #80d4ff)",
-        "Özel Renk: Pastel Mor (Lavender #c084fc)",
-        "Özel Renk: Nane Yeşili (Mint #4ade80)",
-        "Özel Renk: Şeftali / Mercan (Peach #fb923c)",
-        "Özel Renk: Saf Beyaz (Pure White #ffffff)",
+        "Dinamik (Material You, duvar kağıdına uyumlu)",
+        "Açık mavi (#80d4ff)",
+        "Lavanta (#c084fc)",
+        "Nane yeşili (#4ade80)",
+        "Mercan (#fb923c)",
+        "Beyaz (#ffffff)",
     ]);
     let color_dd = DropDown::new(Some(color_choices), None::<gtk4::Expression>);
     let color_idx = if clock_cfg.color_mode == "dynamic" {
@@ -931,22 +1271,41 @@ fn build_pixel_clock_tab() -> GtkBox {
     tab.append(&color_sec);
 
     // Section 3: Opacity, Battery Pill, Date
-    let opts_sec = GtkBox::new(Orientation::Vertical, 10);
+    let opts_sec = GtkBox::new(Orientation::Vertical, 12);
     opts_sec.add_css_class("section-box");
 
-    let o_title = Label::new(Some("Rakam Opaklığı ve Göstergeler"));
+    let o_title = Label::new(Some("Opaklık ve göstergeler"));
     o_title.add_css_class("section-title");
     o_title.set_halign(gtk4::Align::Start);
     opts_sec.append(&o_title);
 
-    let row1 = GtkBox::new(Orientation::Horizontal, 16);
-    let op_lbl = Label::new(Some("Rakam Opaklığı (Numeral Opacity):"));
+    let row1 = GtkBox::new(Orientation::Horizontal, 12);
+    let op_lbl = Label::new(Some("Rakam opaklığı"));
     op_lbl.add_css_class("setting-label");
+    op_lbl.set_hexpand(true);
+    op_lbl.set_halign(gtk4::Align::Start);
     row1.append(&op_lbl);
 
-    let op_choices = StringList::new(&["%100 (Tam Belirgin)", "%95 (Önerilen)", "%80 (Hafif Saydam)", "%60 (Yarı Saydam)", "%40 (Düşük)"]);
+    let op_choices = StringList::new(&[
+        "%100 (tam opak)",
+        "%95 (önerilen)",
+        "%80 (hafif saydam)",
+        "%60 (yarı saydam)",
+        "%40 (düşük)",
+    ]);
     let op_dd = DropDown::new(Some(op_choices), None::<gtk4::Expression>);
-    op_dd.set_selected(1);
+    let op_idx = if clock_cfg.numeral_opacity >= 0.98 {
+        0
+    } else if clock_cfg.numeral_opacity >= 0.88 {
+        1
+    } else if clock_cfg.numeral_opacity >= 0.70 {
+        2
+    } else if clock_cfg.numeral_opacity >= 0.50 {
+        3
+    } else {
+        4
+    };
+    op_dd.set_selected(op_idx);
     op_dd.connect_selected_notify(|dd| {
         let mut cfg = PixelClockConfig::load();
         cfg.numeral_opacity = match dd.selected() {
@@ -962,7 +1321,7 @@ fn build_pixel_clock_tab() -> GtkBox {
     opts_sec.append(&row1);
 
     let row2 = GtkBox::new(Orientation::Horizontal, 20);
-    let bat_chk = CheckButton::with_label("Pil Kapsülünü Göster (Battery Pill [PIL] %41)");
+    let bat_chk = CheckButton::with_label("Pil göstergesini göster");
     bat_chk.set_active(clock_cfg.show_battery_pill);
     bat_chk.connect_toggled(|cb| {
         let mut cfg = PixelClockConfig::load();
@@ -971,7 +1330,7 @@ fn build_pixel_clock_tab() -> GtkBox {
     });
     row2.append(&bat_chk);
 
-    let date_chk = CheckButton::with_label("Tarih Göster");
+    let date_chk = CheckButton::with_label("Tarihi göster");
     date_chk.set_active(clock_cfg.show_date);
     date_chk.connect_toggled(|cb| {
         let mut cfg = PixelClockConfig::load();
@@ -983,10 +1342,10 @@ fn build_pixel_clock_tab() -> GtkBox {
     tab.append(&opts_sec);
 
     // Section 4: Action Buttons (Launch / Restart widget)
-    let act_sec = GtkBox::new(Orientation::Horizontal, 12);
-    act_sec.set_halign(gtk4::Align::End);
+    let act_sec = GtkBox::new(Orientation::Horizontal, 8);
+    act_sec.set_halign(gtk4::Align::Start);
 
-    let launch_btn = Button::with_label("Pixel Saat Widget'ını Masaüstünde Aç");
+    let launch_btn = Button::with_label("Saati başlat");
     launch_btn.add_css_class("action-btn");
     launch_btn.connect_clicked(|_| {
         let _ = Command::new("pkill").args(["-f", "solar-shell (clock|pixel-clock)"]).status();
@@ -1002,32 +1361,35 @@ fn build_pixel_clock_tab() -> GtkBox {
 }
 
 fn build_taskbar_tab() -> GtkBox {
-    let tab = GtkBox::new(Orientation::Vertical, 10);
-    tab.set_margin_top(10);
-    tab.set_margin_bottom(10);
+    let tab = GtkBox::new(Orientation::Vertical, 8);
+    tab.append(&build_page_header(
+        "Görev çubuğu",
+        "Noctalia görev çubuğunun yüzey stilini, saydamlığını ve boyutunu ayarlayın",
+    ));
 
     // Section 1: Appearance Style Presets
-    let preset_sec = GtkBox::new(Orientation::Vertical, 10);
+    let preset_sec = GtkBox::new(Orientation::Vertical, 12);
     preset_sec.add_css_class("section-box");
 
-    let p_title = Label::new(Some("Görev Çubuğu Görünüm Stili (Taskbar Appearance)"));
+    let p_title = Label::new(Some("Görünüm stili"));
     p_title.add_css_class("section-title");
     p_title.set_halign(gtk4::Align::Start);
     preset_sec.append(&p_title);
 
     let p_sub = Label::new(Some(
-        "Buzlu cam efekti zorunlu değildir. İster düz renk, ister şeffaf cam efekti, ister tam saydam, isterseniz de Material 3 duvar kağıdı renklerine dinamik uyarlanan stil seçebilirsiniz:",
+        "Düz mat, buzlu cam, tam saydam veya duvar kağıdına uyarlanan çubuk stilini seçin",
     ));
     p_sub.add_css_class("setting-subtext");
     p_sub.set_wrap(true);
+    p_sub.set_xalign(0.0);
     p_sub.set_halign(gtk4::Align::Start);
     preset_sec.append(&p_sub);
 
     let preset_choices = StringList::new(&[
-        "Buzlu Cam (Frosted Acrylic Glass — %32 Şeffaflık & Blur)",
-        "Düz Opak Renk (Solid Opaque — %100 Mat)",
-        "Tam Şeffaf (Fully Transparent — Sadece Simgeler Yüzer)",
-        "Material 3 Dinamik Renk (Duvar Kağıdı Rengine Uyumlu)",
+        "Buzlu cam (%32 saydamlık)",
+        "Düz mat (%100 opak)",
+        "Tam saydam (yalnızca simgeler)",
+        "Material 3 dinamik renk",
     ]);
     let preset_dd = DropDown::new(Some(preset_choices), None::<gtk4::Expression>);
     preset_dd.set_selected(0);
@@ -1043,23 +1405,30 @@ fn build_taskbar_tab() -> GtkBox {
     tab.append(&preset_sec);
 
     // Section 2: Fine-grained Customization (Opacity, Corner Radius, Height)
-    let fine_sec = GtkBox::new(Orientation::Vertical, 10);
+    let fine_sec = GtkBox::new(Orientation::Vertical, 12);
     fine_sec.add_css_class("section-box");
 
-    let f_title = Label::new(Some("Manuel Boyut ve Şeffaflık İnce Ayarları"));
+    let f_title = Label::new(Some("Boyut ve saydamlık"));
     f_title.add_css_class("section-title");
     f_title.set_halign(gtk4::Align::Start);
     fine_sec.append(&f_title);
 
     // Opacity
     let op_row = GtkBox::new(Orientation::Horizontal, 16);
-    let op_l = Label::new(Some("Şeffaflık Derecesi:"));
+    let op_l = Label::new(Some("Saydamlık"));
     op_l.add_css_class("setting-label");
     op_l.set_hexpand(true);
     op_l.set_halign(gtk4::Align::Start);
     op_row.append(&op_l);
 
-    let op_list = StringList::new(&["%10 (Ultra Cam)", "%25 (Hafif Cam)", "%32 (Varsayılan Solar)", "%50 (Yarı Saydam)", "%75 (Koyu Cam)", "%100 (Mat)"]);
+    let op_list = StringList::new(&[
+        "%10 (çok saydam)",
+        "%25 (hafif saydam)",
+        "%32 (varsayılan)",
+        "%50 (yarı saydam)",
+        "%75 (koyu cam)",
+        "%100 (mat)",
+    ]);
     let op_dd = DropDown::new(Some(op_list), None::<gtk4::Expression>);
     op_dd.set_selected(2);
     op_dd.connect_selected_notify(|dd| {
@@ -1078,13 +1447,19 @@ fn build_taskbar_tab() -> GtkBox {
 
     // Corner Radius
     let rad_row = GtkBox::new(Orientation::Horizontal, 16);
-    let rad_l = Label::new(Some("Köşe Yuvarlaklığı:"));
+    let rad_l = Label::new(Some("Köşe yarıçapı"));
     rad_l.add_css_class("setting-label");
     rad_l.set_hexpand(true);
     rad_l.set_halign(gtk4::Align::Start);
     rad_row.append(&rad_l);
 
-    let rad_list = StringList::new(&["0 px (Köşeli Düz)", "8 px (Hafif Kavis)", "16 px (Varsayılan Modern)", "24 px (Ekstra Yuvarlak)", "40 px (Kapsül)"]);
+    let rad_list = StringList::new(&[
+        "0 px (keskin)",
+        "8 px (hafif yuvarlak)",
+        "16 px (varsayılan)",
+        "24 px (yuvarlak)",
+        "40 px (kapsül)",
+    ]);
     let rad_dd = DropDown::new(Some(rad_list), None::<gtk4::Expression>);
     rad_dd.set_selected(2);
     rad_dd.connect_selected_notify(|dd| {
@@ -1102,13 +1477,19 @@ fn build_taskbar_tab() -> GtkBox {
 
     // Height / Thickness
     let h_row = GtkBox::new(Orientation::Horizontal, 16);
-    let h_l = Label::new(Some("Çubuk Yüksekliği (Kalınlık):"));
+    let h_l = Label::new(Some("Çubuk yüksekliği"));
     h_l.add_css_class("setting-label");
     h_l.set_hexpand(true);
     h_l.set_halign(gtk4::Align::Start);
     h_row.append(&h_l);
 
-    let h_list = StringList::new(&["36 px (Kompakt)", "40 px (Varsayılan)", "44 px (Rahat)", "48 px (Büyük)", "56 px (KDE Plasma Standart)"]);
+    let h_list = StringList::new(&[
+        "36 px (kompakt)",
+        "40 px (varsayılan)",
+        "44 px (rahat)",
+        "48 px (büyük)",
+        "56 px (geniş)",
+    ]);
     let h_dd = DropDown::new(Some(h_list), None::<gtk4::Expression>);
     h_dd.set_selected(1);
     h_dd.connect_selected_notify(|dd| {
@@ -1127,9 +1508,9 @@ fn build_taskbar_tab() -> GtkBox {
     tab.append(&fine_sec);
 
     // Section 3: Open Full Noctalia Bar Settings Button
-    let btn_row = GtkBox::new(Orientation::Horizontal, 12);
-    btn_row.set_halign(gtk4::Align::End);
-    let full_btn = Button::with_label("Gelişmiş Çubuk Düzenleyicisini Aç");
+    let btn_row = GtkBox::new(Orientation::Horizontal, 8);
+    btn_row.set_halign(gtk4::Align::Start);
+    let full_btn = Button::with_label("Çubuk düzenleyiciyi aç");
     full_btn.add_css_class("action-btn");
     full_btn.connect_clicked(|_| {
         let _ = Command::new("noctalia").args(["msg", "settings-open", "bar"]).spawn();
@@ -1297,23 +1678,26 @@ fn update_noctalia_shell_settings(engine: &str, launcher: &str, dash: &str) {
 }
 
 fn build_shell_tab() -> GtkBox {
-    let tab = GtkBox::new(Orientation::Vertical, 12);
-    tab.set_margin_top(10);
-    tab.set_margin_bottom(10);
+    let tab = GtkBox::new(Orientation::Vertical, 8);
+    tab.append(&build_page_header(
+        "Masaüstü kabuğu",
+        "Noctalia, Caelestia, end4-pC ve We10X kabukları arasında geçiş yapın",
+    ));
 
     let sec = GtkBox::new(Orientation::Vertical, 12);
     sec.add_css_class("section-box");
 
-    let title = Label::new(Some("Kabuk ve Yüzey Motoru (Shell Engine Switcher)"));
+    let title = Label::new(Some("Kabuk motoru"));
     title.add_css_class("section-title");
     title.set_halign(gtk4::Align::Start);
     sec.append(&title);
 
     let desc = Label::new(Some(
-        "Noctalia, Caelestia, end4-pC ve We10X (Tanıdık Klasik Düzen / Windows 10 Modu) kabuk motorları arasında güvenli biçimde geçiş yapabilirsiniz. Her motor kendi bar, bildirim, OSD ve sistem tepsisini tek başına yönetir.",
+        "Her kabuk kendi üst çubuğunu, bildirimlerini ve sistem tepsisini bağımsız olarak yönetir",
     ));
     desc.add_css_class("setting-subtext");
     desc.set_wrap(true);
+    desc.set_xalign(0.0);
     desc.set_halign(gtk4::Align::Start);
     sec.append(&desc);
 
@@ -1321,17 +1705,17 @@ fn build_shell_tab() -> GtkBox {
 
     // 1. Shell Engine Selector
     let row1 = GtkBox::new(Orientation::Horizontal, 12);
-    let lbl1 = Label::new(Some("Aktif Kabuk Motoru:"));
+    let lbl1 = Label::new(Some("Etkin kabuk"));
     lbl1.add_css_class("setting-label");
     lbl1.set_hexpand(true);
     lbl1.set_halign(gtk4::Align::Start);
     row1.append(&lbl1);
 
     let engines = [
-        "Noctalia v5 (C++23 Native)",
-        "Caelestia Shell (Quickshell QML)",
-        "end4-pC (Material 3 Expressive)",
-        "We10X (Tanıdık Klasik Düzen)",
+        "Noctalia v5",
+        "Caelestia (Quickshell)",
+        "end4-pC (Material 3)",
+        "We10X (klasik düzen)",
     ];
     let engine_model = StringList::new(&engines);
     let engine_dd = DropDown::new(Some(engine_model), None::<gtk4::Expression>);
@@ -1346,18 +1730,19 @@ fn build_shell_tab() -> GtkBox {
     sec.append(&row1);
 
     // 2. Action Buttons
-    let btn_box = GtkBox::new(Orientation::Horizontal, 10);
-    btn_box.set_margin_top(8);
+    let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+    btn_box.set_margin_top(4);
 
-    let apply_btn = Button::with_label("Kabuk Motorunu Uygula & Geçiş Yap");
+    let apply_btn = Button::with_label("Kabuğu değiştir");
     apply_btn.add_css_class("action-btn");
     apply_btn.set_halign(gtk4::Align::Start);
 
     let engine_dd_clone = engine_dd.clone();
 
-    let shell_status_lbl = Label::new(Some(""));
-    shell_status_lbl.add_css_class("setting-subtext");
+    let shell_status_lbl = Label::new(None);
+    shell_status_lbl.add_css_class("status-text");
     shell_status_lbl.set_halign(gtk4::Align::Start);
+    shell_status_lbl.set_visible(false);
 
     let shell_status_clone = shell_status_lbl.clone();
     apply_btn.connect_clicked(move |_| {
@@ -1384,9 +1769,10 @@ fn build_shell_tab() -> GtkBox {
 
         let engine_str = target_engine.as_str();
         shell_status_clone.set_text(&format!(
-            "[OK] Kabuk motoru ({}) geçişi başlatıldı...",
+            "{} kabuğuna geçiş başlatıldı",
             engine_str
         ));
+        shell_status_clone.set_visible(true);
 
         let engine_to_switch = engine_str.to_string();
         std::thread::spawn(move || {
@@ -1397,12 +1783,13 @@ fn build_shell_tab() -> GtkBox {
     });
     btn_box.append(&apply_btn);
 
-    let reconcile_btn = Button::with_label("Durumu Doğrula (Supervisor Reconcile)");
+    let reconcile_btn = Button::with_label("Durumu denetle");
     reconcile_btn.add_css_class("secondary-btn");
     reconcile_btn.set_halign(gtk4::Align::Start);
     let shell_status_rec = shell_status_lbl.clone();
     reconcile_btn.connect_clicked(move |_| {
-        shell_status_rec.set_text("[OK] Kabuk durumu denetleniyor ve doğrulanıyor...");
+        shell_status_rec.set_text("Kabuk durumu denetleniyor");
+        shell_status_rec.set_visible(true);
         std::thread::spawn(|| {
             let _ = Command::new("solar-shell")
                 .args(["supervisor"])
@@ -1411,17 +1798,19 @@ fn build_shell_tab() -> GtkBox {
     });
     btn_box.append(&reconcile_btn);
 
-    let end4_settings_btn = Button::with_label("end4-pC Ayarlarını Aç");
+    let end4_settings_btn = Button::with_label("end4-pC ayarlarını aç");
     end4_settings_btn.add_css_class("secondary-btn");
     end4_settings_btn.set_halign(gtk4::Align::Start);
     let shell_status_end4 = shell_status_lbl.clone();
     end4_settings_btn.connect_clicked(move |_| {
         let cfg = SolarConfig::load();
         if cfg.shell.engine != ShellEngine::End4Pc {
-            shell_status_end4.set_text("end4-pC ayarları için önce end4-pC motorunu uygulayın.");
+            shell_status_end4.set_text("end4-pC ayarları için önce end4-pC kabuğunu etkinleştirin");
+            shell_status_end4.set_visible(true);
             return;
         }
-        shell_status_end4.set_text("end4-pC ayarları açılıyor...");
+        shell_status_end4.set_text("end4-pC ayarları açılıyor");
+        shell_status_end4.set_visible(true);
         std::thread::spawn(|| {
             let _ = Command::new("solar-shell")
                 .args(["route", "settings"])
@@ -1434,7 +1823,7 @@ fn build_shell_tab() -> GtkBox {
     sec.append(&shell_status_lbl);
     tab.append(&sec);
 
-    // 3. We10X (Tanıdık Klasik Düzen) Customization Card
+    // 3. We10X Customization Card
     tab.append(&build_we10x_customization_card());
 
     tab
@@ -1445,15 +1834,13 @@ fn build_we10x_customization_card() -> GtkBox {
     let we10x_sec = GtkBox::new(Orientation::Vertical, 12);
     we10x_sec.add_css_class("section-box");
 
-    let we10x_title = Label::new(Some(
-        "We10X (Windows 10 Modu) Tema, Renk ve Masaüstü Özelleştirmeleri",
-    ));
+    let we10x_title = Label::new(Some("We10X görünümü"));
     we10x_title.add_css_class("section-title");
     we10x_title.set_halign(gtk4::Align::Start);
     we10x_sec.append(&we10x_title);
 
     let we10x_desc = Label::new(Some(
-        "Windows 10 kabuk modunun koyu/açık/tam siyah temasını, görev çubuğu ve Başlat menüsü vurgu rengini (kırmızı, mavi, koyu veya dilediğiniz özel RGB/Hex renk), görev çubuğu şeffaflığını ve masaüstü simgelerini özelleştirin.",
+        "Windows 10 klasik modunun tema tonunu, vurgu rengini, görev çubuğu saydamlığını ve simgelerini ayarlayın",
     ));
     we10x_desc.add_css_class("setting-subtext");
     we10x_desc.set_wrap(true);
@@ -1461,22 +1848,23 @@ fn build_we10x_customization_card() -> GtkBox {
     we10x_desc.set_halign(gtk4::Align::Start);
     we10x_sec.append(&we10x_desc);
 
-    let status_lbl = Label::new(Some(""));
-    status_lbl.add_css_class("setting-subtext");
+    let status_lbl = Label::new(None);
+    status_lbl.add_css_class("status-text");
     status_lbl.set_halign(gtk4::Align::Start);
+    status_lbl.set_visible(false);
 
     // 1. Theme Mode: Dark / Light / Pure Black OLED
     let theme_row = GtkBox::new(Orientation::Horizontal, 12);
-    let theme_lbl = Label::new(Some("Görev Çubuğu ve Pencere Teması:"));
+    let theme_lbl = Label::new(Some("Tema modu"));
     theme_lbl.add_css_class("setting-label");
     theme_lbl.set_hexpand(true);
     theme_lbl.set_halign(gtk4::Align::Start);
     theme_row.append(&theme_lbl);
 
     let we10x_themes = [
-        "Koyu (Windows 10 Dark)",
-        "Açık (Windows 10 Light)",
-        "Tam Siyah (OLED Kontrast)",
+        "Koyu",
+        "Açık",
+        "Tam siyah (OLED)",
     ];
     let we10x_theme_dd = DropDown::new(Some(StringList::new(&we10x_themes)), None::<gtk4::Expression>);
     let init_theme_idx = if cfg.shell.we10x_theme_mode.eq_ignore_ascii_case("light") {
@@ -1491,12 +1879,13 @@ fn build_we10x_customization_card() -> GtkBox {
     we10x_theme_dd.set_selected(init_theme_idx);
     let st_theme = status_lbl.clone();
     we10x_theme_dd.connect_selected_notify(move |dd| {
-        let mode = match dd.selected() {
-            1 => "light",
-            2 => "oled",
-            _ => "dark",
+        let (mode, mode_tr) = match dd.selected() {
+            1 => ("light", "Açık"),
+            2 => ("oled", "Tam siyah (OLED)"),
+            _ => ("dark", "Koyu"),
         };
-        st_theme.set_text(&format!("[OK] We10X tema modu '{}' olarak uygulandı.", mode));
+        st_theme.set_text(&format!("We10X tema modu {} olarak uygulandı", mode_tr));
+        st_theme.set_visible(true);
         std::thread::spawn(move || {
             let _ = Command::new("solar-shell")
                 .args(["we10x-config", "set-theme", mode])
@@ -1507,23 +1896,31 @@ fn build_we10x_customization_card() -> GtkBox {
     we10x_sec.append(&theme_row);
 
     // 2. Preset Color Swatches (Red, Blue, Dark Charcoal, Green, Purple, Amber, Teal)
-    let swatch_hdr = Label::new(Some("Hızlı Tema ve Vurgu Rengi Paleti:"));
+    let swatch_hdr = Label::new(Some("Vurgu rengi"));
     swatch_hdr.add_css_class("setting-label");
     swatch_hdr.set_halign(gtk4::Align::Start);
     we10x_sec.append(&swatch_hdr);
 
-    let swatch_row = GtkBox::new(Orientation::Horizontal, 8);
-    let hex_entry = gtk4::Entry::builder()
-        .text(&crate::we10x_profile::normalize_hex_color(
-            &cfg.shell.we10x_accent_color,
-        ))
-        .max_length(7)
-        .width_chars(9)
-        .placeholder_text("#E81123")
+    let swatch_flow = gtk4::FlowBox::builder()
+        .selection_mode(gtk4::SelectionMode::None)
+        .max_children_per_line(7)
+        .min_children_per_line(3)
+        .column_spacing(8)
+        .row_spacing(8)
+        .homogeneous(false)
         .build();
 
+    let current_accent = crate::we10x_profile::normalize_hex_color(&cfg.shell.we10x_accent_color);
+    let hex_entry = gtk4::Entry::builder()
+        .text(&current_accent)
+        .max_length(7)
+        .width_chars(9)
+        .placeholder_text("#e81123")
+        .build();
+    hex_entry.add_css_class("settings-mono");
+
     let color_dialog = gtk4::ColorDialog::builder()
-        .title("We10X Özel Tema Rengi Seçin")
+        .title("We10X özel vurgu rengi")
         .with_alpha(false)
         .modal(true)
         .build();
@@ -1533,34 +1930,77 @@ fn build_we10x_customization_card() -> GtkBox {
     }
     let color_btn = gtk4::ColorDialogButton::new(Some(color_dialog));
     color_btn.set_rgba(&init_rgba);
-    color_btn.set_tooltip_text(Some("Renk Tekerleğinden Özel Renk Seçin"));
+    color_btn.set_tooltip_text(Some("Renk seçiciden özel renk belirle"));
 
     let presets: [(&str, &str, &str); 7] = [
-        ("Kırmızı", "#e81123", "swatch-red"),
-        ("Mavi", "#0078d7", "swatch-blue"),
-        ("Koyu", "#2d2d30", "swatch-dark"),
-        ("Yeşil", "#107c10", "swatch-green"),
-        ("Mor", "#881798", "swatch-purple"),
-        ("Kehribar", "#ff6a00", "swatch-amber"),
-        ("Turkuaz", "#008272", "swatch-teal"),
+        ("Kırmızı", "#e81123", "swatch-dot-red"),
+        ("Mavi", "#0078d7", "swatch-dot-blue"),
+        ("Koyu", "#2d2d30", "swatch-dot-dark"),
+        ("Yeşil", "#107c10", "swatch-dot-green"),
+        ("Mor", "#881798", "swatch-dot-purple"),
+        ("Kehribar", "#ff6a00", "swatch-dot-amber"),
+        ("Turkuaz", "#008272", "swatch-dot-teal"),
     ];
 
-    for (label_txt, hex_code, css_cls) in presets {
-        let b = Button::with_label(label_txt);
-        b.add_css_class(css_cls);
-        let hex_owned = hex_code.to_string();
+    let mut swatch_btns: Vec<(String, Button)> = Vec::new();
+    for (label_txt, hex_code, dot_cls) in presets {
+        let b = Button::new();
+        b.add_css_class("swatch-chip");
+        if current_accent.eq_ignore_ascii_case(hex_code) {
+            b.add_css_class("swatch-active");
+        }
+
+        let inner = GtkBox::new(Orientation::Horizontal, 8);
+        inner.set_valign(gtk4::Align::Center);
+
+        let dot = GtkBox::new(Orientation::Horizontal, 0);
+        dot.add_css_class("swatch-dot");
+        dot.add_css_class(dot_cls);
+        dot.set_size_request(12, 12);
+        dot.set_halign(gtk4::Align::Center);
+        dot.set_valign(gtk4::Align::Center);
+        dot.set_hexpand(false);
+        dot.set_vexpand(false);
+        inner.append(&dot);
+
+        let lbl = Label::new(Some(label_txt));
+        lbl.set_valign(gtk4::Align::Center);
+        inner.append(&lbl);
+
+        b.set_child(Some(&inner));
+        swatch_flow.insert(&b, -1);
+        swatch_btns.push((hex_code.to_string(), b));
+    }
+
+    let swatch_btns_rc = Rc::new(swatch_btns);
+    let sync_active_swatch = |btns: &[(String, Button)], active_hex: &str| {
+        for (hx, btn) in btns.iter() {
+            if hx.eq_ignore_ascii_case(active_hex) {
+                btn.add_css_class("swatch-active");
+            } else {
+                btn.remove_css_class("swatch-active");
+            }
+        }
+    };
+
+    for ((label_txt, hex_code, _), (_, btn)) in presets.iter().zip(swatch_btns_rc.iter()) {
+        let hex_owned = (*hex_code).to_string();
+        let lbl_owned = (*label_txt).to_string();
         let entry_ref = hex_entry.clone();
         let cbtn_ref = color_btn.clone();
         let st_sw = status_lbl.clone();
-        b.connect_clicked(move |_| {
+        let btns_ref = swatch_btns_rc.clone();
+        btn.connect_clicked(move |_| {
             entry_ref.set_text(&hex_owned);
             if let Ok(rgba) = gdk::RGBA::parse(&hex_owned) {
                 cbtn_ref.set_rgba(&rgba);
             }
+            sync_active_swatch(&btns_ref, &hex_owned);
             st_sw.set_text(&format!(
-                "[OK] We10X tema rengi {} ({}) olarak ayarlandı.",
-                label_txt, hex_owned
+                "We10X vurgu rengi {} ({}) olarak uygulandı",
+                lbl_owned, hex_owned
             ));
+            st_sw.set_visible(true);
             let hx = hex_owned.clone();
             std::thread::spawn(move || {
                 let _ = Command::new("solar-shell")
@@ -1568,13 +2008,12 @@ fn build_we10x_customization_card() -> GtkBox {
                     .status();
             });
         });
-        swatch_row.append(&b);
     }
-    we10x_sec.append(&swatch_row);
+    we10x_sec.append(&swatch_flow);
 
     // 3. Arbitrary Custom RGB / Hex Color Picker Row
-    let custom_color_row = GtkBox::new(Orientation::Horizontal, 10);
-    let custom_lbl = Label::new(Some("Özel Renk Seçici (İstediğiniz Renk / Hex):"));
+    let custom_color_row = GtkBox::new(Orientation::Horizontal, 8);
+    let custom_lbl = Label::new(Some("Özel renk (Hex)"));
     custom_lbl.add_css_class("setting-label");
     custom_lbl.set_hexpand(true);
     custom_lbl.set_halign(gtk4::Align::Start);
@@ -1582,6 +2021,7 @@ fn build_we10x_customization_card() -> GtkBox {
 
     let entry_from_dialog = hex_entry.clone();
     let st_dialog = status_lbl.clone();
+    let btns_from_dialog = swatch_btns_rc.clone();
     color_btn.connect_rgba_notify(move |btn| {
         let c = btn.rgba();
         let r = (c.red().clamp(0.0, 1.0) * 255.0).round() as u8;
@@ -1591,7 +2031,15 @@ fn build_we10x_customization_card() -> GtkBox {
         if entry_from_dialog.text().as_str().to_ascii_lowercase() != hex {
             entry_from_dialog.set_text(&hex);
         }
-        st_dialog.set_text(&format!("[OK] Özel tema rengi {} uygulandı.", hex));
+        for (hx, sbtn) in btns_from_dialog.iter() {
+            if hx.eq_ignore_ascii_case(&hex) {
+                sbtn.add_css_class("swatch-active");
+            } else {
+                sbtn.remove_css_class("swatch-active");
+            }
+        }
+        st_dialog.set_text(&format!("Özel vurgu rengi {} uygulandı", hex));
+        st_dialog.set_visible(true);
         std::thread::spawn(move || {
             let _ = Command::new("solar-shell")
                 .args(["we10x-config", "set-accent", &hex])
@@ -1601,18 +2049,27 @@ fn build_we10x_customization_card() -> GtkBox {
     custom_color_row.append(&color_btn);
     custom_color_row.append(&hex_entry);
 
-    let apply_hex_btn = Button::with_label("Hex Rengi Uygula");
+    let apply_hex_btn = Button::with_label("Uygula");
     apply_hex_btn.add_css_class("secondary-btn");
     let entry_for_btn = hex_entry.clone();
     let cbtn_for_btn = color_btn.clone();
     let st_hex = status_lbl.clone();
+    let btns_for_hex = swatch_btns_rc.clone();
     apply_hex_btn.connect_clicked(move |_| {
         let norm = crate::we10x_profile::normalize_hex_color(entry_for_btn.text().as_str());
         entry_for_btn.set_text(&norm);
         if let Ok(rgba) = gdk::RGBA::parse(&norm) {
             cbtn_for_btn.set_rgba(&rgba);
         }
-        st_hex.set_text(&format!("[OK] Özel Hex rengi {} uygulandı.", norm));
+        for (hx, sbtn) in btns_for_hex.iter() {
+            if hx.eq_ignore_ascii_case(&norm) {
+                sbtn.add_css_class("swatch-active");
+            } else {
+                sbtn.remove_css_class("swatch-active");
+            }
+        }
+        st_hex.set_text(&format!("Özel Hex rengi {} uygulandı", norm));
+        st_hex.set_visible(true);
         std::thread::spawn(move || {
             let _ = Command::new("solar-shell")
                 .args(["we10x-config", "set-accent", &norm])
@@ -1624,13 +2081,14 @@ fn build_we10x_customization_card() -> GtkBox {
 
     // 4. Colorize Taskbar, Start Menu & Titlebars Toggle
     let colorize_chk = CheckButton::with_label(
-        "Görev çubuğu, Başlat menüsü, İşlem Merkezi ve pencere başlık çubuklarını seçilen tema rengiyle boya",
+        "Görev çubuğu, Başlat menüsü ve pencere başlık çubuklarını vurgu rengiyle boya",
     );
     colorize_chk.set_active(cfg.shell.we10x_colorize_surfaces);
     let st_col = status_lbl.clone();
     colorize_chk.connect_toggled(move |chk| {
         let val = if chk.is_active() { "true" } else { "false" };
-        st_col.set_text("[OK] Görev çubuğu ve başlık renklendirme tercihi güncellendi.");
+        st_col.set_text("Yüzey renklendirme tercihi güncellendi");
+        st_col.set_visible(true);
         std::thread::spawn(move || {
             let _ = Command::new("solar-shell")
                 .args(["we10x-config", "set-colorize", val])
@@ -1641,17 +2099,17 @@ fn build_we10x_customization_card() -> GtkBox {
 
     // 5. Taskbar Opacity
     let op_row = GtkBox::new(Orientation::Horizontal, 12);
-    let op_lbl = Label::new(Some("We10X Görev Çubuğu Şeffaflığı:"));
+    let op_lbl = Label::new(Some("Görev çubuğu saydamlığı"));
     op_lbl.add_css_class("setting-label");
     op_lbl.set_hexpand(true);
     op_lbl.set_halign(gtk4::Align::Start);
     op_row.append(&op_lbl);
 
     let op_choices = [
-        "%65 — Şeffaf Cam",
-        "%85 — Yarı Saydam Akrilik",
-        "%95 — Klasik Windows 10 Koyu Cam (Varsayılan)",
-        "%100 — Tam Mat / Opak",
+        "%65 (şeffaf)",
+        "%85 (yarı saydam)",
+        "%95 (varsayılan koyu)",
+        "%100 (tam mat)",
     ];
     let op_vals: [u8; 4] = [65, 85, 95, 100];
     let op_dd = DropDown::new(Some(StringList::new(&op_choices)), None::<gtk4::Expression>);
@@ -1680,15 +2138,15 @@ fn build_we10x_customization_card() -> GtkBox {
 
     // 6. Start Icon & Desktop Icons
     let icon_row = GtkBox::new(Orientation::Horizontal, 12);
-    let icon_lbl = Label::new(Some("Başlat Düğmesi İkonu:"));
+    let icon_lbl = Label::new(Some("Başlat düğmesi simgesi"));
     icon_lbl.add_css_class("setting-label");
     icon_lbl.set_hexpand(true);
     icon_lbl.set_halign(gtk4::Align::Start);
     icon_row.append(&icon_lbl);
 
     let start_icons = [
-        "We10X 4-Bölmeli Perspektif İkonu (GPL-3.0)",
-        "BlazeOS Alev İkonu",
+        "We10X dört bölmeli simge",
+        "BlazeOS alev simgesi",
     ];
     let start_icon_dd = DropDown::new(Some(StringList::new(&start_icons)), None::<gtk4::Expression>);
     start_icon_dd.set_selected(if cfg.shell.we10x_start_icon.eq_ignore_ascii_case("blaze") {
@@ -1708,7 +2166,7 @@ fn build_we10x_customization_card() -> GtkBox {
     we10x_sec.append(&icon_row);
 
     let desk_chk = CheckButton::with_label(
-        "Masaüstü simgelerini göster (Bu Bilgisayar, Geri Dönüşüm Kutusu, FireHub Mağaza)",
+        "Masaüstü simgelerini göster (Bu Bilgisayar, Geri Dönüşüm Kutusu, FireHub)",
     );
     desk_chk.set_active(cfg.shell.we10x_desktop_icons);
     desk_chk.connect_toggled(|chk| {
@@ -1726,45 +2184,123 @@ fn build_we10x_customization_card() -> GtkBox {
 }
 
 fn build_personalize_tab() -> GtkBox {
-    let tab = GtkBox::new(Orientation::Vertical, 14);
-    tab.set_margin_top(10);
-    tab.set_margin_bottom(10);
+    let tab = GtkBox::new(Orientation::Vertical, 8);
+    tab.append(&build_page_header(
+        "Kişiselleştirme",
+        "Masaüstü duvar kağıdını ve We10X görünüm tercihlerini yönetin",
+    ));
 
     // Section 1: Universal Wallpaper Gallery & Custom File Picker (Works in Noctalia, We10X, Caelestia, end4-pC)
     let wp_sec = GtkBox::new(Orientation::Vertical, 12);
     wp_sec.add_css_class("section-box");
 
-    let wp_title = Label::new(Some("Masaüstü Duvar Kağıdı Yönetimi (Tüm Kabuklar)"));
+    let current_wp = crate::wallpaper::current_effective_wallpaper();
+
+    let wp_hdr_row = GtkBox::new(Orientation::Horizontal, 12);
+    let wp_hdr_left = GtkBox::new(Orientation::Vertical, 4);
+    wp_hdr_left.set_hexpand(true);
+
+    let wp_title = Label::new(Some("Duvar kağıdı"));
     wp_title.add_css_class("section-title");
     wp_title.set_halign(gtk4::Align::Start);
-    wp_sec.append(&wp_title);
+    wp_hdr_left.append(&wp_title);
 
     let wp_desc = Label::new(Some(
-        "Seçtiğiniz duvar kağıdı aktif kabuk hangisi olursa olsun (BlazeOS Noctalia, Windows 10 Modu We10X, Caelestia, end4-pC) anında uygulanır ve Dosya Gezgini (Nautilus) ile senkronize kalır.",
+        "Seçilen görsel etkin kabuğa ve Nautilus dosya yöneticisine anında uygulanır",
     ));
     wp_desc.add_css_class("setting-subtext");
     wp_desc.set_wrap(true);
     wp_desc.set_xalign(0.0);
     wp_desc.set_halign(gtk4::Align::Start);
-    wp_sec.append(&wp_desc);
+    wp_hdr_left.append(&wp_desc);
+    wp_hdr_row.append(&wp_hdr_left);
 
-    let active_wp_lbl = Label::new(Some(&format!(
-        "Aktif Duvar Kağıdı: {}",
-        crate::wallpaper::current_effective_wallpaper()
-    )));
-    active_wp_lbl.add_css_class("setting-subtext");
+    let active_wp_lbl = Label::new(Some(&format!("Geçerli: {}", current_wp)));
+    active_wp_lbl.add_css_class("settings-meta");
     active_wp_lbl.set_ellipsize(gtk4::pango::EllipsizeMode::Middle);
     active_wp_lbl.set_halign(gtk4::Align::Start);
-    wp_sec.append(&active_wp_lbl);
 
-    let action_row = GtkBox::new(Orientation::Horizontal, 10);
-    let pick_btn = Button::with_label("Bilgisayardan Duvar Kağıdı Seç...");
+    let action_row = GtkBox::new(Orientation::Horizontal, 8);
+    action_row.set_valign(gtk4::Align::Start);
+
+    let gallery = gtk4::FlowBox::builder()
+        .selection_mode(gtk4::SelectionMode::None)
+        .max_children_per_line(3)
+        .min_children_per_line(2)
+        .column_spacing(12)
+        .row_spacing(12)
+        .homogeneous(true)
+        .build();
+
+    let mut wp_cards: Vec<(String, GtkBox)> = Vec::new();
+    let mut wp_apply_btns: Vec<(String, Button)> = Vec::new();
+    let wallpapers = crate::wallpaper::discover_available_wallpapers();
+    for (title_txt, img_path) in &wallpapers {
+        let card = GtkBox::new(Orientation::Vertical, 0);
+        card.add_css_class("wp-card");
+        card.set_overflow(gtk4::Overflow::Hidden);
+        if img_path == &current_wp {
+            card.add_css_class("wp-active");
+        }
+
+        let pic = gtk4::Picture::for_filename(img_path);
+        pic.set_can_shrink(true);
+        pic.set_content_fit(gtk4::ContentFit::Cover);
+        pic.set_size_request(180, 100);
+        card.append(&pic);
+
+        let footer = GtkBox::new(Orientation::Horizontal, 8);
+        footer.add_css_class("wp-footer");
+        footer.set_valign(gtk4::Align::Center);
+
+        let name_l = Label::new(Some(title_txt));
+        name_l.add_css_class("wp-title");
+        name_l.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        name_l.set_hexpand(true);
+        name_l.set_halign(gtk4::Align::Start);
+        footer.append(&name_l);
+
+        let use_btn = Button::with_label("Uygula");
+        use_btn.add_css_class("secondary-btn");
+        use_btn.add_css_class("wp-apply-btn");
+        footer.append(&use_btn);
+
+        card.append(&footer);
+        gallery.insert(&card, -1);
+        wp_cards.push((img_path.clone(), card));
+        wp_apply_btns.push((img_path.clone(), use_btn));
+    }
+
+    let wp_cards_rc = Rc::new(wp_cards);
+
+    // Wire per-card apply buttons with active-card highlight sync
+    for (img_path, use_btn) in wp_apply_btns {
+        let lbl_card = active_wp_lbl.clone();
+        let cards_ref = wp_cards_rc.clone();
+        use_btn.connect_clicked(move |_| {
+            lbl_card.set_text(&format!("Geçerli: {}", img_path));
+            for (path_k, c_box) in cards_ref.iter() {
+                if path_k == &img_path {
+                    c_box.add_css_class("wp-active");
+                } else {
+                    c_box.remove_css_class("wp-active");
+                }
+            }
+            let target = img_path.clone();
+            std::thread::spawn(move || {
+                let _ = crate::wallpaper::apply_wallpaper_everywhere(&target, true);
+            });
+        });
+    }
+
+    let pick_btn = Button::with_label("Görsel seç");
     pick_btn.add_css_class("action-btn");
     let lbl_after_pick = active_wp_lbl.clone();
+    let cards_after_pick = wp_cards_rc.clone();
     pick_btn.connect_clicked(move |btn| {
         let win = btn.root().and_then(|r| r.downcast::<gtk4::Window>().ok());
         let dialog = gtk4::FileDialog::builder()
-            .title("Duvar Kağıdı Görseli Seçin")
+            .title("Duvar kağıdı görseli seç")
             .modal(true)
             .build();
         let filter = gtk4::FileFilter::new();
@@ -1776,11 +2312,19 @@ fn build_personalize_tab() -> GtkBox {
         filters.append(&filter);
         dialog.set_filters(Some(&filters));
         let lbl_cb = lbl_after_pick.clone();
+        let cards_cb = cards_after_pick.clone();
         dialog.open(win.as_ref(), None::<&gtk4::gio::Cancellable>, move |res| {
             if let Ok(file) = res {
                 if let Some(path) = file.path() {
                     let path_str = path.to_string_lossy().to_string();
-                    lbl_cb.set_text(&format!("[OK] Aktif Duvar Kağıdı: {}", path_str));
+                    lbl_cb.set_text(&format!("Geçerli: {}", path_str));
+                    for (path_k, c_box) in cards_cb.iter() {
+                        if path_k == &path_str {
+                            c_box.add_css_class("wp-active");
+                        } else {
+                            c_box.remove_css_class("wp-active");
+                        }
+                    }
                     std::thread::spawn(move || {
                         let _ = crate::wallpaper::apply_wallpaper_everywhere(&path_str, true);
                     });
@@ -1790,7 +2334,7 @@ fn build_personalize_tab() -> GtkBox {
     });
     action_row.append(&pick_btn);
 
-    let open_dir_btn = Button::with_label("Duvar Kağıdı Klasörünü Aç");
+    let open_dir_btn = Button::with_label("Klasörü aç");
     open_dir_btn.add_css_class("secondary-btn");
     open_dir_btn.connect_clicked(|_| {
         let _ = Command::new("nautilus")
@@ -1798,94 +2342,70 @@ fn build_personalize_tab() -> GtkBox {
             .spawn();
     });
     action_row.append(&open_dir_btn);
-    wp_sec.append(&action_row);
+    wp_hdr_row.append(&action_row);
 
-    let gallery = gtk4::FlowBox::builder()
-        .selection_mode(gtk4::SelectionMode::None)
-        .max_children_per_line(3)
-        .min_children_per_line(2)
-        .column_spacing(10)
-        .row_spacing(10)
-        .homogeneous(true)
-        .build();
-
-    for (title_txt, img_path) in crate::wallpaper::discover_available_wallpapers() {
-        let card = GtkBox::new(Orientation::Vertical, 6);
-        card.add_css_class("wp-card");
-
-        let pic = gtk4::Picture::for_filename(&img_path);
-        pic.set_can_shrink(true);
-        pic.set_content_fit(gtk4::ContentFit::Cover);
-        pic.set_size_request(176, 98);
-        card.append(&pic);
-
-        let name_l = Label::new(Some(&title_txt));
-        name_l.add_css_class("setting-subtext");
-        name_l.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-        name_l.set_max_width_chars(24);
-        name_l.set_halign(gtk4::Align::Start);
-        card.append(&name_l);
-
-        let use_btn = Button::with_label("Duvar Kağıdı Yap");
-        use_btn.add_css_class("secondary-btn");
-        let p_owned = img_path.clone();
-        let lbl_card = active_wp_lbl.clone();
-        use_btn.connect_clicked(move |_| {
-            lbl_card.set_text(&format!("[OK] Aktif Duvar Kağıdı: {}", p_owned));
-            let target = p_owned.clone();
-            std::thread::spawn(move || {
-                let _ = crate::wallpaper::apply_wallpaper_everywhere(&target, true);
-            });
-        });
-        card.append(&use_btn);
-        gallery.insert(&card, -1);
-    }
+    wp_sec.append(&wp_hdr_row);
+    wp_sec.append(&active_wp_lbl);
     wp_sec.append(&gallery);
     tab.append(&wp_sec);
 
-    // Section 2: Rich We10X Theme Mode, Accent Color & Taskbar Customization
+    // Section 2: We10X Theme Mode, Accent Color & Taskbar Customization
     tab.append(&build_we10x_customization_card());
 
     tab
 }
 
 fn build_caelestia_tab() -> GtkBox {
-    let tab = GtkBox::new(Orientation::Vertical, 12);
-    tab.set_margin_top(10);
-    tab.set_margin_bottom(10);
-    
+    let tab = GtkBox::new(Orientation::Vertical, 8);
+    tab.append(&build_page_header(
+        "Caelestia",
+        "Duvar kağıdı renk şeması ve tema modu",
+    ));
+
     let cfg = SolarConfig::load();
     if cfg.shell.engine != ShellEngine::Caelestia {
-        let msg = Label::new(Some("Bu ayarlar yalnız tam Caelestia motoru aktifken kullanılabilir. Lütfen 'Kabuk Motoru' sekmesinden Caelestia'yı seçin."));
-        msg.add_css_class("setting-label");
+        let empty_sec = GtkBox::new(Orientation::Vertical, 8);
+        empty_sec.add_css_class("section-box");
+
+        let empty_title = Label::new(Some("Caelestia etkin değil"));
+        empty_title.add_css_class("section-title");
+        empty_title.set_halign(gtk4::Align::Start);
+        empty_sec.append(&empty_title);
+
+        let msg = Label::new(Some(
+            "Bu ayarları kullanmak için Masaüstü kabuğu bölümünden Caelestia seçeneğini etkinleştirin",
+        ));
+        msg.add_css_class("setting-subtext");
         msg.set_wrap(true);
-        msg.set_halign(gtk4::Align::Center);
-        msg.set_valign(gtk4::Align::Center);
-        msg.set_vexpand(true);
-        tab.append(&msg);
+        msg.set_xalign(0.0);
+        msg.set_halign(gtk4::Align::Start);
+        empty_sec.append(&msg);
+
+        tab.append(&empty_sec);
         return tab;
     }
-    
+
     // Section 1: Wallpaper
-    let sec_wall = GtkBox::new(Orientation::Vertical, 10);
+    let sec_wall = GtkBox::new(Orientation::Vertical, 12);
     sec_wall.add_css_class("section-box");
-    
-    let w_title = Label::new(Some("Duvar Kağıdı ve Material 3 Renk Şeması"));
+
+    let w_title = Label::new(Some("Duvar kağıdı ve renk şeması"));
     w_title.add_css_class("section-title");
     w_title.set_halign(gtk4::Align::Start);
     sec_wall.append(&w_title);
-    
+
     let w_desc = Label::new(Some(
-        "Caelestia yüzeyleri (Launcher, Dashboard) seçilen duvar kağıdına göre dinamik olarak renk paleti üretir. Duvar kağıdını değiştirdiğinizde tüm arayüz renkleri otomatik güncellenir."
+        "Duvar kağıdı değiştiğinde Caelestia arayüzünün Material 3 renk paleti otomatik güncellenir",
     ));
     w_desc.add_css_class("setting-subtext");
     w_desc.set_wrap(true);
+    w_desc.set_xalign(0.0);
     w_desc.set_halign(gtk4::Align::Start);
     sec_wall.append(&w_desc);
-    
-    let btn_row = GtkBox::new(Orientation::Horizontal, 10);
-    
-    let btn_rand = Button::with_label("Rastgele Duvar Kağıdı");
+
+    let btn_row = GtkBox::new(Orientation::Horizontal, 8);
+
+    let btn_rand = Button::with_label("Rastgele seç");
     btn_rand.add_css_class("action-btn");
     btn_rand.connect_clicked(|_| {
         std::thread::spawn(|| {
@@ -1894,12 +2414,12 @@ fn build_caelestia_tab() -> GtkBox {
     });
     btn_row.append(&btn_rand);
 
-    let btn_pick = Button::with_label("Dosyadan Seç...");
+    let btn_pick = Button::with_label("Dosyadan seç");
     btn_pick.add_css_class("secondary-btn");
     btn_pick.connect_clicked(|btn| {
         let win = btn.root().and_then(|r| r.downcast::<gtk4::Window>().ok());
         let dialog = gtk4::FileDialog::builder()
-            .title("Duvar Kağıdı Seç (Caelestia)")
+            .title("Caelestia duvar kağıdı seç")
             .modal(true)
             .build();
         let filter = gtk4::FileFilter::new();
@@ -1922,33 +2442,37 @@ fn build_caelestia_tab() -> GtkBox {
         });
     });
     btn_row.append(&btn_pick);
-    
+
     sec_wall.append(&btn_row);
     tab.append(&sec_wall);
-    
+
     // Section 2: Mode and Layout
-    let sec_lay = GtkBox::new(Orientation::Vertical, 10);
+    let sec_lay = GtkBox::new(Orientation::Vertical, 12);
     sec_lay.add_css_class("section-box");
-    
-    let l_title = Label::new(Some("Masaüstü ve Arayüz Düzeni"));
+
+    let l_title = Label::new(Some("Tema modu"));
     l_title.add_css_class("section-title");
     l_title.set_halign(gtk4::Align::Start);
     sec_lay.append(&l_title);
-    
+
     let l_desc = Label::new(Some(
-        "Quickshell tabanlı Caelestia arayüzü için tema modu ve diğer yapılandırmalar."
+        "Caelestia ve GTK uygulamaları için koyu veya açık renk şemasını seçin",
     ));
     l_desc.add_css_class("setting-subtext");
+    l_desc.set_wrap(true);
+    l_desc.set_xalign(0.0);
     l_desc.set_halign(gtk4::Align::Start);
     sec_lay.append(&l_desc);
-    
+
     let row_mode = GtkBox::new(Orientation::Horizontal, 12);
-    let lbl_mode = Label::new(Some("Caelestia Tema Modu:"));
+    let lbl_mode = Label::new(Some("Renk şeması"));
     lbl_mode.add_css_class("setting-label");
+    lbl_mode.set_hexpand(true);
+    lbl_mode.set_halign(gtk4::Align::Start);
     row_mode.append(&lbl_mode);
 
-    let mode_dd = DropDown::new(Some(StringList::new(&["Karanlık (Dark)", "Aydınlık (Light)"])), None::<gtk4::Expression>);
-    
+    let mode_dd = DropDown::new(Some(StringList::new(&["Koyu", "Açık"])), None::<gtk4::Expression>);
+
     // Initial read
     let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
     let scheme_path = format!("{}/.local/state/caelestia/scheme.json", home);
@@ -1982,37 +2506,35 @@ fn build_caelestia_tab() -> GtkBox {
 }
 
 fn build_display_tab() -> GtkBox {
-    let tab = GtkBox::new(Orientation::Vertical, 16);
-    tab.set_margin_top(14);
-    tab.set_margin_bottom(14);
-    tab.set_margin_start(16);
-    tab.set_margin_end(16);
+    let tab = GtkBox::new(Orientation::Vertical, 8);
+    tab.append(&build_page_header(
+        "Ekran",
+        "Çözünürlük, yenileme hızı ve DPI ölçeğini ekran bazında veya genel olarak ayarlayın",
+    ));
 
     let cfg = SolarConfig::load();
     let scale_presets = [
-        "0.75x — Kompakt (%75)",
-        "0.85x — Küçük (%85 - 1280x800 için önerilen)",
-        "1.00x — Standart (%100 - Varsayılan)",
-        "1.25x — Büyük (%125)",
-        "1.50x — Geniş (%150 - 2K Ekranlar)",
-        "1.75x — Ekstra Büyük (%175)",
-        "2.00x — HiDPI (%200 - 4K Ekranlar)",
+        "0.75x (%75, kompakt)",
+        "0.85x (%85, 1280×800 için önerilen)",
+        "1.00x (%100, varsayılan)",
+        "1.25x (%125)",
+        "1.50x (%150, 2K ekranlar)",
+        "1.75x (%175)",
+        "2.00x (%200, 4K ekranlar)",
     ];
     let scale_values = [0.75, 0.85, 1.00, 1.25, 1.50, 1.75, 2.00];
 
     // SECTION 1: Per-Monitor Manual Resolution, Refresh Rate (Hz) & Independent DPI Scaling
-    let sec_mon = GtkBox::new(Orientation::Vertical, 14);
+    let sec_mon = GtkBox::new(Orientation::Vertical, 12);
     sec_mon.add_css_class("section-box");
 
-    let title_mon = Label::new(Some(
-        "Monitör Çözünürlüğü, Yenileme Hızı (Hz) ve Bağımsız Ölçekleme",
-    ));
+    let title_mon = Label::new(Some("Bağlı ekranlar"));
     title_mon.add_css_class("section-title");
     title_mon.set_halign(gtk4::Align::Start);
     sec_mon.append(&title_mon);
 
     let desc_mon = Label::new(Some(
-        "Bağlı her ekran için çözünürlüğü (ör. 1920x1080, 2560x1440, 1366x768), yenileme hızını (60 Hz, 75 Hz, 120 Hz, 144 Hz, 240 Hz vb.) ve bağımsız DPI ölçeğini doğrudan seçin veya özel çözünürlük/Hz girin.",
+        "Her ekran için çözünürlük, yenileme hızı ve bağımsız DPI ölçeği seçin veya özel mod girin",
     ));
     desc_mon.add_css_class("setting-subtext");
     desc_mon.set_wrap(true);
@@ -2037,27 +2559,27 @@ fn build_display_tab() -> GtkBox {
 
     let detected_outputs = get_detected_outputs();
     for out in detected_outputs {
-        let mon_card = GtkBox::new(Orientation::Vertical, 10);
-        mon_card.add_css_class("wp-card");
+        let mon_card = GtkBox::new(Orientation::Vertical, 12);
+        mon_card.add_css_class("monitor-card");
 
-        let mon_header = GtkBox::new(Orientation::Horizontal, 10);
-        let mon_icon = Image::from_icon_name("video-display");
-        mon_icon.set_pixel_size(24);
+        let mon_header = GtkBox::new(Orientation::Horizontal, 8);
+        let mon_icon = create_symbolic_icon("video-display-symbolic", "settings-row-icon");
         mon_header.append(&mon_icon);
 
         let info_box = GtkBox::new(Orientation::Vertical, 2);
         info_box.set_hexpand(true);
 
-        let name_lbl = Label::new(Some(&format!("{} — {}", out.name, out.description)));
-        name_lbl.add_css_class("setting-label");
+        let name_lbl = Label::new(Some(&format!("{} ({})", out.name, out.description)));
+        name_lbl.add_css_class("monitor-name");
         name_lbl.set_halign(gtk4::Align::Start);
+        name_lbl.set_ellipsize(gtk4::pango::EllipsizeMode::End);
         info_box.append(&name_lbl);
 
         let res_lbl = Label::new(Some(&format!(
-            "Aktif Mod: {} | Ölçek: {:.2}x",
+            "Etkin mod: {} · Ölçek: {:.2}x",
             out.resolution, out.scale
         )));
-        res_lbl.add_css_class("setting-subtext");
+        res_lbl.add_css_class("settings-meta");
         res_lbl.set_halign(gtk4::Align::Start);
         info_box.append(&res_lbl);
         mon_header.append(&info_box);
@@ -2087,14 +2609,15 @@ fn build_display_tab() -> GtkBox {
             .iter()
             .map(|(w, h, is_hw)| {
                 if *is_hw {
-                    format!("{} × {} (Donanım)", w, h)
+                    format!("{} × {} (donanım)", w, h)
                 } else {
-                    format!("{} × {} (Özel Mod)", w, h)
+                    format!("{} × {} (özel)", w, h)
                 }
             })
             .collect();
         let res_label_refs: Vec<&str> = res_labels.iter().map(|s| s.as_str()).collect();
         let res_dd = DropDown::new(Some(StringList::new(&res_label_refs)), None::<gtk4::Expression>);
+        res_dd.set_hexpand(true);
 
         let init_res_idx = res_items
             .iter()
@@ -2132,14 +2655,15 @@ fn build_display_tab() -> GtkBox {
             .iter()
             .map(|(mhz, is_hw)| {
                 if *is_hw {
-                    format!("{:.2} Hz (Donanım)", *mhz as f64 / 1000.0)
+                    format!("{:.2} Hz (donanım)", *mhz as f64 / 1000.0)
                 } else {
-                    format!("{:.2} Hz (Özel)", *mhz as f64 / 1000.0)
+                    format!("{:.2} Hz (özel)", *mhz as f64 / 1000.0)
                 }
             })
             .collect();
         let hz_refs_init: Vec<&str> = hz_labels_init.iter().map(|s| s.as_str()).collect();
         let hz_dd = DropDown::new(Some(StringList::new(&hz_refs_init)), None::<gtk4::Expression>);
+        hz_dd.set_hexpand(true);
 
         let init_hz_idx = init_hz_opts
             .iter()
@@ -2162,9 +2686,9 @@ fn build_display_tab() -> GtkBox {
                 .iter()
                 .map(|(mhz, is_hw)| {
                     if *is_hw {
-                        format!("{:.2} Hz (Donanım)", *mhz as f64 / 1000.0)
+                        format!("{:.2} Hz (donanım)", *mhz as f64 / 1000.0)
                     } else {
-                        format!("{:.2} Hz (Özel)", *mhz as f64 / 1000.0)
+                        format!("{:.2} Hz (özel)", *mhz as f64 / 1000.0)
                     }
                 })
                 .collect();
@@ -2181,6 +2705,7 @@ fn build_display_tab() -> GtkBox {
         // Scale dropdown for this monitor
         let mon_scale_dd =
             DropDown::new(Some(StringList::new(&scale_presets)), None::<gtk4::Expression>);
+        mon_scale_dd.set_hexpand(true);
         let mut mon_sel_idx = 2;
         for (i, &val) in scale_values.iter().enumerate() {
             if (out.scale - val).abs() < 0.04 {
@@ -2191,13 +2716,13 @@ fn build_display_tab() -> GtkBox {
         mon_scale_dd.set_selected(mon_sel_idx);
 
         // Controls row 1: Resolution + Refresh Rate (Hz)
-        let row_mode_sel = GtkBox::new(Orientation::Horizontal, 10);
-        let l_res = Label::new(Some("Çözünürlük:"));
+        let row_mode_sel = GtkBox::new(Orientation::Horizontal, 12);
+        let l_res = Label::new(Some("Çözünürlük"));
         l_res.add_css_class("setting-label");
         row_mode_sel.append(&l_res);
         row_mode_sel.append(&res_dd);
 
-        let l_hz = Label::new(Some("Yenileme Hızı (Hz):"));
+        let l_hz = Label::new(Some("Yenileme hızı (Hz)"));
         l_hz.add_css_class("setting-label");
         l_hz.set_margin_start(8);
         row_mode_sel.append(&l_hz);
@@ -2205,18 +2730,19 @@ fn build_display_tab() -> GtkBox {
         mon_card.append(&row_mode_sel);
 
         // Controls row 2: DPI Scale + Apply Button
-        let row_scale_sel = GtkBox::new(Orientation::Horizontal, 10);
-        let l_sc = Label::new(Some("Monitör Ölçeği:"));
+        let row_scale_sel = GtkBox::new(Orientation::Horizontal, 12);
+        let l_sc = Label::new(Some("Monitör ölçeği"));
         l_sc.add_css_class("setting-label");
         row_scale_sel.append(&l_sc);
         row_scale_sel.append(&mon_scale_dd);
 
-        let mon_apply = Button::with_label("Çözünürlük, Hz ve Ölçeği Uygula");
+        let mon_apply = Button::with_label("Uygula");
         mon_apply.add_css_class("action-btn");
 
-        let mon_status = Label::new(Some(""));
-        mon_status.add_css_class("setting-subtext");
+        let mon_status = Label::new(None);
+        mon_status.add_css_class("status-text");
         mon_status.set_halign(gtk4::Align::Start);
+        mon_status.set_visible(false);
 
         let out_name = out.name.clone();
         let res_dd_apply = res_dd.clone();
@@ -2245,35 +2771,46 @@ fn build_display_tab() -> GtkBox {
             let mode_spec = format!("{}x{}@{:.3}", w, h, mhz as f64 / 1000.0);
             let is_custom = !(is_hw_res && is_hw_hz);
 
+            for cls in ["status-text", "status-text-ok", "status-text-warn", "status-text-danger"] {
+                mon_status_apply.remove_css_class(cls);
+            }
+
             match apply_per_output_mode_dynamically(&out_name, &mode_spec, is_custom) {
                 Ok(()) => {
                     apply_per_output_scale_dynamically(&out_name, sc_val);
                     res_lbl_apply.set_text(&format!(
-                        "Aktif Mod: {}x{} @ {:.2}Hz | Ölçek: {:.2}x",
+                        "Etkin mod: {}×{} @ {:.2} Hz · Ölçek: {:.2}x",
                         w,
                         h,
                         mhz as f64 / 1000.0,
                         sc_val
                     ));
+                    mon_status_apply.add_css_class("status-text-ok");
                     mon_status_apply.set_text(&format!(
-                        "[OK] {} için {} ({:.2}x ölçek) başarıyla uygulandı ve kaydedildi.",
+                        "{} için {} ({:.2}x ölçek) uygulandı ve kaydedildi",
                         out_name, mode_spec, sc_val
                     ));
+                    mon_status_apply.set_visible(true);
                 }
                 Err(err) => {
+                    mon_status_apply.add_css_class("status-text-warn");
                     mon_status_apply.set_text(&format!(
-                        "[UYARI] {} modu uygulanamadı: {}",
+                        "{} modu uygulanamadı: {}",
                         mode_spec, err
                     ));
+                    mon_status_apply.set_visible(true);
                 }
             }
         });
         row_scale_sel.append(&mon_apply);
         mon_card.append(&row_scale_sel);
 
+        let mon_sep = Separator::new(Orientation::Horizontal);
+        mon_card.append(&mon_sep);
+
         // Controls row 3: Custom W x H @ Hz Manual Entry
         let custom_row = GtkBox::new(Orientation::Horizontal, 8);
-        let c_lbl = Label::new(Some("Manuel Özel Mod:"));
+        let c_lbl = Label::new(Some("Özel mod"));
         c_lbl.add_css_class("setting-subtext");
         custom_row.append(&c_lbl);
 
@@ -2282,21 +2819,27 @@ fn build_display_tab() -> GtkBox {
             .width_chars(6)
             .placeholder_text("1920")
             .build();
+        w_entry.add_css_class("settings-mono");
         let x_lbl = Label::new(Some("×"));
+        x_lbl.add_css_class("setting-subtext");
         let h_entry = gtk4::Entry::builder()
             .text(out.current_height.to_string())
             .width_chars(6)
             .placeholder_text("1080")
             .build();
+        h_entry.add_css_class("settings-mono");
         let at_lbl = Label::new(Some("@"));
+        at_lbl.add_css_class("setting-subtext");
         let hz_entry = gtk4::Entry::builder()
             .text(format!("{:.0}", out.current_refresh_mhz as f64 / 1000.0))
             .width_chars(5)
             .placeholder_text("60")
             .build();
+        hz_entry.add_css_class("settings-mono");
         let hz_u_lbl = Label::new(Some("Hz"));
+        hz_u_lbl.add_css_class("setting-subtext");
 
-        let custom_btn = Button::with_label("Özel Modu Uygula");
+        let custom_btn = Button::with_label("Özel modu uygula");
         custom_btn.add_css_class("secondary-btn");
         let out_custom = out.name.clone();
         let st_custom = mon_status.clone();
@@ -2306,6 +2849,9 @@ fn build_display_tab() -> GtkBox {
         let hz_ent_c = hz_entry.clone();
         let cur_sc = out.scale;
         custom_btn.connect_clicked(move |_| {
+            for cls in ["status-text", "status-text-ok", "status-text-warn", "status-text-danger"] {
+                st_custom.remove_css_class(cls);
+            }
             let w_ok = w_ent_c.text().trim().parse::<u32>().unwrap_or(0);
             let h_ok = h_ent_c.text().trim().parse::<u32>().unwrap_or(0);
             let hz_ok = hz_ent_c
@@ -2318,25 +2864,31 @@ fn build_display_tab() -> GtkBox {
                 || !(480..=4320).contains(&h_ok)
                 || !(24.0..=500.0).contains(&hz_ok)
             {
+                st_custom.add_css_class("status-text-danger");
                 st_custom.set_text(
-                    "[HATA] Geçerli bir çözünürlük (640..7680 × 480..4320) ve Hz (24..500) girin.",
+                    "Geçerli bir çözünürlük (640..7680 × 480..4320) ve yenileme hızı (24..500 Hz) girin",
                 );
+                st_custom.set_visible(true);
                 return;
             }
             let spec = format!("{}x{}@{:.3}", w_ok, h_ok, hz_ok);
             match apply_per_output_mode_dynamically(&out_custom, &spec, true) {
                 Ok(()) => {
                     rl_custom.set_text(&format!(
-                        "Aktif Mod: {}x{} @ {:.2}Hz | Ölçek: {:.2}x",
+                        "Etkin mod: {}×{} @ {:.2} Hz · Ölçek: {:.2}x",
                         w_ok, h_ok, hz_ok, cur_sc
                     ));
+                    st_custom.add_css_class("status-text-ok");
                     st_custom.set_text(&format!(
-                        "[OK] Özel mod {} başarıyla uygulandı ve kaydedildi.",
+                        "Özel mod {} uygulandı ve kaydedildi",
                         spec
                     ));
+                    st_custom.set_visible(true);
                 }
                 Err(e) => {
-                    st_custom.set_text(&format!("[UYARI] Özel mod uygulanamadı: {}", e));
+                    st_custom.add_css_class("status-text-warn");
+                    st_custom.set_text(&format!("Özel mod uygulanamadı: {}", e));
+                    st_custom.set_visible(true);
                 }
             }
         });
@@ -2347,6 +2899,9 @@ fn build_display_tab() -> GtkBox {
         custom_row.append(&at_lbl);
         custom_row.append(&hz_entry);
         custom_row.append(&hz_u_lbl);
+        let spacer = GtkBox::new(Orientation::Horizontal, 0);
+        spacer.set_hexpand(true);
+        custom_row.append(&spacer);
         custom_row.append(&custom_btn);
         mon_card.append(&custom_row);
         mon_card.append(&mon_status);
@@ -2359,21 +2914,22 @@ fn build_display_tab() -> GtkBox {
     let sec = GtkBox::new(Orientation::Vertical, 12);
     sec.add_css_class("section-box");
 
-    let title = Label::new(Some("Genel Masaüstü ve Arayüz Ölçeği (Tüm Ekranlar)"));
+    let title = Label::new(Some("Genel ölçek"));
     title.add_css_class("section-title");
     title.set_halign(gtk4::Align::Start);
     sec.append(&title);
 
     let desc = Label::new(Some(
-        "Tüm ekranlarınızdaki pencere ve yazı boyutunu tek seferde ölçeklendirin.",
+        "Tüm ekranlardaki pencere ve metin boyutunu tek seferde ölçeklendirin",
     ));
     desc.add_css_class("setting-subtext");
     desc.set_wrap(true);
+    desc.set_xalign(0.0);
     desc.set_halign(gtk4::Align::Start);
     sec.append(&desc);
 
     let row_scale = GtkBox::new(Orientation::Horizontal, 12);
-    let lbl_scale = Label::new(Some("Genel Sistem Ölçeği:"));
+    let lbl_scale = Label::new(Some("Sistem ölçeği"));
     lbl_scale.add_css_class("setting-label");
     lbl_scale.set_hexpand(true);
     lbl_scale.set_halign(gtk4::Align::Start);
@@ -2394,14 +2950,15 @@ fn build_display_tab() -> GtkBox {
     row_scale.append(&scale_dd);
     sec.append(&row_scale);
 
-    let status_lbl = Label::new(Some(""));
-    status_lbl.add_css_class("setting-subtext");
+    let status_lbl = Label::new(None);
+    status_lbl.add_css_class("status-text-ok");
     status_lbl.set_halign(gtk4::Align::Start);
+    status_lbl.set_visible(false);
 
-    let btn_box = GtkBox::new(Orientation::Horizontal, 10);
-    btn_box.set_margin_top(8);
+    let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+    btn_box.set_margin_top(4);
 
-    let apply_btn = Button::with_label("Tüm Ekranlara Uygula");
+    let apply_btn = Button::with_label("Tüm ekranlara uygula");
     apply_btn.add_css_class("action-btn");
 
     let scale_dd_clone = scale_dd.clone();
@@ -2423,13 +2980,14 @@ fn build_display_tab() -> GtkBox {
         apply_display_scale_dynamically(chosen_scale);
 
         status_clone.set_text(&format!(
-            "[OK] Genel ölçek {:.2}x başarıyla uygulandı ve kaydedildi.",
+            "Genel ölçek {:.2}x uygulandı ve kaydedildi",
             chosen_scale
         ));
+        status_clone.set_visible(true);
     });
     btn_box.append(&apply_btn);
 
-    let reset_btn = Button::with_label("Varsayılana Sıfırla (1.00x)");
+    let reset_btn = Button::with_label("Sıfırla");
     reset_btn.add_css_class("secondary-btn");
     let scale_dd_reset = scale_dd.clone();
     let status_reset = status_lbl.clone();
@@ -2440,7 +2998,8 @@ fn build_display_tab() -> GtkBox {
         c.display.text_scale = 1.00;
         let _ = c.save();
         apply_display_scale_dynamically(1.00);
-        status_reset.set_text("[OK] Ölçek varsayılan 1.00x değerine sıfırlandı.");
+        status_reset.set_text("Ölçek varsayılan 1.00x değerine sıfırlandı");
+        status_reset.set_visible(true);
     });
     btn_box.append(&reset_btn);
 
@@ -2538,7 +3097,7 @@ fn scale_for_height(height: u32) -> f64 {
 }
 
 pub fn sync_caelestia_scale(_scale: f64) {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/liveuser".to_string());
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
     let conf_dir = PathBuf::from(&home).join(".config/caelestia");
     let _ = std::fs::create_dir_all(&conf_dir);
     let shell_json_path = conf_dir.join("shell.json");
@@ -2613,14 +3172,14 @@ pub fn get_detected_outputs() -> Vec<OutputDetails> {
                         let desc = if !make.is_empty() || !model.is_empty() {
                             format!("{} {}", make, model).trim().to_string()
                         } else {
-                            "Dahili / Harici Ekran".to_string()
+                            "Dahili veya harici ekran".to_string()
                         };
 
                         let mut parsed_modes = Vec::new();
                         let mut cur_w: u32 = 1920;
                         let mut cur_h: u32 = 1080;
                         let mut cur_mhz: u32 = 60_000;
-                        let mut res_str = "1920x1080 @ 60.00Hz".to_string();
+                        let mut res_str = "1920×1080 @ 60.00 Hz".to_string();
 
                         if let Some(modes) = data.get("modes").and_then(|v| v.as_array()) {
                             for m in modes {
@@ -2654,7 +3213,7 @@ pub fn get_detected_outputs() -> Vec<OutputDetails> {
                                     .and_then(|v| v.as_u64())
                                     .unwrap_or(60_000) as u32;
                                 res_str = format!(
-                                    "{}x{} @ {:.2}Hz",
+                                    "{}×{} @ {:.2} Hz",
                                     cur_w,
                                     cur_h,
                                     cur_mhz as f64 / 1000.0
@@ -2693,8 +3252,8 @@ pub fn get_detected_outputs() -> Vec<OutputDetails> {
     if outputs.is_empty() {
         outputs.push(OutputDetails {
             name: "Virtual-1".to_string(),
-            description: "Sanal / Varsayılan Ekran".to_string(),
-            resolution: "1920x1080 @ 60.00Hz".to_string(),
+            description: "Sanal ekran".to_string(),
+            resolution: "1920×1080 @ 60.00 Hz".to_string(),
             scale: cfg.display.scale,
             current_width: 1920,
             current_height: 1080,
@@ -3135,27 +3694,48 @@ pub fn apply_display_scale_dynamically(scale: f64) {
 }
 
 fn build_omnibar_tab() -> GtkBox {
-    let tab = GtkBox::new(Orientation::Vertical, 16);
-    tab.set_margin_top(14);
-    tab.set_margin_bottom(14);
-    tab.set_margin_start(16);
-    tab.set_margin_end(16);
+    let tab = GtkBox::new(Orientation::Vertical, 8);
+    tab.append(&build_page_header(
+        "Omnibar",
+        "Uygulama başlatıcı, komut arama, hesap makinesi ve pano geçmişi",
+    ));
 
-    let sec = GtkBox::new(Orientation::Vertical, 14);
+    let sec = GtkBox::new(Orientation::Vertical, 12);
     sec.add_css_class("section-box");
 
-    let title = Label::new(Some("SolarUI Omnibar ve Başlatıcı Yönlendirme"));
+    let title = Label::new(Some("Başlatıcı ve arama"));
     title.add_css_class("section-title");
     title.set_halign(gtk4::Align::Start);
     sec.append(&title);
 
     let desc = Label::new(Some(
-        "Super + Boşluk kısayolu ile açılan Omnibar; sistem komutları, anlık matematik hesaplamaları, çevrimdışı yaklaşık birim/kur çevirileri, pano geçmişi (cb) ve uygulama başlatıcısıdır. Dilerseniz devre dışı bırakıp aktif kabuğun (Caelestia / Noctalia / end4-pC) kendi yerel uygulama başlatıcısını kullanabilirsiniz.",
+        "Uygulama başlatma, hesaplama, birim çevirme ve pano geçmişine (cb) hızlı erişim sağlar",
     ));
     desc.add_css_class("setting-subtext");
     desc.set_wrap(true);
+    desc.set_xalign(0.0);
     desc.set_halign(gtk4::Align::Start);
     sec.append(&desc);
+
+    // Signature keycap shortcut row
+    let shortcut_row = GtkBox::new(Orientation::Horizontal, 20);
+    shortcut_row.set_margin_top(4);
+    shortcut_row.set_margin_bottom(4);
+
+    let open_sc = GtkBox::new(Orientation::Horizontal, 8);
+    let open_lbl = Label::new(Some("Başlatıcı"));
+    open_lbl.add_css_class("kv-key");
+    open_sc.append(&open_lbl);
+    open_sc.append(&build_keycap_combo(&[&["Super", "Boşluk"]]));
+    shortcut_row.append(&open_sc);
+
+    let force_sc = GtkBox::new(Orientation::Horizontal, 8);
+    let force_lbl = Label::new(Some("Zorla aç"));
+    force_lbl.add_css_class("kv-key");
+    force_sc.append(&force_lbl);
+    force_sc.append(&build_keycap_combo(&[&["Super", "Shift", "Boşluk"]]));
+    shortcut_row.append(&force_sc);
+    sec.append(&shortcut_row);
 
     let sep1 = Separator::new(Orientation::Horizontal);
     sec.append(&sep1);
@@ -3164,7 +3744,7 @@ fn build_omnibar_tab() -> GtkBox {
 
     // 0. Omnibar Etkinleştirme & Kabuk Başlatıcısı Davranışı
     let chk_enabled = CheckButton::with_label(
-        "SolarUI Omnibar'ı Etkinleştir (Kapalıysa Super+Boşluk aktif kabuğun kendi başlatıcısını açar)",
+        "SolarUI Omnibar'ı etkinleştir (kapalıysa etkin kabuğun başlatıcısı açılır)",
     );
     chk_enabled.set_active(cfg.omnibar.enabled);
     chk_enabled.connect_toggled(|cb| {
@@ -3179,7 +3759,7 @@ fn build_omnibar_tab() -> GtkBox {
     sec.append(&chk_enabled);
 
     let chk_override = CheckButton::with_label(
-        "Caelestia / end4-pC aktifken de Super+Boşluk ile Omnibar aç (Kapalıysa kabuğun kendi menüsü açılır)",
+        "Caelestia ve end4-pC üzerinde de Omnibar kullan",
     );
     chk_override.set_active(cfg.omnibar.override_shell_launcher);
     chk_override.connect_toggled(|cb| {
@@ -3191,7 +3771,7 @@ fn build_omnibar_tab() -> GtkBox {
     sec.append(&chk_override);
 
     // 1. Web Arama Geçişi
-    let chk_web = CheckButton::with_label("Çevrimiçi Web Arama Sonuçlarını Göster");
+    let chk_web = CheckButton::with_label("Çevrimiçi web arama sonuçlarını göster");
     chk_web.set_active(cfg.omnibar.enable_web_search);
     chk_web.connect_toggled(|cb| {
         let active = cb.is_active();
@@ -3203,8 +3783,9 @@ fn build_omnibar_tab() -> GtkBox {
 
     // 2. Arama Motoru Seçimi
     let engine_box = GtkBox::new(Orientation::Horizontal, 12);
-    let engine_lbl = Label::new(Some("Varsayılan Arama Motoru:"));
+    let engine_lbl = Label::new(Some("Varsayılan arama motoru"));
     engine_lbl.add_css_class("setting-label");
+    engine_lbl.set_hexpand(true);
     engine_lbl.set_halign(gtk4::Align::Start);
     engine_box.append(&engine_lbl);
 
@@ -3230,9 +3811,9 @@ fn build_omnibar_tab() -> GtkBox {
     let sep2 = Separator::new(Orientation::Horizontal);
     sec.append(&sep2);
 
-    // Test Butonları
-    let btn_row = GtkBox::new(Orientation::Horizontal, 10);
-    let btn_test = Button::with_label("Omnibar'ı Şimdi Aç (Super + Shift + Boşluk)");
+    // Action Buttons
+    let btn_row = GtkBox::new(Orientation::Horizontal, 8);
+    let btn_test = Button::with_label("Omnibar'ı aç");
     btn_test.add_css_class("action-btn");
     btn_test.connect_clicked(|_| {
         let _ = Command::new("solar-shell")
@@ -3241,7 +3822,7 @@ fn build_omnibar_tab() -> GtkBox {
     });
     btn_row.append(&btn_test);
 
-    let btn_shell_launcher = Button::with_label("Aktif Kabuğun Kendi Başlatıcısını Aç");
+    let btn_shell_launcher = Button::with_label("Kabuk başlatıcısını aç");
     btn_shell_launcher.add_css_class("secondary-btn");
     btn_shell_launcher.connect_clicked(|_| {
         let _ = Command::new("solar-shell")
