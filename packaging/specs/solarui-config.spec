@@ -5,7 +5,7 @@
 
 Name:           solarui-config
 Version:        5.05.1
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        SolarUI and BlazeOS system, compositor, skeleton, and service configurations
 License:        GPL-3.0-or-later
 URL:            https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
@@ -27,6 +27,34 @@ Plymouth theme, Wayland session, and skeleton configuration defaults.
 mkdir -p %{buildroot}
 cp -a . %{buildroot}/
 rm -f %{buildroot}/%{name}-%{version}.tar
+# Deduplicate byte-identical assets (wallpapers, etc.) via intra-tree hardlinks
+# so RPM payloads stay well under GitHub Pages' 100 MiB file limit without
+# ever creating cross-filesystem hardlinks between /etc and /usr.
+python3 - "%{buildroot}" <<'PY'
+import hashlib, os, stat, sys
+root = sys.argv[1]
+for subtree in ("usr/share", "etc/skel"):
+    base = os.path.join(root, subtree)
+    if not os.path.isdir(base):
+        continue
+    seen = {}
+    for dp, _dns, fns in os.walk(base):
+        for fn in sorted(fns):
+            p = os.path.join(dp, fn)
+            st = os.lstat(p)
+            if not stat.S_ISREG(st.st_mode) or st.st_size < 4096:
+                continue
+            h = hashlib.sha256()
+            with open(p, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1048576), b""):
+                    h.update(chunk)
+            key = (st.st_size, st.st_mode & 0o7777, h.hexdigest())
+            if key in seen:
+                os.unlink(p)
+                os.link(seen[key], p)
+            else:
+                seen[key] = p
+PY
 
 %files
 %config(noreplace) /etc/NetworkManager/conf.d/00-blaze-network.conf
@@ -64,6 +92,9 @@ rm -f %{buildroot}/%{name}-%{version}.tar
 /etc/skel/Pictures
 /etc/skel/Resimler
 /usr/lib/modprobe.d/blazeos-usb-quirks.conf
+/usr/lib/systemd/user/blazeos-update-notifier.service
+/usr/lib/systemd/user/blazeos-update-notifier.timer
+/usr/lib/systemd/user/timers.target.wants/blazeos-update-notifier.timer
 %attr(0755,root,root) /usr/local/bin/gnome-control-center
 /usr/share/blaze-kinetic-glass
 /usr/share/applications/blaze-gamezone.desktop
@@ -113,5 +144,7 @@ rm -f %{buildroot}/%{name}-%{version}.tar
 /usr/share/xdg-desktop-portal/solarui-portals.conf
 
 %changelog
+* Thu Nov 26 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-2
+- Enable dynamic Omnibar sizing in Niri config and ship unprivileged BlazeHouse update notifier user timer
 * Tue Nov 24 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-1
 - Split SolarUI and BlazeOS configuration defaults into solarui-config RPM

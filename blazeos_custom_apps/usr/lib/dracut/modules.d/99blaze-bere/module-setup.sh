@@ -16,7 +16,8 @@ depends() {
 }
 
 installkernel() {
-    instmods -c squashfs overlay loop ext4 vfat btrfs
+    hostonly="" instmods squashfs overlay loop ext4 vfat btrfs
+    hostonly="" instmods nvme ahci virtio_blk virtio_scsi sd_mod usb_storage uas xhci_pci usbhid hid_generic
 }
 
 install() {
@@ -28,7 +29,8 @@ install() {
     fi
 
     inst_multiple -o stty dd chvt clear reset sync reboot poweroff \
-        btrfs findmnt lsblk blkid blockdev mount umount losetup kexec modprobe sulogin
+        btrfs findmnt lsblk blkid blockdev mount umount losetup kexec modprobe sulogin \
+        sha256sum awk grep dirname mkdir
 
     # Ensure udev callouts referencing /sbin/blockdev (99-blaze-recovery-vault.rules) always resolve inside initramfs.
     if [ ! -e "${initdir}/sbin/blockdev" ]; then
@@ -58,4 +60,5 @@ EOF
     done
 
     inst_hook emergency 00 "${moddir}/blaze-emergency-hook.sh"
+    inst_hook pre-pivot 50 "${moddir}/blaze-bere-overlay-mount.sh"
 }

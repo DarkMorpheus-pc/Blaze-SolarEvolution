@@ -41,7 +41,7 @@ Kullanıcının talebi:
 - **Mevcut güvenlik kırmızı çizgileri korunur:** `audit2allow`, `semodule`, global Flatpak geçersiz kılmaları (`global`), blanket `filesystem=host`/`/`/`/etc`, `devices=all`, D-Bus kum havuzu kaçışları ve kabuk enjeksiyonu (`shell=True` yok) engellenmeye devam eder.
 - **Salt-okunur `akrepd` sözleşmesi bozulmaz:** `akrepd` (`User=akrep`, `ProtectSystem=strict`) asla mutasyon yapmaz ve `akrep-privd`'yi salt görüntüleme için uyandırmaz.
 - **Diğer BlazeOS uygulamalarına dokunulmaz:** FireHub, Blaze House, OOBE, SolarUI Settings, GameZone kapsam dışındadır.
-- **Görsel tasarım sözleşmesi korunur:** [2026-11-26-blaze-ui-unslop-design.md](file:///home/darkmorpheus/BlazeFedora/docs/superpowers/specs/2026-11-26-blaze-ui-unslop-design.md) kurallarına (Grafit + Blaze ember, 4px ızgara, 8px durum noktası, 16px sembolik ikon, cümle düzeni Türkçe, sıfır emoji, sıfır `(Polkit)` düğme etiketi, `1060x720` taşmasız düzen) %100 uyulur.
+- **Görsel tasarım sözleşmesi korunur:** [2026-11-26-blaze-ui-unslop-design.md](2026-11-26-blaze-ui-unslop-design.md) kurallarına (Grafit + Blaze ember, 4px ızgara, 8px durum noktası, 16px sembolik ikon, cümle düzeni Türkçe, sıfır emoji, sıfır `(Polkit)` düğme etiketi, `1060x720` taşmasız düzen) %100 uyulur.
 
 ---
 
@@ -173,7 +173,7 @@ pub enum CompatPackageGroup {
 
 ## 5. Arayüz Tasarımı (`blaze-akrep-ui`)
 
-Tüm yeni bileşenler [2026-11-26-blaze-ui-unslop-design.md](file:///home/darkmorpheus/BlazeFedora/docs/superpowers/specs/2026-11-26-blaze-ui-unslop-design.md) kurallarına (Grafit + Blaze ember, tek birincil düğme, 4px ızgara, 8px durum noktası, 16px sembolik ikon, `changes-prevent-symbolic` ile sakin `Yönetici parolası istenir` notu, sıfır `(Polkit)`) uyar. Yeni sekme eklenmez (`nav_count: 10` değişmez).
+Tüm yeni bileşenler [2026-11-26-blaze-ui-unslop-design.md](2026-11-26-blaze-ui-unslop-design.md) kurallarına (Grafit + Blaze ember, tek birincil düğme, 4px ızgara, 8px durum noktası, 16px sembolik ikon, `changes-prevent-symbolic` ile sakin `Yönetici parolası istenir` notu, sıfır `(Polkit)`) uyar. Yeni sekme eklenmez (`nav_count: 10` değişmez).
 
 1. **Genel Bakış (`overview.rs`) ve Üst Çubuk (`header_banner.rs`):**
    - Herhangi bir koruma duraklatılmış veya `Permissive` moddaysa Genel Bakış üst kartının hemen altında sakin bir **Etkin gevşetmeler** kartı görünür: alt sistem adı, amber nokta, kalan süre veya `Elle açılana kadar` bilgisi ve satır başına `Etkinleştir` düğmesi.

@@ -46,6 +46,11 @@ if [ -x /usr/bin/blazeos-sync-identity ]; then
     /usr/bin/blazeos-sync-identity --force --quiet || :
 fi
 
+if [ "$dnf_status" -eq 0 ] && [ -f /var/lib/blazeos/bere-vault-needs-refresh ] && [ -x /usr/libexec/blazeos-provision-bere-vault ]; then
+    plymouth_call display-message --text="BERE zırhlı kurtarma kasası güncelleniyor…"
+    /usr/libexec/blazeos-provision-bere-vault --update-bere >/dev/null 2>&1 || :
+fi
+
 if [ "$dnf_status" -eq 0 ]; then
     plymouth_call system-update --progress=100
     plymouth_call display-message --text="Güncelleme tamamlandı. Sistem yeniden başlatılıyor…"

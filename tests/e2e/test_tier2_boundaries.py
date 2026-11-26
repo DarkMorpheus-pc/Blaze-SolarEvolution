@@ -118,7 +118,7 @@ class Tier2BoundaryAndNegativeTests(unittest.TestCase):
 
     def test_rpm_and_repomd_tamper_rejected(self):
         gpg_key = PACKAGING_REPO_DIR / "RPM-GPG-KEY-blaze"
-        orig_rpm = PACKAGING_REPO_DIR / "blaze-sentinel-0.3.1-2.blaze.x86_64.rpm"
+        orig_rpm = sorted(PACKAGING_REPO_DIR.glob("blaze-sentinel-*.rpm"))[-1]
         orig_repomd = PACKAGING_REPO_DIR / "repodata/repomd.xml"
         orig_asc = PACKAGING_REPO_DIR / "repodata/repomd.xml.asc"
 

@@ -595,9 +595,9 @@ def run_gate(iso_path: Path, keep_vm: bool = False) -> dict[str, Any]:
             results["screenshots"].append(str(desktop_png))
 
             # ================================================================
-            # GATE 1: Installed RPM Provenance (1.0.0-1.blaze) & SELinux Enforcing
+            # GATE 1: Installed RPM Provenance (1.0.0-2.blaze) & SELinux Enforcing
             # ================================================================
-            print("[GATE 1/10] Verifying RPM provenance (1.0.0-1.blaze), rpm -V (SEC-12), and SELinux=Enforcing...", flush=True)
+            print("[GATE 1/10] Verifying RPM provenance (1.0.0-2.blaze), rpm -V (SEC-12), and SELinux=Enforcing...", flush=True)
             g1 = vm.qga.run_shell(
                 "set -euo pipefail; "
                 "test \"$(getenforce)\" = \"Enforcing\"; "
@@ -605,9 +605,9 @@ def run_gate(iso_path: Path, keep_vm: bool = False) -> dict[str, Any]:
                 "systemctl is-active --quiet akrepd.service; "
                 "test \"$(ps -o user= -C akrepd | awk '{print $1; exit}')\" = \"akrep\"; "
                 "q_out=$(rpm -q --qf '%{NAME}-%{VERSION}-%{RELEASE}\\n' blaze-akrep blaze-akrep-daemon blaze-akrep-ui); "
-                "echo \"$q_out\" | grep -qx 'blaze-akrep-1.0.0-1.blaze'; "
-                "echo \"$q_out\" | grep -qx 'blaze-akrep-daemon-1.0.0-1.blaze'; "
-                "echo \"$q_out\" | grep -qx 'blaze-akrep-ui-1.0.0-1.blaze'; "
+                "echo \"$q_out\" | grep -qx 'blaze-akrep-1.0.0-2.blaze'; "
+                "echo \"$q_out\" | grep -qx 'blaze-akrep-daemon-1.0.0-2.blaze'; "
+                "echo \"$q_out\" | grep -qx 'blaze-akrep-ui-1.0.0-2.blaze'; "
                 "v_out=$(rpm -V blaze-akrep blaze-akrep-daemon blaze-akrep-ui); "
                 "test -z \"$v_out\"; "
                 "echo \"$q_out\"",

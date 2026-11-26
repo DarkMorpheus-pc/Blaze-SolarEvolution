@@ -1,0 +1,11 @@
+[Unit]
+Description=Check for Blaze SolarEvolution updates periodically
+
+[Timer]
+OnStartupSec=90s
+OnUnitActiveSec=6h
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

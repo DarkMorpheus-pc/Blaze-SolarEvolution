@@ -61,11 +61,12 @@ python3 "${BLAZEOS_ROOT:-$(pwd)}/packaging/check_ownership.py"
 if [ "${SKIP_RPM_BUILD:-0}" != "1" ]; then
     "${BLAZEOS_ROOT:-$(pwd)}/packaging/build-rpms.sh"
 fi
-BLAZE_RELEASE_RPM="${BLAZEOS_ROOT:-$(pwd)}/packaging/out/repo/blaze-release-5.05.1-1.blaze.noarch.rpm"
+BLAZE_RELEASE_RPM="$(ls -1 "${BLAZEOS_ROOT:-$(pwd)}"/packaging/out/repo/blaze-release-*.blaze.noarch.rpm 2>/dev/null | sort -V | tail -n1)"
 test -f "$BLAZE_RELEASE_RPM"
 bash -n \
     "$OVERLAY/usr/bin/blazeos-sync-identity" \
     "$OVERLAY/etc/kernel/install.d/05-blaze-identity.install" \
+    "$OVERLAY/etc/kernel/install.d/95-blaze-bere-vault.install" \
     "$OVERLAY/etc/kernel/install.d/99-zz-blaze-identity.install" \
     "$OVERLAY/usr/libexec/livesys/sessions.d/livesys-solarui" \
     "$OVERLAY/usr/libexec/blazeos-oobe-hygiene" \
@@ -84,7 +85,8 @@ bash -n \
     "$OVERLAY/usr/bin/blaze-recovery-gui-launcher" \
     "$OVERLAY/usr/libexec/blazeos-provision-bere-vault" \
     "$OVERLAY/usr/libexec/blaze-oobe-session" \
-    "$OVERLAY/usr/lib/dracut/modules.d/99blaze-bere/module-setup.sh"
+    "$OVERLAY/usr/lib/dracut/modules.d/99blaze-bere/module-setup.sh" \
+    "$OVERLAY/usr/lib/dracut/modules.d/99blaze-bere/blaze-bere-overlay-mount.sh"
 sh -n "$OVERLAY/etc/sddm/wayland-session" "$OVERLAY/usr/bin/blaze-death-screen" "$OVERLAY/etc/grub.d/09_berp" "$OVERLAY/etc/grub.d/99_berp"
 node --check "$OVERLAY/usr/share/cockpit/anaconda-webui/index.js"
 node --check "$OVERLAY/usr/share/berp-recovery/app.js"
@@ -93,6 +95,7 @@ grep -q 'spawn-at-startup "/usr/libexec/blazeos-wayland-session-ready"' "$OVERLA
 grep -q 'spawn-at-startup "/usr/libexec/blazeos-wayland-session-ready"' "$OVERLAY/etc/skel/.config/niri/config.kdl"
 grep -q 'spawn-at-startup "/usr/libexec/blazeos-wayland-session-ready"' "$OVERLAY/usr/share/solarui/niri.kdl"
 python3 -c 'compile(open("'"$OVERLAY/usr/bin/blaze-setup"'", encoding="utf-8").read(), "blaze-setup", "exec")'
+python3 -c 'compile(open("'"$OVERLAY/usr/libexec/blazeos-update-notifier"'", encoding="utf-8").read(), "blazeos-update-notifier", "exec")'
 python3 -c 'compile(open("'"$OVERLAY/usr/bin/berp-recovery-gui"'", encoding="utf-8").read(), "berp-recovery-gui", "exec")'
 python3 -c 'compile(open("'"$OVERLAY/usr/bin/blaze-style-center"'", encoding="utf-8").read(), "blaze-style-center", "exec")'
 python3 -c 'compile(open("'"$OVERLAY/usr/bin/blaze-gamezone-browser"'", encoding="utf-8").read(), "blaze-gamezone-browser", "exec")'
@@ -710,11 +713,14 @@ for bin_path in \
     "$ROOTFS/usr/bin/blazeos-remove-solarui" \
     "$ROOTFS/usr/bin/blazeos-sync-identity" \
     "$ROOTFS/etc/kernel/install.d/05-blaze-identity.install" \
+    "$ROOTFS/etc/kernel/install.d/95-blaze-bere-vault.install" \
     "$ROOTFS/etc/kernel/install.d/99-zz-blaze-identity.install" \
     "$ROOTFS/usr/libexec/blazeos-provision-bere-vault" \
+    "$ROOTFS/usr/libexec/blazeos-update-notifier" \
     "$ROOTFS/usr/libexec/blaze-oobe-session" \
     "$ROOTFS/usr/lib/dracut/modules.d/99blaze-bere/module-setup.sh" \
-    "$ROOTFS/usr/lib/dracut/modules.d/99blaze-bere/blaze-emergency-hook.sh"; do
+    "$ROOTFS/usr/lib/dracut/modules.d/99blaze-bere/blaze-emergency-hook.sh" \
+    "$ROOTFS/usr/lib/dracut/modules.d/99blaze-bere/blaze-bere-overlay-mount.sh"; do
     chmod 0755 "$bin_path" 2>/dev/null || true
     setfattr -n security.selinux -v "system_u:object_r:bin_t:s0" "$bin_path" 2>/dev/null || true
 done

@@ -33,7 +33,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Host Build Dependencies
-        run: dnf -y -q install rpm-build rpm-sign createrepo_c gnupg2 rpmlint python3 tar
+        run: dnf -y -q install rpm-build rpm-sign createrepo_c gnupg2 rpmlint python3 tar git
 
       - name: Import Release GPG Key or Ephemeral CI Check Key
         env:
@@ -64,46 +64,99 @@ jobs:
           export GNUPGHOME=/tmp/ci-gnupg
           mkdir -p /tmp/rpmbuild/{BUILD,RPMS,SRPMS,SOURCES} packaging/out/repo
           python3 - <<'PY'
-          import json, os, tarfile
+          import json, os, subprocess, sys
+          overlay = "blazeos_custom_apps"
+          dest = "/tmp/rpmbuild/SOURCES"
           with open("packaging/packages.json", encoding="utf-8") as f:
               pkgs = json.load(f)
+          built_specs = []
           for p in pkgs:
               name, ver = p["name"], p["ver"]
-              if name == "blaze-release":
-                  tar_path = f"/tmp/rpmbuild/SOURCES/{name}-{ver}.tar"
-                  with tarfile.open(tar_path, "w") as tf:
-                      for rel in p["files"]:
-                          src = "blazeos_custom_apps/" + rel.lstrip("/")
-                          tf.add(src, arcname=rel.lstrip("/"))
-          PY
-          for tar_dir_pkg in blaze-sentinel blaze-continuum blaze-recovery blaze-house blaze-tools solarui blaze-oobe; do
-            python3 - <<'PY' "$tar_dir_pkg"
-          import json, os, sys, tarfile
-          target = sys.argv[1]
-          with open("packaging/packages.json", encoding="utf-8") as f:
-              pkgs = {p["name"]: p for p in json.load(f)}
-          p = pkgs[target]
-          with tarfile.open(f"/tmp/rpmbuild/SOURCES/{p['name']}-{p['ver']}.tar", "w") as tf:
-              for rel in p["files"]:
-                  src = "blazeos_custom_apps/" + rel.lstrip("/")
-                  if os.path.exists(src):
-                      tf.add(src, arcname=rel.lstrip("/"))
+              paths = [rel.lstrip("/") for rel in p["files"]]
               if p.get("icons"):
-                  for sz in ("48x48", "scalable"):
-                      ip = f"blazeos_custom_apps/usr/share/icons/hicolor/{sz}/apps/{target}.svg"
-                      ip2 = f"blazeos_custom_apps/usr/share/icons/hicolor/{sz}/apps/{target}.png"
-                      for cand in (ip, ip2):
-                          if os.path.exists(cand):
-                              tf.add(cand, arcname=cand.removeprefix("blazeos_custom_apps/"))
+                  icons_root = os.path.join(overlay, "usr/share/icons/hicolor")
+                  if os.path.isdir(icons_root):
+                      for root, _, names in os.walk(icons_root):
+                          for n in names:
+                              if n == "blaze-house.png":
+                                  paths.append(os.path.relpath(os.path.join(root, n), overlay))
+              missing = [rel for rel in paths if not os.path.exists(os.path.join(overlay, rel))]
+              if missing:
+                  # opt/FireHub is gitignored on public GitHub checkouts; skip CI rebuild and carry forward signed RPM from gh-pages.
+                  if name == "blaze-firehub" and all(m == "opt/FireHub" for m in missing):
+                      print(f"Skipping {name} build on CI (gitignored opt/FireHub absent); will carry forward signed RPM if publishing.")
+                      continue
+                  sys.exit(f"FATAL: {name} missing tracked files in overlay: {missing}")
+              tar_path = os.path.join(dest, f"{name}-{ver}.tar")
+              subprocess.check_call([
+                  "tar", "-C", overlay, "--owner=0", "--group=0", "--numeric-owner",
+                  "--exclude=__pycache__", "--exclude=*.pyc", "--exclude=.env*",
+                  "--exclude=.git*", "--exclude=*.map", "--exclude=*.log",
+                  "-cf", tar_path,
+              ] + paths)
+              built_specs.append(f"packaging/specs/{name}.spec")
+              print(f"Staged {os.path.basename(tar_path)}")
+          with open("/tmp/rpmbuild/built_specs.txt", "w", encoding="utf-8") as out:
+              out.write("\n".join(built_specs) + "\n")
           PY
-          done
           cp -f packaging/blaze.repo packaging/keys/RPM-GPG-KEY-blaze /tmp/rpmbuild/SOURCES/
-          printf '%s\n' "%dist .blaze" "%_topdir /tmp/rpmbuild" "%_sourcedir /tmp/rpmbuild/SOURCES" "%_gpg_name $BLAZE_KEY_ID" "%_gpg_path /tmp/ci-gnupg" > ~/.rpmmacros
-          for spec in packaging/specs/*.spec; do rpmbuild -bb "$spec"; done
+          printf '%s\n' \
+            "%dist .blaze" \
+            "%_topdir /tmp/rpmbuild" \
+            "%_sourcedir /tmp/rpmbuild/SOURCES" \
+            "%_gpg_name $BLAZE_KEY_ID" \
+            "%_gpg_path /tmp/ci-gnupg" > ~/.rpmmacros
+          while IFS= read -r spec; do
+            [ -n "$spec" ] || continue
+            rpmbuild -bb "$spec"
+          done < /tmp/rpmbuild/built_specs.txt
           find /tmp/rpmbuild/RPMS -name "*.rpm" -exec cp {} packaging/out/repo/ \;
-          rpmsign --addsign packaging/out/repo/*.rpm
+          if [ -n "${BLAZE_GPG_PASSPHRASE:-}" ]; then
+            printf '%s\n' '%__gpg_sign_cmd %{__gpg} gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --no-armor --no-secmem-warning -u "%{_gpg_name}" -sbo %{__signature_filename} %{__plaintext_filename}' >> ~/.rpmmacros
+            exec 3<<<"$BLAZE_GPG_PASSPHRASE"
+            rpmsign --addsign packaging/out/repo/*.rpm
+            exec 3<&-
+          else
+            rpmsign --addsign packaging/out/repo/*.rpm
+          fi
+
+          # Carry forward signed blaze-firehub RPM from existing gh-pages ONLY after verifying EdDSA signature against pinned key
+          if [ "$CAN_PUBLISH" = "true" ] && ! ls packaging/out/repo/blaze-firehub-*.rpm >/dev/null 2>&1; then
+            if git fetch --depth=1 origin gh-pages 2>/dev/null; then
+              mkdir -p /tmp/gh-carry
+              if git archive origin/gh-pages repo | tar -x -C /tmp/gh-carry 2>/dev/null; then
+                rpm --import packaging/keys/RPM-GPG-KEY-blaze
+                for fh_rpm in /tmp/gh-carry/repo/blaze-firehub-*.rpm; do
+                  [ -f "$fh_rpm" ] || continue
+                  if rpm -K "$fh_rpm" | grep -q "digests signatures OK"; then
+                    sig="$(rpm -qp --qf '%{OPENPGP:pgpsig}|%{SIGPGP:pgpsig}' "$fh_rpm")"
+                    if [ "$sig" != "(none)|(none)" ]; then
+                      cp -f "$fh_rpm" packaging/out/repo/
+                      echo "Carried forward verified signed $(basename "$fh_rpm")"
+                    fi
+                  fi
+                done
+              fi
+            fi
+          fi
+
+          # Mandatory EdDSA signature verification gate (zero unsigned RPMs permitted)
+          rpm --import packaging/keys/RPM-GPG-KEY-blaze
+          for rpm_file in packaging/out/repo/*.rpm; do
+            rpm -K "$rpm_file" | grep -q "digests signatures OK" || { echo "FATAL: signature verify failed: $rpm_file" >&2; exit 1; }
+            sig="$(rpm -qp --qf '%{OPENPGP:pgpsig}|%{SIGPGP:pgpsig}|%{RSAHEADER:pgpsig}|%{DSAHEADER:pgpsig}' "$rpm_file")"
+            if [ "$sig" = "(none)|(none)|(none)|(none)" ]; then
+              echo "FATAL: unsigned RPM detected: $rpm_file" >&2
+              exit 1
+            fi
+          done
+
           createrepo_c -q packaging/out/repo
-          gpg --batch --yes --pinentry-mode loopback -u "$BLAZE_KEY_ID" --detach-sign --armor packaging/out/repo/repodata/repomd.xml
+          if [ -n "${BLAZE_GPG_PASSPHRASE:-}" ]; then
+            printf '%s\n' "$BLAZE_GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 -u "$BLAZE_KEY_ID" --detach-sign --armor packaging/out/repo/repodata/repomd.xml
+          else
+            gpg --batch --yes --pinentry-mode loopback -u "$BLAZE_KEY_ID" --detach-sign --armor packaging/out/repo/repodata/repomd.xml
+          fi
           cp -f packaging/keys/RPM-GPG-KEY-blaze packaging/out/repo/RPM-GPG-KEY-blaze
 
       - name: Publish to gh-pages if Release Secret Present

@@ -1,6 +1,6 @@
 Name:           blaze-release
 Version:        5.05.1
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Blaze repository definition, GPG key and OS identity guard
 License:        GPL-3.0-or-later
 URL:            https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
@@ -11,6 +11,9 @@ Source2:        %{name}-%{version}.tar
 Requires:       coreutils
 Requires:       gawk
 Requires:       grep
+Recommends:     blaze-akrep
+Recommends:     solarui-config
+Recommends:     blaze-scap-compat
 
 %description
 Installs the Blaze package repository definition, the public GPG signing key,
@@ -79,6 +82,9 @@ fi
 /etc/blazeos/update-channel.conf
 
 %changelog
+* Thu Nov 26 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-2
+- Recommend blaze-akrep, solarui-config, and blaze-scap-compat for seamless in-place upgrades from 5.05
+
 * Tue Nov 24 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-1
 - Bump SolarEvolution identity to 5.05.1 with BLAZE_BASE_ID=fedora and BLAZE_BASE_VERSION_ID=45
 

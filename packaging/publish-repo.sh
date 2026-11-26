@@ -14,6 +14,11 @@ shopt -s nullglob
 rpms=("$REPO_DIR"/*.rpm)
 [ "${#rpms[@]}" -gt 0 ] || { echo "no RPM packages found in $REPO_DIR" >&2; exit 1; }
 for rpm_file in "${rpms[@]}"; do
+  size_bytes="$(stat -c '%s' "$rpm_file")"
+  if [ "$size_bytes" -ge 104857600 ]; then
+    echo "FATAL: RPM exceeds GitHub 100 MiB file limit ($size_bytes bytes): $rpm_file" >&2
+    exit 1
+  fi
   sig="$(rpm -qp --qf '%{OPENPGP:pgpsig}|%{SIGPGP:pgpsig}|%{RSAHEADER:pgpsig}|%{DSAHEADER:pgpsig}' "$rpm_file" 2>/dev/null || echo '(none)|(none)|(none)|(none)')"
   if [ "$sig" = "(none)|(none)|(none)|(none)" ] || [ -z "$sig" ]; then
     echo "FATAL: refusing to publish unsigned RPM: $rpm_file" >&2
@@ -26,7 +31,7 @@ trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/repo"
 cp -a "$REPO_DIR/." "$TMP/repo/"
 python3 - <<'PY' "$TMP/repo"
-import json, os, subprocess, sys
+import datetime, json, os, subprocess, sys
 repo_dir = sys.argv[1]
 pkgs = {}
 for fn in sorted(os.listdir(repo_dir)):
@@ -40,12 +45,27 @@ for fn in sorted(os.listdir(repo_dir)):
     if "\t" in out:
         name, vr = out.split("\t", 1)
         pkgs[name] = vr
+core_packages = [
+    p for p in (
+        "blaze-release",
+        "blaze-akrep",
+        "solarui",
+        "solarui-config",
+        "blaze-recovery",
+        "blaze-tools",
+        "blaze-sentinel",
+        "blaze-scap-compat",
+    )
+    if p in pkgs
+]
 manifest = {
     "product": "Blaze SolarEvolution",
     "series": "5.05.1",
     "base_fedora": "45",
+    "published_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "repo_url": "https://darkmorpheus-pc.github.io/Blaze-SolarEvolution/repo/",
     "github_repo": "DarkMorpheus-pc/Blaze-SolarEvolution",
+    "core_packages": core_packages,
     "packages": pkgs,
     "upgrade_target": None,
 }

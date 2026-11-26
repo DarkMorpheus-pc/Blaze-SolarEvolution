@@ -998,6 +998,189 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
                 mod.subprocess.check_output = orig_co
                 mod.os.path.exists = orig_exists
 
+    def test_ota_update_notifier_ci_and_bere_armored_vault_self_update(self):
+        import hashlib as _hl
+        import importlib.util
+        import json as _json
+
+        # 1. Shell syntax check on all OTA and BERE vault scripts
+        for rel_sh in (
+            OVERLAY / 'usr/libexec/blazeos-provision-bere-vault',
+            OVERLAY / 'usr/libexec/blazeos-offline-update',
+            OVERLAY / 'usr/lib/dracut/modules.d/99blaze-bere/module-setup.sh',
+            OVERLAY / 'usr/lib/dracut/modules.d/99blaze-bere/blaze-bere-overlay-mount.sh',
+            OVERLAY / 'etc/kernel/install.d/95-blaze-bere-vault.install',
+            ROOT / 'packaging/publish-repo.sh',
+        ):
+            chk = subprocess.run(['bash', '-n', str(rel_sh)], capture_output=True, text=True)
+            self.assertEqual(chk.returncode, 0, f'bash -n failed for {rel_sh}: {chk.stderr}')
+
+        # 2. BERE armored vault self-update security invariants (zero eval, RPMDB SHA-256, flock, RO relock trap)
+        prov_sh = (OVERLAY / 'usr/libexec/blazeos-provision-bere-vault').read_text(encoding='utf-8')
+        self.assertNotIn('eval ', prov_sh)
+        for marker in (
+            '--update-bere',
+            'flock -w 60 9',
+            'rpm", "-q", "--dump", "blaze-recovery"',
+            'trap cleanup_update_bere EXIT INT TERM',
+            'bere-overlay.sqsh',
+            'relock_vault_device',
+            'overlay_hook_v1',
+        ):
+            self.assertIn(marker, prov_sh)
+
+        # 3. Dracut pre-pivot BERE overlay hook invariants (recovery-only cmdline, fail-closed SHA-256, ro,nosuid,nodev)
+        hook_sh = (OVERLAY / 'usr/lib/dracut/modules.d/99blaze-bere/blaze-bere-overlay-mount.sh').read_text(encoding='utf-8')
+        for marker in (
+            'systemd.unit=blaze-recovery-gui.target',
+            'systemd.unit=blaze-recovery.target',
+            'bere_overlay',
+            'sha256sum',
+            'ro,nosuid,nodev',
+            'remount,ro,bind,nosuid,nodev',
+        ):
+            self.assertIn(marker, hook_sh)
+
+        mod_setup = (OVERLAY / 'usr/lib/dracut/modules.d/99blaze-bere/module-setup.sh').read_text(encoding='utf-8')
+        self.assertIn('inst_hook pre-pivot 50 "${moddir}/blaze-bere-overlay-mount.sh"', mod_setup)
+
+        # 4. Fail-closed bere_overlay SHA-256 verification inside inspect_blaze_rec_vault
+        from importlib.machinery import SourceFileLoader
+        berp_mod = SourceFileLoader('berp_gui_ov_test', str(OVERLAY / 'usr/bin/berp-recovery-gui')).load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            (t / 'LiveOS').mkdir()
+            (t / 'boot').mkdir()
+            (t / 'LiveOS/squashfs.img').write_bytes(b'factory-squash')
+            (t / 'LiveOS/bere-overlay.sqsh').write_bytes(b'overlay-v2')
+            (t / 'boot/vmlinuz-bere').write_bytes(b'vmlinuz-v2')
+            (t / 'boot/initrd-bere.img').write_bytes(b'initrd-v2')
+            manifest = {
+                'label': 'BLAZE_REC',
+                'mode': 'full',
+                'full_os_embedded': True,
+                'overlay_hook_v1': True,
+                'bere_version': '5.05.1-2.blaze',
+                'sha256': {
+                    'squashfs': _hl.sha256(b'factory-squash').hexdigest(),
+                    'vmlinuz': _hl.sha256(b'vmlinuz-v2').hexdigest(),
+                    'initrd': _hl.sha256(b'initrd-v2').hexdigest(),
+                    'bere_overlay': _hl.sha256(b'overlay-v2').hexdigest(),
+                },
+            }
+            (t / 'BLAZE_RECOVERY_VAULT.json').write_text(_json.dumps(manifest), encoding='utf-8')
+
+            orig_co = berp_mod.subprocess.check_output
+            orig_exists = berp_mod.os.path.exists
+            try:
+                def fake_co(cmd, *a, **kw):
+                    if cmd[:2] == ['blkid', '-L']:
+                        return '/dev/fakevault2\n'
+                    if cmd[:3] == ['blkid', '-s', 'UUID']:
+                        return 'cafe-babe\n'
+                    if cmd[:2] == ['findmnt', '-n']:
+                        return f'{t}\n'
+                    return orig_co(cmd, *a, **kw)
+
+                berp_mod.subprocess.check_output = fake_co
+                berp_mod.os.path.exists = lambda p: True if p == '/dev/fakevault2' else orig_exists(p)
+
+                ok = berp_mod.inspect_blaze_rec_vault(verify_hashes=True)
+                self.assertTrue(ok['hash_verified'])
+                self.assertTrue(ok['bere_overlay_present'])
+                self.assertEqual(ok['bere_version'], '5.05.1-2.blaze')
+                self.assertIsNone(ok['tamper_error'])
+
+                # Tamper bere-overlay.sqsh -> must fail closed
+                (t / 'LiveOS/bere-overlay.sqsh').write_bytes(b'evil-overlay')
+                bad_ov = berp_mod.inspect_blaze_rec_vault(verify_hashes=True)
+                self.assertFalse(bad_ov['hash_verified'])
+                self.assertIsNotNone(bad_ov['tamper_error'])
+                self.assertIn('bere_overlay', bad_ov['tamper_error'])
+
+                # Missing bere_overlay digest when file exists -> must fail closed
+                manifest['sha256'].pop('bere_overlay')
+                (t / 'BLAZE_RECOVERY_VAULT.json').write_text(_json.dumps(manifest), encoding='utf-8')
+                missing_sha = berp_mod.inspect_blaze_rec_vault(verify_hashes=True)
+                self.assertFalse(missing_sha['hash_verified'])
+                self.assertIsNotNone(missing_sha['tamper_error'])
+                self.assertIn('eksik', missing_sha['tamper_error'])
+            finally:
+                berp_mod.subprocess.check_output = orig_co
+                berp_mod.os.path.exists = orig_exists
+
+        # 5. Functional unit tests for unprivileged blazeos-update-notifier
+        notifier_path = OVERLAY / 'usr/libexec/blazeos-update-notifier'
+        loader = SourceFileLoader('blazeos_update_notifier_mod', str(notifier_path))
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        notif = importlib.util.module_from_spec(spec)
+        loader.exec_module(notif)
+
+        # HTTPS enforcement
+        self.assertEqual(
+            notif.validate_manifest_url('https://darkmorpheus-pc.github.io/Blaze-SolarEvolution/repo/channel.json'),
+            'https://darkmorpheus-pc.github.io/Blaze-SolarEvolution/repo/channel.json',
+        )
+        with self.assertRaises(ValueError):
+            notif.validate_manifest_url('http://darkmorpheus-pc.github.io/repo/channel.json')
+        with self.assertRaises(ValueError):
+            notif.validate_manifest_url('file:///etc/passwd')
+        self.assertEqual(
+            notif.validate_manifest_url('http://127.0.0.1:8080/channel.json', allow_local_test_url=True),
+            'http://127.0.0.1:8080/channel.json',
+        )
+
+        # EVR comparisons
+        self.assertLess(notif.compare_evr('5.05-1.blaze', '5.05.1-2.blaze'), 0)
+        self.assertLess(notif.compare_evr('5.05.1-1.blaze', '5.05.1-2.blaze'), 0)
+        self.assertLess(notif.compare_evr('0.3.1-2.blaze', '0.3.1-3.blaze'), 0)
+        self.assertEqual(notif.compare_evr('1.0.0-2.blaze', '1.0.0-2.blaze'), 0)
+        self.assertLess(notif.compare_evr('5.06~rc1-1.blaze', '5.06-1.blaze'), 0)
+
+        # Evaluate 5.05 -> 5.05.1-2 upgrades + missing new core packages + dedup state 0600
+        ev = notif.evaluate_updates(
+            {
+                'series': '5.05.1',
+                'core_packages': ['blaze-release', 'blaze-akrep', 'solarui-config', 'blaze-scap-compat'],
+                'packages': {
+                    'blaze-release': '5.05.1-2.blaze',
+                    'solarui': '5.05.1-2.blaze',
+                    'blaze-akrep': '1.0.0-2.blaze',
+                    'solarui-config': '5.05.1-2.blaze',
+                    'blaze-scap-compat': '5.05.1-1.blaze',
+                },
+                'upgrade_target': None,
+            },
+            installed={'blaze-release': '5.05-3.blaze', 'solarui': '5.05-1.blaze'},
+            current_releasever='45',
+        )
+        self.assertTrue(ev['has_updates'])
+        self.assertEqual({u['name'] for u in ev['upgrades']}, {'blaze-release', 'solarui'})
+        self.assertEqual({m['name'] for m in ev['missing_core']}, {'blaze-akrep', 'solarui-config', 'blaze-scap-compat'})
+
+        with tempfile.TemporaryDirectory() as tmp:
+            st_file = Path(tmp) / 'blazeos' / 'last-notified-update.json'
+            notif.save_last_fingerprint(st_file, ev['fingerprint'], 'test')
+            self.assertEqual(os.stat(st_file).st_mode & 0o777, 0o600)
+            self.assertEqual(notif.load_last_fingerprint(st_file), ev['fingerprint'])
+
+        # 6. GitHub workflow and blaze-release upgrade pull-in invariants
+        wf = (ROOT / '.github/workflows/release-repo.yml').read_text(encoding='utf-8')
+        for marker in ('packaging/packages.json', 'blaze-firehub', 'digests signatures OK', '%{OPENPGP:pgpsig}', 'publish-repo.sh'):
+            self.assertIn(marker, wf)
+
+        rel_spec = (ROOT / 'packaging/specs/blaze-release.spec').read_text(encoding='utf-8')
+        for rec in ('Recommends:     blaze-akrep', 'Recommends:     solarui-config', 'Recommends:     blaze-scap-compat'):
+            self.assertIn(rec, rel_spec)
+
+        rec_spec = (ROOT / 'packaging/specs/blaze-recovery.spec').read_text(encoding='utf-8')
+        self.assertIn('%posttrans', rec_spec)
+        self.assertIn('blazeos-bere-vault-refresh.service', rec_spec)
+
+        off_sh = (OVERLAY / 'usr/libexec/blazeos-offline-update').read_text(encoding='utf-8')
+        self.assertIn('bere-vault-needs-refresh', off_sh)
+        self.assertIn('--update-bere', off_sh)
+
     def test_ventoy_initrd_and_live_nvidia_compatibility(self):
         patch_sh = (ROOT / 'scripts/patch_f45_initrd.sh').read_text(encoding='utf-8')
         self.assertRegex(patch_sh, r'BASE_DISTRO=.*Fedora Linux 45')

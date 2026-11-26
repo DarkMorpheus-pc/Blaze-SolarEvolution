@@ -4,7 +4,7 @@
 # Binary repack of artefacts built from the repositories listed in SOURCES.md
 Name:           blaze-tools
 Version:        5.05.1
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        BlazeOS helper tools and installers
 License:        GPL-3.0-or-later
 URL:            https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
@@ -46,6 +46,7 @@ rm -f %{buildroot}/%{name}-%{version}.tar
 %attr(0755,root,root) /usr/libexec/blazeos-offline-progress-filter
 %attr(0755,root,root) /usr/libexec/blazeos-offline-update
 %attr(0755,root,root) /usr/libexec/blazeos-update
+%attr(0755,root,root) /usr/libexec/blazeos-update-notifier
 %attr(0755,root,root) /usr/libexec/blazeos-wayland-session-ready
 %attr(0755,root,root) /usr/libexec/blazeos-welcome-helper
 %attr(0755,root,root) /usr/libexec/livesys/sessions.d/livesys-solarui
@@ -53,6 +54,8 @@ rm -f %{buildroot}/%{name}-%{version}.tar
 /etc/dnf/libdnf5-plugins/actions.d/blaze-snapshot.actions
 
 %changelog
+* Thu Nov 26 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-2
+- Ship unprivileged BlazeHouse desktop update notifier and trigger armored BERE vault refresh during offline updates
 * Tue Nov 24 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-1
 - Complete ownership of Blaze libexec helpers, livesys session hook, and udev I/O scheduler rules
 * Mon Oct 26 2026 Blaze Release <release@blazeos.com.tr> - 5.05-1

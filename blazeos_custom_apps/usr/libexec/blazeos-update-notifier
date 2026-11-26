@@ -1,0 +1,423 @@
+#!/usr/bin/env python3
+"""Unprivileged BlazeHouse desktop update notifier for Blaze SolarEvolution.
+
+Periodically fetches the signed GitHub Pages channel.json manifest over HTTPS,
+compares package EVR versions against locally installed RPMs, and shows a single
+deduplicated interactive desktop notification per release offering to open
+BlazeHouse. Never runs privileged commands and never auto-installs packages.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from typing import Any
+
+CHANNEL_CONF_PATH = Path("/etc/blazeos/update-channel.conf")
+MAX_MANIFEST_BYTES = 262144
+DEFAULT_CHANNEL_URL = "https://darkmorpheus-pc.github.io/Blaze-SolarEvolution/repo/channel.json"
+
+
+def is_live_iso() -> bool:
+    if Path("/run/initramfs/live").exists() or Path("/dev/mapper/live-base").exists():
+        return True
+    try:
+        cmdline = Path("/proc/cmdline").read_text(encoding="utf-8", errors="ignore")
+        return "rd.live.image" in cmdline
+    except OSError:
+        return False
+
+
+def parse_kv_conf(text: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or line.startswith("["):
+            continue
+        if "=" in line:
+            k, v = line.split("=", 1)
+            out[k.strip()] = v.strip().strip('"')
+    return out
+
+
+def validate_manifest_url(url: str, allow_local_test_url: bool = False) -> str:
+    cleaned = url.strip()
+    if not cleaned or any(ch.isspace() or ord(ch) < 32 for ch in cleaned):
+        raise ValueError("Invalid whitespace or control characters in manifest URL")
+    if cleaned.startswith("https://"):
+        return cleaned
+    if allow_local_test_url and cleaned.startswith("http://127.0.0.1:"):
+        return cleaned
+    raise ValueError(f"Refusing non-HTTPS manifest URL: {cleaned}")
+
+
+def _split_rpm_segments(s: str) -> list[tuple[int, str]]:
+    """Split version string into RPM-comparable segments (tilde, caret, int, alpha)."""
+    segs: list[tuple[int, str]] = []
+    i = 0
+    n = len(s)
+    while i < n:
+        ch = s[i]
+        if ch == "~":
+            segs.append((-1, "~"))
+            i += 1
+        elif ch == "^":
+            segs.append((0, "^"))
+            i += 1
+        elif ch.isdigit():
+            j = i
+            while j < n and s[j].isdigit():
+                j += 1
+            segs.append((2, s[i:j].lstrip("0") or "0"))
+            i = j
+        elif ch.isalpha():
+            j = i
+            while j < n and s[j].isalpha():
+                j += 1
+            segs.append((1, s[i:j]))
+            i = j
+        else:
+            i += 1
+    return segs
+
+
+def rpm_vercmp_part(a: str, b: str) -> int:
+    if a == b:
+        return 0
+    sa = _split_rpm_segments(a)
+    sb = _split_rpm_segments(b)
+    for (ta, va), (tb, vb) in zip(sa, sb):
+        if ta != tb:
+            return -1 if ta < tb else 1
+        if ta == 2:
+            if len(va) != len(vb):
+                return -1 if len(va) < len(vb) else 1
+        if va != vb:
+            return -1 if va < vb else 1
+    if len(sa) == len(sb):
+        return 0
+    if len(sa) < len(sb):
+        next_type = sb[len(sa)][0]
+        return 1 if next_type == -1 else -1
+    next_type = sa[len(sb)][0]
+    return -1 if next_type == -1 else 1
+
+
+def split_evr(evr: str) -> tuple[str, str, str]:
+    raw = evr.strip()
+    epoch = "0"
+    if ":" in raw:
+        e_part, raw = raw.split(":", 1)
+        if e_part.isdigit():
+            epoch = e_part
+    if "-" in raw:
+        ver, rel = raw.rsplit("-", 1)
+    else:
+        ver, rel = raw, ""
+    return (epoch, ver, rel)
+
+
+def compare_evr(left: str, right: str) -> int:
+    """Return -1 if left < right, 0 if equal, +1 if left > right (RPM EVR semantics)."""
+    try:
+        import rpm  # type: ignore
+
+        return int(rpm.labelCompare(split_evr(left), split_evr(right)))
+    except Exception:
+        e1, v1, r1 = split_evr(left)
+        e2, v2, r2 = split_evr(right)
+        if int(e1) != int(e2):
+            return -1 if int(e1) < int(e2) else 1
+        cv = rpm_vercmp_part(v1, v2)
+        if cv != 0:
+            return cv
+        return rpm_vercmp_part(r1, r2)
+
+
+def fetch_manifest(url: str, allow_local_test_url: bool = False) -> dict[str, Any]:
+    safe_url = validate_manifest_url(url, allow_local_test_url=allow_local_test_url)
+    curl_cmd = [
+        "/usr/bin/curl",
+        "-fsSL",
+        "--max-time",
+        "8",
+        "--max-filesize",
+        str(MAX_MANIFEST_BYTES),
+        "-A",
+        "BlazeHouse-Notifier/5.05.1",
+    ]
+    if safe_url.startswith("https://"):
+        curl_cmd.extend(["--proto", "=https", "--tlsv1.2"])
+    curl_cmd.extend(["--", safe_url])
+
+    proc = subprocess.run(curl_cmd, capture_output=True, timeout=12)
+    if proc.returncode != 0:
+        raise RuntimeError(f"curl failed ({proc.returncode}): {proc.stderr.decode('utf-8', errors='replace').strip()}")
+    if len(proc.stdout) > MAX_MANIFEST_BYTES:
+        raise ValueError("Remote channel.json exceeded maximum allowed size")
+    data = json.loads(proc.stdout.decode("utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("channel.json root must be a JSON object")
+    return data
+
+
+def query_installed_rpms(pkg_names: list[str]) -> dict[str, str]:
+    installed: dict[str, str] = {}
+    valid_names = [p for p in pkg_names if re.fullmatch(r"[A-Za-z0-9._+-]+", p)]
+    if not valid_names:
+        return installed
+    proc = subprocess.run(
+        ["/usr/bin/rpm", "-q", "--qf", "%{NAME}\t%{VERSION}-%{RELEASE}\n", *valid_names],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    for line in proc.stdout.splitlines():
+        if "\t" in line:
+            name, vr = line.split("\t", 1)
+            name = name.strip()
+            vr = vr.strip()
+            if name and vr and "is not installed" not in line:
+                installed[name] = vr
+    return installed
+
+
+def evaluate_updates(
+    manifest: dict[str, Any],
+    installed: dict[str, str],
+    current_releasever: str,
+) -> dict[str, Any]:
+    remote_pkgs = manifest.get("packages") or {}
+    if not isinstance(remote_pkgs, dict):
+        remote_pkgs = {}
+
+    upgrades: list[dict[str, str]] = []
+    for pkg, remote_vr in sorted(remote_pkgs.items()):
+        if not isinstance(pkg, str) or not isinstance(remote_vr, str):
+            continue
+        local_vr = installed.get(pkg)
+        if local_vr and compare_evr(local_vr, remote_vr) < 0:
+            upgrades.append({"name": pkg, "current": local_vr, "available": remote_vr})
+
+    missing_core: list[dict[str, str]] = []
+    core_pkgs = manifest.get("core_packages") or []
+    if "blaze-release" in installed and isinstance(core_pkgs, list):
+        for pkg in core_pkgs:
+            if isinstance(pkg, str) and pkg in remote_pkgs and pkg not in installed:
+                missing_core.append({"name": pkg, "available": str(remote_pkgs[pkg])})
+
+    major_upgrade: dict[str, str] | None = None
+    ut = manifest.get("upgrade_target")
+    if isinstance(ut, dict) and bool(ut.get("ready")):
+        target_ver = str(ut.get("target_releasever") or "").strip()
+        if target_ver.isdigit() and current_releasever.isdigit() and int(target_ver) > int(current_releasever):
+            major_upgrade = {
+                "series": str(ut.get("series") or target_ver),
+                "target_releasever": target_ver,
+                "notes": str(ut.get("notes") or ""),
+            }
+
+    fp_payload = json.dumps(
+        {
+            "series": manifest.get("series"),
+            "upgrades": upgrades,
+            "missing_core": missing_core,
+            "major_upgrade": major_upgrade,
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+    fingerprint = hashlib.sha256(fp_payload.encode("utf-8")).hexdigest()
+    return {
+        "has_updates": bool(upgrades or missing_core or major_upgrade),
+        "series": str(manifest.get("series") or ""),
+        "upgrades": upgrades,
+        "missing_core": missing_core,
+        "major_upgrade": major_upgrade,
+        "fingerprint": fingerprint,
+    }
+
+
+def cache_state_path() -> Path:
+    xdg_cache = os.environ.get("XDG_CACHE_HOME", "").strip()
+    base = Path(xdg_cache) if xdg_cache else (Path.home() / ".cache")
+    return base / "blazeos" / "last-notified-update.json"
+
+
+def load_last_fingerprint(path: Path) -> str:
+    try:
+        if path.is_symlink() or not path.is_file():
+            return ""
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return str(data.get("fingerprint") or "")
+    except Exception:
+        return ""
+
+
+def save_last_fingerprint(path: Path, fingerprint: str, summary: str) -> None:
+    if path.is_symlink():
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    os.chmod(path.parent, 0o700)
+    fd, tmp_name = tempfile.mkstemp(prefix=".upd-", dir=str(path.parent))
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump({"fingerprint": fingerprint, "summary": summary}, fh, ensure_ascii=False, indent=2)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_name, path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def format_notification_text(result: dict[str, Any], is_tr: bool) -> tuple[str, str, str]:
+    up_count = len(result["upgrades"])
+    new_count = len(result["missing_core"])
+    major = result["major_upgrade"]
+    series = result.get("series") or "Blaze SolarEvolution"
+
+    if major:
+        if is_tr:
+            title = f"Blaze SolarEvolution {major['series']} yükseltmesi hazır"
+            body = f"Taban sürüm {major['target_releasever']} için formatsız yükseltme BlazeHouse üzerinden kullanılabilir."
+            action_lbl = "BlazeHouse'u Aç"
+        else:
+            title = f"Blaze SolarEvolution {major['series']} upgrade available"
+            body = f"In-place upgrade to base release {major['target_releasever']} is ready in BlazeHouse."
+            action_lbl = "Open BlazeHouse"
+        return (title, body, action_lbl)
+
+    total = up_count + new_count
+    if is_tr:
+        title = f"Yeni Blaze SolarEvolution ({series}) güncellemesi hazır"
+        parts = []
+        if up_count:
+            parts.append(f"{up_count} paket güncellemesi")
+        if new_count:
+            parts.append(f"{new_count} yeni sistem bileşeni")
+        detail = " ve ".join(parts) if parts else f"{total} güncelleme"
+        body = f"{detail} bulundu. Format atmadan yüklemek için BlazeHouse'u açın."
+        action_lbl = "BlazeHouse'u Aç"
+    else:
+        title = f"Blaze SolarEvolution ({series}) update available"
+        body = f"{total} update(s) found. Open BlazeHouse to install cleanly without reinstalling."
+        action_lbl = "Open BlazeHouse"
+    return (title, body, action_lbl)
+
+
+def send_desktop_notification(title: str, body: str, action_lbl: str, dry_run: bool = False) -> bool:
+    if dry_run:
+        print(f"[DRY-RUN] {title} :: {body}")
+        return True
+    notify_bin = shutil.which("notify-send")
+    if not notify_bin:
+        return False
+    cmd = [
+        notify_bin,
+        "-a",
+        "BlazeHouse",
+        "-i",
+        "blaze-house",
+        "-u",
+        "normal",
+        "--action",
+        f"open={action_lbl}",
+        "--",
+        title,
+        body,
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if proc.stdout.strip() == "open" and Path("/usr/bin/blaze-house").is_file():
+            subprocess.Popen(
+                ["/usr/bin/blaze-house"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        return proc.returncode == 0
+    except subprocess.TimeoutExpired:
+        return True
+    except OSError:
+        return False
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="BlazeHouse desktop update notifier")
+    parser.add_argument("--channel-conf", type=Path, default=CHANNEL_CONF_PATH)
+    parser.add_argument("--manifest-url", type=str, default=None)
+    parser.add_argument("--allow-local-test-url", action="store_true")
+    parser.add_argument("--force-live", action="store_true")
+    parser.add_argument("--force-notify", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+
+    if not args.force_live and is_live_iso():
+        return 0
+
+    conf: dict[str, str] = {}
+    if args.channel_conf.is_file():
+        conf = parse_kv_conf(args.channel_conf.read_text(encoding="utf-8", errors="ignore"))
+
+    manifest_url = args.manifest_url or conf.get("repo_manifest_url") or DEFAULT_CHANNEL_URL
+    current_releasever = conf.get("current_releasever") or "45"
+
+    try:
+        manifest = fetch_manifest(manifest_url, allow_local_test_url=args.allow_local_test_url)
+    except Exception as exc:
+        if args.json:
+            print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+        return 0
+
+    remote_pkgs = list((manifest.get("packages") or {}).keys())
+    if "blaze-release" not in remote_pkgs:
+        remote_pkgs.append("blaze-release")
+    installed = query_installed_rpms(remote_pkgs)
+    result = evaluate_updates(manifest, installed, current_releasever)
+
+    state_path = cache_state_path()
+    last_fp = load_last_fingerprint(state_path)
+    should_notify = result["has_updates"] and (args.force_notify or result["fingerprint"] != last_fp)
+
+    notified = False
+    is_tr = os.environ.get("LC_ALL", os.environ.get("LANG", "tr_TR.UTF-8")).lower().startswith("tr")
+    if should_notify:
+        title, body, action_lbl = format_notification_text(result, is_tr=is_tr)
+        notified = send_desktop_notification(title, body, action_lbl, dry_run=args.dry_run)
+        if notified:
+            save_last_fingerprint(state_path, result["fingerprint"], title)
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "has_updates": result["has_updates"],
+                    "notified": notified,
+                    "deduplicated": bool(result["has_updates"] and not should_notify),
+                    "upgrades": result["upgrades"],
+                    "missing_core": result["missing_core"],
+                    "major_upgrade": result["major_upgrade"],
+                },
+                ensure_ascii=False,
+            )
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

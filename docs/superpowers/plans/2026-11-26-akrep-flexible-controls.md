@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust (`tokio`, `zbus`, `serde`, `gtk4`), systemd transient timers (`systemd-run`), Polkit XML, Fedora 45 RPM/DNF5 (`build-rpms.sh`), QEMU/KVM (`tests.e2e.run_e2e` + live UEFI visual check).
 
-**Spec:** [2026-11-26-akrep-flexible-controls-design.md](file:///home/darkmorpheus/BlazeFedora/docs/superpowers/specs/2026-11-26-akrep-flexible-controls-design.md)
+**Spec:** [2026-11-26-akrep-flexible-controls-design.md](../specs/2026-11-26-akrep-flexible-controls-design.md)
 
 ## Global Constraints
 
@@ -16,7 +16,7 @@
 - `SELINUX=disabled`, `audit2allow`, `semodule`, global Flatpak overrides (`global`), blanket `filesystem=host`/`/`/`/etc`, `devices=all`, and sandbox-escape D-Bus policies remain strictly forbidden.
 - `blaze-akrep-daemon` (`akrepd`) remains 100% read-only (`User=akrep`, `ProtectSystem=strict`, zero `gtk4` deps, zero mutator methods, `<250ms` snapshot budget, never wakes `akrep-privd` during browsing).
 - `blaze-akrep-privd` keeps `--idle-timeout-secs 60` (`0 MiB RSS` at idle) and requires `CreatePlan` -> `present_plan_preview_dialog` -> `CommitPlan` + Polkit (`auth_admin_keep`) for all privileged changes.
-- UI follows [2026-11-26-blaze-ui-unslop-design.md](file:///home/darkmorpheus/BlazeFedora/docs/superpowers/specs/2026-11-26-blaze-ui-unslop-design.md): Graphite `#0f0f10/#141415/#19191b/#232325`, Blaze ember `#c83b22/#e0573c`, 4px grid, 8px status dots, 16px `*-symbolic` icons, Turkish sentence case, zero `(Polkit)` button text, zero emojis, zero `/home/<user>` developer paths, zero clipping at `1060x720`.
+- UI follows [2026-11-26-blaze-ui-unslop-design.md](../specs/2026-11-26-blaze-ui-unslop-design.md): Graphite `#0f0f10/#141415/#19191b/#232325`, Blaze ember `#c83b22/#e0573c`, 4px grid, 8px status dots, 16px `*-symbolic` icons, Turkish sentence case, zero `(Polkit)` button text, zero emojis, zero `/home/<user>` developer paths, zero clipping at `1060x720`.
 - Offline Cargo (`--locked --offline`), stripped release binaries (`--remap-path-prefix=${HOME}=/build`), EdDSA-signed RPMs, and mandatory QEMU Legacy BIOS + UEFI OVMF (`run_e2e --all --firmware both`) + visual screenshot verification (`AGENTS.md`).
 
 ## Review Focus
@@ -273,7 +273,7 @@
     install -m 0755 solarui/target/release/akrepd blazeos_custom_apps/usr/bin/akrepd
     install -m 0755 solarui/target/release/akrep-privd blazeos_custom_apps/usr/bin/akrep-privd
     install -m 0755 solarui/target/release/akrep-ui blazeos_custom_apps/usr/bin/akrep-ui
-    for b in akrepd akrep-privd akrep-ui; do [ "$(strings blazeos_custom_apps/usr/bin/$b | grep -c /home/darkmorpheus || true)" -eq 0 ]; done
+    for b in akrepd akrep-privd akrep-ui; do [ "$(strings blazeos_custom_apps/usr/bin/$b | grep -c "$HOME" || true)" -eq 0 ]; done
     python3 -B -m unittest tests.test_audit_regressions -v
     python3 packaging/check_ownership.py
     ./packaging/build-rpms.sh

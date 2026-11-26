@@ -4,7 +4,7 @@
 
 Name:           blaze-akrep
 Version:        1.0.0
-Release:        1.blaze
+Release:        2.blaze
 Summary:        BlazeOS Akrep Security Center
 License:        GPL-3.0-or-later
 URL:            https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
@@ -98,6 +98,8 @@ fi
 %attr(0644,root,root) /usr/share/applications/tr.com.blazeos.Akrep.desktop
 
 %changelog
+* Thu Nov 26 2026 BlazeOS Team <contact@blazeos.org> - 1.0.0-2.blaze
+- Add timed and persistent flexible protection overrides, Android ROM/gaming compatibility helpers, Secure Boot/MOK card, and UI unslop polish
 * Wed Nov 25 2026 BlazeOS Team <contact@blazeos.org> - 1.0.0-1.blaze
 - Promote Akrep to v1.0 with akrep-privd Polkit transaction engine, 4 TOML security profiles, ClamAV Suggests, and 10-tab GTK4 Security Center UI
 * Wed Nov 25 2026 BlazeOS Team <contact@blazeos.org> - 0.1.0-1.blaze

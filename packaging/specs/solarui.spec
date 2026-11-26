@@ -4,7 +4,7 @@
 # Binary repack of artefacts built from the repositories listed in SOURCES.md
 Name:           solarui
 Version:        5.05.1
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        SolarUI desktop shell manager, session and settings
 License:        GPL-3.0-or-later
 URL:            https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
@@ -43,6 +43,8 @@ rm -f %{buildroot}/%{name}-%{version}.tar
 /usr/share/backgrounds/blazeos/we10x
 
 %changelog
+* Thu Nov 26 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-2
+- Add Solar Omnibar Persephone/Koz vector companion, 16-persona BlazeAI with local memory, UI unslop polish, and solar-settings --tab routing fix
 * Tue Nov 24 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-1
 - Own full SolarUI binary/helper set and /usr/share/solarui resources
 * Wed Nov 18 2026 Blaze Release <release@blazeos.com.tr> - 5.05-1

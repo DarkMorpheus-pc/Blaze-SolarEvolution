@@ -45,12 +45,15 @@
    "/etc/udev/rules.d/99-blaze-recovery-vault.rules",
    "/etc/grub.d/09_berp",
    "/etc/grub.d/99_berp",
+   "/etc/kernel/install.d/95-blaze-bere-vault.install",
    "/etc/systemd/system/blaze-recovery.service",
    "/etc/systemd/system/blaze-recovery.target",
    "/etc/systemd/system/blaze-recovery.target.wants",
    "/etc/systemd/system/blaze-recovery-gui.service",
    "/etc/systemd/system/blaze-recovery-gui.target",
-   "/etc/systemd/system/blaze-recovery-gui.target.wants"
+   "/etc/systemd/system/blaze-recovery-gui.target.wants",
+   "/etc/systemd/system/blazeos-bere-vault-refresh.service",
+   "/etc/systemd/system/multi-user.target.wants/blazeos-bere-vault-refresh.service"
   ],
   "req": [
    "python3"
@@ -96,6 +99,7 @@
    "/usr/libexec/blazeos-offline-progress-filter",
    "/usr/libexec/blazeos-offline-update",
    "/usr/libexec/blazeos-update",
+   "/usr/libexec/blazeos-update-notifier",
    "/usr/libexec/blazeos-wayland-session-ready",
    "/usr/libexec/blazeos-welcome-helper",
    "/usr/libexec/livesys/sessions.d/livesys-solarui",
@@ -176,6 +180,9 @@
    "/etc/skel/Pictures",
    "/etc/skel/Resimler",
    "/usr/lib/modprobe.d/blazeos-usb-quirks.conf",
+   "/usr/lib/systemd/user/blazeos-update-notifier.service",
+   "/usr/lib/systemd/user/blazeos-update-notifier.timer",
+   "/usr/lib/systemd/user/timers.target.wants/blazeos-update-notifier.timer",
    "/usr/local/bin/gnome-control-center",
    "/usr/share/blaze-kinetic-glass",
    "/usr/share/applications/blaze-gamezone.desktop",

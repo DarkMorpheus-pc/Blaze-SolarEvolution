@@ -1,0 +1,12 @@
+[Unit]
+Description=BlazeHouse Desktop Update Notifier
+After=graphical-session.target network-online.target
+ConditionPathExists=!/run/initramfs/live
+ConditionPathExists=!/dev/mapper/live-base
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/blazeos-update-notifier
+Nice=19
+IOSchedulingClass=idle
+NoNewPrivileges=yes

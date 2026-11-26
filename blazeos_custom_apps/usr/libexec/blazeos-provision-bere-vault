@@ -12,6 +12,8 @@ set -euo pipefail
 SYSROOT=""
 VAULT_DEV=""
 REFRESH_KERNEL_ONLY=0
+UPDATE_BERE=0
+ALLOW_LIVE_TEST=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -35,6 +37,14 @@ while [[ $# -gt 0 ]]; do
             REFRESH_KERNEL_ONLY=1
             shift
             ;;
+        --update-bere)
+            UPDATE_BERE=1
+            shift
+            ;;
+        --allow-live-test)
+            ALLOW_LIVE_TEST=1
+            shift
+            ;;
         *)
             shift
             ;;
@@ -44,10 +54,372 @@ done
 SYSROOT="${SYSROOT%/}"
 VAULT_MP="${SYSROOT}/boot/bere-vault"
 CREATED_TEMP_MP=0
+_BERE_STAGE_DIR=""
+_BERE_UPD_MP=""
+_BERE_VAULT_UNLOCKED=0
 
 log() {
     echo "[BLAZE-VAULT] $*"
 }
+
+pick_stage_parent() {
+    local best="/tmp" best_kb=0 cand kb fstype
+    for cand in /var/tmp /tmp; do
+        [[ -d "$cand" && -w "$cand" ]] || continue
+        fstype="$(stat -f -c '%T' "$cand" 2>/dev/null || true)"
+        # On Live ISO overlayfs, /var/tmp shares the small root overlay; prefer /tmp tmpfs
+        if [[ "$cand" == "/var/tmp" && "$fstype" == "overlayfs" && -d /tmp && -w /tmp ]]; then
+            continue
+        fi
+        kb="$(df -k --output=avail "$cand" 2>/dev/null | tail -n1 | tr -dc '0-9' || echo 0)"
+        if [[ "${kb:-0}" -gt "$best_kb" ]]; then
+            best="$cand"
+            best_kb="$kb"
+        fi
+    done
+    printf '%s\n' "$best"
+}
+
+relock_vault_device() {
+    local dev="$1"
+    [[ -n "$dev" && -b "$dev" ]] || return 0
+    local pk pn pt
+    pk="$(lsblk -no PKNAME "$dev" 2>/dev/null | head -n1 | tr -d '[:space:]' || true)"
+    pn="$(lsblk -no PARTN "$dev" 2>/dev/null | head -n1 | tr -d '[:space:]' || true)"
+    if [[ -n "$pk" && -b "/dev/$pk" && "$pn" =~ ^[0-9]+$ ]]; then
+        pt="$(lsblk -dno PTTYPE "/dev/$pk" 2>/dev/null | tr -d '[:space:]' || true)"
+        if [[ "${pt,,}" == "gpt" ]]; then
+            sfdisk --part-attrs "/dev/$pk" "$pn" "RequiredPartition,60" >/dev/null 2>&1 || true
+            partprobe "/dev/$pk" >/dev/null 2>&1 || true
+            udevadm settle >/dev/null 2>&1 || true
+        fi
+    fi
+    blockdev --setro "$dev" >/dev/null 2>&1 || true
+}
+
+cleanup_update_bere() {
+    local rc=$?
+    if [[ -n "${_BERE_UPD_MP:-}" && -d "${_BERE_UPD_MP:-}" ]]; then
+        rm -f \
+            "${_BERE_UPD_MP}/LiveOS/bere-overlay.sqsh.tmp" \
+            "${_BERE_UPD_MP}/boot/blaze-recovery.tmp" \
+            "${_BERE_UPD_MP}/boot/vmlinuz-bere.tmp" \
+            "${_BERE_UPD_MP}/boot/initrd-bere.img.tmp" \
+            "${_BERE_UPD_MP}/BLAZE_RECOVERY_VAULT.json.tmp" 2>/dev/null || true
+        sync 2>/dev/null || true
+        umount "${_BERE_UPD_MP}" 2>/dev/null || umount -l "${_BERE_UPD_MP}" 2>/dev/null || true
+        rmdir "${_BERE_UPD_MP}" 2>/dev/null || true
+    fi
+    if [[ "${_BERE_VAULT_UNLOCKED:-0}" -eq 1 ]]; then
+        relock_vault_device "${VAULT_DEV:-}"
+    fi
+    if [[ -n "${_BERE_STAGE_DIR:-}" && -d "${_BERE_STAGE_DIR:-}" ]]; then
+        rm -rf "${_BERE_STAGE_DIR}" 2>/dev/null || true
+    fi
+    return "$rc"
+}
+
+run_update_bere_mode() {
+    if [[ "$(id -u)" -ne 0 ]]; then
+        log "HATA: --update-bere yönetici yetkisi (root) gerektirir."
+        exit 77
+    fi
+    if [[ "$ALLOW_LIVE_TEST" -eq 0 ]]; then
+        if [[ -e /run/initramfs/live || -e /dev/mapper/live-base ]] || grep -qw 'rd.live.image' /proc/cmdline 2>/dev/null; then
+            log "Canlı ISO ortamında BLAZE_REC güncellemesi atlanıyor."
+            exit 0
+        fi
+        if command -v systemd-detect-virt >/dev/null 2>&1 && systemd-detect-virt --container --quiet 2>/dev/null; then
+            log "Konteyner ortamında BLAZE_REC güncellemesi atlanıyor."
+            exit 0
+        fi
+    fi
+
+    mkdir -p -m 0755 /run/lock
+    exec 9>/run/lock/blazeos-bere-vault.lock
+    if ! flock -w 60 9; then
+        log "HATA: Başka bir BLAZE_REC kasa işlemi sürüyor (kilit zaman aşımı)."
+        exit 1
+    fi
+
+    if [[ -z "$VAULT_DEV" ]]; then
+        VAULT_DEV="$(blkid -L BLAZE_REC 2>/dev/null | head -n1 | tr -d '[:space:]' || true)"
+    fi
+    if [[ -z "$VAULT_DEV" || ! -b "$VAULT_DEV" ]]; then
+        log "Fiziksel BLAZE_REC kurtarma bölümü bulunamadı; kasa güncellemesi atlanıyor."
+        rm -f /var/lib/blazeos/bere-vault-needs-refresh 2>/dev/null || true
+        exit 0
+    fi
+
+    local root_src real_root real_vault
+    root_src="$(findmnt -n -o SOURCE / 2>/dev/null | sed 's/\[.*//' | tr -d '[:space:]' || true)"
+    real_root="$(readlink -f "$root_src" 2>/dev/null || echo "$root_src")"
+    real_vault="$(readlink -f "$VAULT_DEV" 2>/dev/null || echo "$VAULT_DEV")"
+    if [[ -n "$real_root" && "$real_vault" == "$real_root" ]]; then
+        log "GÜVENLİK İHLALİ: BLAZE_REC aygıtı etkin kök dosya sistemiyle çakışıyor; işlem durduruldu."
+        exit 1
+    fi
+
+    trap cleanup_update_bere EXIT INT TERM
+
+    local stage_parent
+    stage_parent="$(pick_stage_parent)"
+    _BERE_STAGE_DIR="$(mktemp -d "${stage_parent}/bere-stage.XXXXXX")"
+    chmod 0700 "${_BERE_STAGE_DIR}"
+    local stage_tree="${_BERE_STAGE_DIR}/tree"
+    local stage_out="${_BERE_STAGE_DIR}/out"
+    local dracut_tmp="${_BERE_STAGE_DIR}/dracut-tmp"
+    mkdir -p -m 0700 "$stage_tree" "$stage_out" "$dracut_tmp"
+
+    # 1. Fail-closed RPMDB SHA-256 verification & allowlist staging BEFORE unlocking BLAZE_REC
+    local bere_ver=""
+    bere_ver="$(python3 - "$stage_tree" <<'PY'
+import hashlib, os, shutil, stat, subprocess, sys
+
+stage_tree = sys.argv[1]
+ALLOW_FILES = [
+    "/usr/bin/blaze-recovery",
+    "/usr/bin/berp-recovery-gui",
+    "/usr/bin/blaze-recovery-gui-launcher",
+    "/usr/bin/blaze-death-screen",
+    "/usr/libexec/blazeos-provision-bere-vault",
+]
+ALLOW_DIR_PREFIX = "/usr/share/berp-recovery/"
+
+ver_proc = subprocess.run(
+    ["/usr/bin/rpm", "-q", "--qf", "%{VERSION}-%{RELEASE}", "blaze-recovery"],
+    capture_output=True, text=True,
+)
+if ver_proc.returncode != 0:
+    sys.stderr.write("GÜVENLİK İHLALİ: blaze-recovery RPM veritabanında kurulu değil.\n")
+    sys.exit(2)
+bere_ver = ver_proc.stdout.strip()
+
+dump_proc = subprocess.run(
+    ["/usr/bin/rpm", "-q", "--dump", "blaze-recovery"],
+    capture_output=True, text=True,
+)
+if dump_proc.returncode != 0:
+    sys.stderr.write("GÜVENLİK İHLALİ: blaze-recovery RPMDB özet tablosu okunamadı.\n")
+    sys.exit(2)
+
+rpmdb_digests = {}
+for line in dump_proc.stdout.splitlines():
+    parts = line.split()
+    if len(parts) < 7:
+        continue
+    path, _size, _mtime, digest, mode_oct = parts[0], parts[1], parts[2], parts[3], parts[4]
+    rpmdb_digests[path] = (digest.lower(), int(mode_oct, 8))
+
+staged_count = 0
+for path, (expected_digest, expected_mode) in sorted(rpmdb_digests.items()):
+    if not (path in ALLOW_FILES or path.startswith(ALLOW_DIR_PREFIX)):
+        continue
+    if stat.S_ISDIR(expected_mode):
+        continue
+    if len(expected_digest) != 64 or not all(c in "0123456789abcdef" for c in expected_digest):
+        sys.stderr.write(f"GÜVENLİK İHLALİ: geçersiz RPMDB SHA-256 özeti: {path}\n")
+        sys.exit(3)
+    try:
+        st = os.lstat(path)
+    except OSError:
+        sys.stderr.write(f"GÜVENLİK İHLALİ: izinli BERE dosyası eksik: {path}\n")
+        sys.exit(3)
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+        sys.stderr.write(f"GÜVENLİK İHLALİ: BERE yolu normal dosya değil veya sembolik bağ: {path}\n")
+        sys.exit(3)
+    if st.st_uid != 0 or (st.st_mode & 0o002):
+        sys.stderr.write(f"GÜVENLİK İHLALİ: güvensiz sahiplik veya yazma izni: {path}\n")
+        sys.exit(3)
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    actual_digest = h.hexdigest().lower()
+    if actual_digest != expected_digest:
+        sys.stderr.write(
+            f"GÜVENLİK İHLALİ: {path} disk özeti RPMDB ile uyuşmuyor ({actual_digest[:12]} != {expected_digest[:12]})\n"
+        )
+        sys.exit(4)
+
+    dst = os.path.join(stage_tree, path.lstrip("/"))
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    shutil.copy2(path, dst)
+    os.chmod(dst, stat.S_IMODE(st.st_mode))
+    staged_count += 1
+
+for req in ALLOW_FILES:
+    if not os.path.isfile(os.path.join(stage_tree, req.lstrip("/"))):
+        sys.stderr.write(f"GÜVENLİK İHLALİ: zorunlu BERE ikilisi hazırlanmadı: {req}\n")
+        sys.exit(5)
+
+if staged_count < len(ALLOW_FILES):
+    sys.stderr.write("GÜVENLİK İHLALİ: eksik BERE katmanı.\n")
+    sys.exit(5)
+
+print(bere_ver)
+PY
+)"
+    log "RPMDB SHA-256 doğrulaması geçti (blaze-recovery=${bere_ver})."
+
+    local mksq_bin
+    mksq_bin="$(command -v mksquashfs 2>/dev/null || true)"
+    if [[ -z "$mksq_bin" ]]; then
+        log "HATA: mksquashfs bulunamadı."
+        exit 1
+    fi
+    "$mksq_bin" "$stage_tree" "${stage_out}/bere-overlay.sqsh" \
+        -comp zstd -Xcompression-level 15 -b 262144 -all-root -no-progress -noappend -xattrs
+
+    # 2. Inspect existing BLAZE_REC read-only first to decide if kernel/initrd must refresh
+    _BERE_UPD_MP="$(mktemp -d /run/bere-vault-upd.XXXXXX)"
+    chmod 0700 "$_BERE_UPD_MP"
+    mount -o ro "$VAULT_DEV" "$_BERE_UPD_MP"
+
+    if [[ ! -f "$_BERE_UPD_MP/LiveOS/squashfs.img" ]]; then
+        log "UYARI: BLAZE_REC içinde LiveOS/squashfs.img bulunamadı; güncelleme atlanıyor."
+        exit 0
+    fi
+
+    local prev_mode="full" prev_full="true" prev_hook="false" prev_vm_sha=""
+    if [[ -f "$_BERE_UPD_MP/BLAZE_RECOVERY_VAULT.json" ]]; then
+        IFS=$'\t' read -r prev_mode prev_full prev_hook prev_vm_sha < <(python3 - "$_BERE_UPD_MP/BLAZE_RECOVERY_VAULT.json" <<'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception:
+    d = {}
+mode = str(d.get("mode") or "full")
+if mode not in ("full", "minimal"):
+    mode = "full"
+full = "true" if bool(d.get("full_os_embedded", mode == "full")) else "false"
+hook = "true" if bool(d.get("overlay_hook_v1", False)) else "false"
+vm_sha = str((d.get("sha256") or {}).get("vmlinuz") or "").strip()
+print(f"{mode}\t{full}\t{hook}\t{vm_sha}")
+PY
+)
+    fi
+
+    local latest_kver="" latest_vmlinuz="" need_kernel_refresh=0
+    latest_kver="$(ls -1 /usr/lib/modules 2>/dev/null | grep -v rescue | sort -V | tail -n1 || true)"
+    if [[ -n "$latest_kver" && -f "/boot/vmlinuz-${latest_kver}" ]]; then
+        latest_vmlinuz="/boot/vmlinuz-${latest_kver}"
+    elif [[ -n "$latest_kver" && -f "/usr/lib/modules/${latest_kver}/vmlinuz" ]]; then
+        latest_vmlinuz="/usr/lib/modules/${latest_kver}/vmlinuz"
+    fi
+
+    if [[ "$prev_hook" != "true" || ! -f "$_BERE_UPD_MP/boot/vmlinuz-bere" || ! -f "$_BERE_UPD_MP/boot/initrd-bere.img" ]]; then
+        need_kernel_refresh=1
+    elif [[ -n "$latest_vmlinuz" ]]; then
+        local host_vm_sha
+        host_vm_sha="$(sha256sum "$latest_vmlinuz" | awk '{print $1}')"
+        if [[ "$host_vm_sha" != "$prev_vm_sha" ]]; then
+            need_kernel_refresh=1
+        fi
+    fi
+
+    if [[ "$need_kernel_refresh" -eq 1 && -n "$latest_kver" && -n "$latest_vmlinuz" ]] && command -v dracut >/dev/null 2>&1; then
+        log "99blaze-bere pre-pivot kancalı initrd-bere.img üretiliyor (kernel=${latest_kver}, stage=${stage_parent})..."
+        dracut --force --hostonly --no-hostonly-cmdline --zstd --tmpdir "$dracut_tmp" \
+            --omit "network network-manager network-legacy iscsi nfs nbd fcoe fcoe-uefi cifs multipath livenet drm plymouth bluetooth qemu-net kernel-network-modules" \
+            --force-add "dmsquash-live overlayfs pollcdrom simpledrm blaze-bere" \
+            "${stage_out}/initrd-bere.img" "$latest_kver" >/dev/null
+        if [[ ! -s "${stage_out}/initrd-bere.img" ]]; then
+            log "HATA: dracut boş initrd-bere.img üretti; kasa değiştirilmeden çıkılıyor."
+            exit 1
+        fi
+        cp -f "$latest_vmlinuz" "${stage_out}/vmlinuz-bere"
+    fi
+
+    # 3. Check space on BLAZE_REC BEFORE remounting RW (accounting for temporary staging peak)
+    local avail_kb need_kb
+    avail_kb="$(df -k --output=avail "$_BERE_UPD_MP" 2>/dev/null | tail -n1 | tr -dc '0-9' || echo 0)"
+    need_kb="$(du -sk "${stage_out}/bere-overlay.sqsh" | awk '{print $1}')"
+    need_kb=$(( need_kb + $(du -sk "${stage_tree}/usr/bin/blaze-recovery" | awk '{print $1}') + 4096 ))
+    if [[ -f "${stage_out}/initrd-bere.img" ]]; then
+        need_kb=$(( need_kb + $(du -sk "${stage_out}/initrd-bere.img" | awk '{print $1}') + $(du -sk "${stage_out}/vmlinuz-bere" | awk '{print $1}') ))
+    fi
+    if [[ "${avail_kb:-0}" -lt "$need_kb" ]]; then
+        log "UYARI: BLAZE_REC boş alanı (${avail_kb} KiB) atomik güncelleme için yetersiz (${need_kb} KiB gerekli); mevcut kasa korunuyor."
+        exit 1
+    fi
+
+    # 4. Temporarily unlock BLAZE_REC, atomically install overlay + boot assets, re-hash all 4 artifacts
+    umount "$_BERE_UPD_MP"
+    blockdev --setrw "$VAULT_DEV"
+    _BERE_VAULT_UNLOCKED=1
+    mount -o rw "$VAULT_DEV" "$_BERE_UPD_MP"
+
+    mkdir -p "$_BERE_UPD_MP/LiveOS" "$_BERE_UPD_MP/boot"
+    cp -f "${stage_out}/bere-overlay.sqsh" "$_BERE_UPD_MP/LiveOS/bere-overlay.sqsh.tmp"
+    cp -f "${stage_tree}/usr/bin/blaze-recovery" "$_BERE_UPD_MP/boot/blaze-recovery.tmp"
+    chmod 0755 "$_BERE_UPD_MP/boot/blaze-recovery.tmp"
+
+    local hook_ready="false"
+    if [[ "$prev_hook" == "true" ]]; then
+        hook_ready="true"
+    fi
+    if [[ -f "${stage_out}/initrd-bere.img" && -f "${stage_out}/vmlinuz-bere" ]]; then
+        cp -f "${stage_out}/vmlinuz-bere" "$_BERE_UPD_MP/boot/vmlinuz-bere.tmp"
+        cp -f "${stage_out}/initrd-bere.img" "$_BERE_UPD_MP/boot/initrd-bere.img.tmp"
+        sync
+        mv -f "$_BERE_UPD_MP/boot/vmlinuz-bere.tmp" "$_BERE_UPD_MP/boot/vmlinuz-bere"
+        mv -f "$_BERE_UPD_MP/boot/initrd-bere.img.tmp" "$_BERE_UPD_MP/boot/initrd-bere.img"
+        hook_ready="true"
+    fi
+    sync
+    mv -f "$_BERE_UPD_MP/LiveOS/bere-overlay.sqsh.tmp" "$_BERE_UPD_MP/LiveOS/bere-overlay.sqsh"
+    mv -f "$_BERE_UPD_MP/boot/blaze-recovery.tmp" "$_BERE_UPD_MP/boot/blaze-recovery"
+
+    local sq_sha vm_sha in_sha ov_sha
+    sq_sha="$(sha256sum "$_BERE_UPD_MP/LiveOS/squashfs.img" | awk '{print $1}')"
+    vm_sha="$(sha256sum "$_BERE_UPD_MP/boot/vmlinuz-bere" | awk '{print $1}')"
+    in_sha="$(sha256sum "$_BERE_UPD_MP/boot/initrd-bere.img" | awk '{print $1}')"
+    ov_sha="$(sha256sum "$_BERE_UPD_MP/LiveOS/bere-overlay.sqsh" | awk '{print $1}')"
+
+    cat > "$_BERE_UPD_MP/BLAZE_RECOVERY_VAULT.json.tmp" <<EOF
+{
+  "label": "BLAZE_REC",
+  "role": "immutable-graphical-bere-and-berp-vault",
+  "mode": "$prev_mode",
+  "full_os_embedded": $prev_full,
+  "readonly": true,
+  "overlay_hook_v1": $hook_ready,
+  "bere_version": "$bere_ver",
+  "sha256": {
+    "squashfs": "$sq_sha",
+    "vmlinuz": "$vm_sha",
+    "initrd": "$in_sha",
+    "bere_overlay": "$ov_sha"
+  }
+}
+EOF
+    sync
+    mv -f "$_BERE_UPD_MP/BLAZE_RECOVERY_VAULT.json.tmp" "$_BERE_UPD_MP/BLAZE_RECOVERY_VAULT.json"
+    sync
+
+    # Sync Limine ESP mirror if present
+    for esp_bere in /boot/efi/bere /efi/bere; do
+        if [[ -d "$esp_bere" && -f "${stage_out}/vmlinuz-bere" && -f "${stage_out}/initrd-bere.img" ]]; then
+            cp -f "$_BERE_UPD_MP/boot/vmlinuz-bere" "$esp_bere/vmlinuz-bere" 2>/dev/null || true
+            cp -f "$_BERE_UPD_MP/boot/initrd-bere.img" "$esp_bere/initrd-bere.img" 2>/dev/null || true
+        fi
+    done
+
+    umount "$_BERE_UPD_MP"
+    rmdir "$_BERE_UPD_MP" 2>/dev/null || true
+    _BERE_UPD_MP=""
+    relock_vault_device "$VAULT_DEV"
+    _BERE_VAULT_UNLOCKED=0
+    rm -f /var/lib/blazeos/bere-vault-needs-refresh 2>/dev/null || true
+
+    log "BLAZE_REC zırhlı kasa BERE/BERP katmanı ($bere_ver, overlay_hook_v1=$hook_ready) başarıyla güncellendi ve salt-okunur kilitlendi."
+    exit 0
+}
+
+if [[ "$UPDATE_BERE" -eq 1 ]]; then
+    run_update_bere_mode
+fi
 
 VAULT_MODE="full"
 for mf in /tmp/anaconda_bere_vault_mode "${SYSROOT}/etc/blazeos-bere-vault-mode"; do
@@ -200,7 +572,10 @@ done
 if [[ -z "$LIVE_INITRD" ]]; then
     KVER="$(ls -1 "${SRC_ROOT}/usr/lib/modules" 2>/dev/null | grep -v rescue | sort -V | tail -n1 || true)"
     if [[ -n "$KVER" ]] && command -v dracut >/dev/null 2>&1; then
-        dracut --force --no-hostonly --add "dmsquash-live overlayfs pollcdrom" "$VAULT_MP/boot/initrd-bere.img" "$KVER"
+        dracut --force --hostonly --no-hostonly-cmdline --zstd \
+            --omit "network network-manager network-legacy iscsi nfs nbd fcoe fcoe-uefi cifs multipath livenet drm plymouth bluetooth qemu-net kernel-network-modules" \
+            --force-add "dmsquash-live overlayfs pollcdrom simpledrm blaze-bere" \
+            "$VAULT_MP/boot/initrd-bere.img" "$KVER"
         LIVE_INITRD="$VAULT_MP/boot/initrd-bere.img"
     fi
 fi
@@ -287,6 +662,7 @@ fi
 SQ_SHA="$(sha256sum "$VAULT_MP/LiveOS/squashfs.img" | awk '{print $1}')"
 VM_SHA="$(sha256sum "$VAULT_MP/boot/vmlinuz-bere" | awk '{print $1}')"
 IN_SHA="$(sha256sum "$VAULT_MP/boot/initrd-bere.img" | awk '{print $1}')"
+BERE_RPM_VER="$(rpm -q --qf '%{VERSION}-%{RELEASE}' blaze-recovery 2>/dev/null || echo '5.05.1')"
 
 cat > "$VAULT_MP/BLAZE_RECOVERY_VAULT.json" <<EOF
 {
@@ -295,6 +671,8 @@ cat > "$VAULT_MP/BLAZE_RECOVERY_VAULT.json" <<EOF
   "mode": "$ACTUAL_MODE",
   "full_os_embedded": $FULL_OS_EMBEDDED,
   "readonly": true,
+  "overlay_hook_v1": false,
+  "bere_version": "$BERE_RPM_VER",
   "sha256": {
     "squashfs": "$SQ_SHA",
     "vmlinuz": "$VM_SHA",

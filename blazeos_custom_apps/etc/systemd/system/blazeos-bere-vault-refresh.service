@@ -1,0 +1,16 @@
+[Unit]
+Description=Refresh BlazeOS Armored BERE Recovery Vault (BLAZE_REC)
+After=local-fs.target systemd-udev-settle.service
+ConditionPathExists=/var/lib/blazeos/bere-vault-needs-refresh
+ConditionPathExists=!/run/initramfs/live
+ConditionPathExists=!/dev/mapper/live-base
+ConditionVirtualization=!container
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/blazeos-provision-bere-vault --update-bere
+Nice=19
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target

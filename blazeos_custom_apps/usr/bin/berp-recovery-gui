@@ -382,6 +382,7 @@ def inspect_blaze_rec_vault(verify_hashes=False):
                 manifest = {}
 
         sq_path = os.path.join(vault_mp, "LiveOS/squashfs.img")
+        ov_path = os.path.join(vault_mp, "LiveOS/bere-overlay.sqsh")
         vm_path = os.path.join(vault_mp, "boot/vmlinuz-bere")
         in_path = os.path.join(vault_mp, "boot/initrd-bere.img")
         sq_mb = int(os.path.getsize(sq_path) / (1024 * 1024)) if os.path.isfile(sq_path) else 0
@@ -403,6 +404,16 @@ def inspect_blaze_rec_vault(verify_hashes=False):
                             tamper_error = f"Güvenlik ihlali: BLAZE_REC '{key}' SHA-256 özeti uyuşmuyor"
                             break
                 if tamper_error is None:
+                    exp_ov = (expected.get("bere_overlay") or "").strip().lower()
+                    has_ov_file = os.path.isfile(ov_path)
+                    if has_ov_file and not exp_ov:
+                        tamper_error = "Güvenlik ihlali: BLAZE_REC 'bere_overlay' SHA-256 özeti eksik"
+                    elif exp_ov and not has_ov_file:
+                        tamper_error = "Güvenlik ihlali: BLAZE_REC 'bere_overlay' katmanı eksik"
+                    elif has_ov_file and exp_ov:
+                        if _sha256_file(ov_path).lower() != exp_ov:
+                            tamper_error = "Güvenlik ihlali: BLAZE_REC 'bere_overlay' SHA-256 özeti uyuşmuyor"
+                if tamper_error is None:
                     hash_verified = bool(expected)
 
         return {
@@ -415,6 +426,8 @@ def inspect_blaze_rec_vault(verify_hashes=False):
             "full_os_embedded": full_os,
             "squashfs_mb": sq_mb,
             "kernel_ready": os.path.isfile(vm_path) and os.path.isfile(in_path),
+            "bere_overlay_present": os.path.isfile(ov_path),
+            "bere_version": str(manifest.get("bere_version") or ""),
             "hash_verified": hash_verified,
             "tamper_error": tamper_error,
         }

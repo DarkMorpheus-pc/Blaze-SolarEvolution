@@ -7,7 +7,7 @@ Applies the `unslop` method (Damir Sokolovsky, @heydamir, CC BY 4.0 — keep thi
 Reference material (read before editing):
 - `unslop` skill: `<refs>/unslop/skills/unslop/SKILL.md`, `references/signs.md`, `references/tokens.md`
 - `no-ai-slop` skill: `<refs>/no-ai-slop/skills/no-ai-slop/SKILL.md`
-  (`<refs>` = `/home/darkmorpheus/.gemini/antigravity/brain/7257d894-04b2-4834-97d6-0a1aaac0789a/scratch/refs`)
+  (`<refs>` = local visual reference scratch directory)
 
 ## Direction (approved by the user)
 - **Product:** Blaze SolarEvolution's own system tools — security center, desktop settings, first-run guide,
