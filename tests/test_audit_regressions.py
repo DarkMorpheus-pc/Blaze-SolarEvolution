@@ -1503,8 +1503,23 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
             'tr.com.blazeos.Akrep1.quarantine.manage',
             'tr.com.blazeos.Akrep1.profile.apply',
             'tr.com.blazeos.Akrep1.packages.install-optional',
+            'tr.com.blazeos.Akrep1.system.compat-manage',
         ):
             self.assertIn(pk_act, polkit_pol)
+
+        sentinel_models = (ROOT / 'solarui/crates/blaze-sentinel-core/src/models.rs').read_text(encoding='utf-8')
+        for snap_field in ('pub active_overrides:', 'pub system_compat:', 'pub driver_mok:'):
+            self.assertIn(snap_field, sentinel_models)
+
+        common_models = (ROOT / 'solarui/crates/blaze-akrep-common/src/models.rs').read_text(encoding='utf-8')
+        sel_desired_block = common_models.split('pub enum SelinuxDesiredMode', 1)[1].split('}', 1)[0]
+        self.assertIn('Enforcing', sel_desired_block)
+        self.assertIn('Permissive', sel_desired_block)
+        self.assertNotIn('Disabled', sel_desired_block)
+        common_domain = (ROOT / 'solarui/crates/blaze-akrep-common/src/domain_types.rs').read_text(encoding='utf-8')
+        self.assertIn('"selinux=disabled"', common_domain)
+        priv_main = (ROOT / 'solarui/crates/blaze-akrep-privd/src/main.rs').read_text(encoding='utf-8')
+        self.assertIn('"--revert-override"', priv_main)
 
         desktop = (OVERLAY / 'usr/share/applications/tr.com.blazeos.Akrep.desktop').read_text(encoding='utf-8')
         self.assertIn('Exec=akrep-ui', desktop)
@@ -1527,6 +1542,13 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
             ver_res = subprocess.run([str(bin_p), '--version'], capture_output=True, text=True, timeout=10)
             self.assertEqual(ver_res.returncode, 0, ver_res.stderr)
             self.assertIn(f'{bin_name} 1.0.0', ver_res.stdout)
+
+        priv_help = subprocess.run(
+            [str(OVERLAY / 'usr/bin/akrep-privd'), '--help'],
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(priv_help.returncode, 0, priv_help.stderr)
+        self.assertIn('--revert-override', priv_help.stdout)
 
         smoke_res = subprocess.run(
             [str(OVERLAY / 'usr/bin/akrep-ui'), '--smoke-test'],
