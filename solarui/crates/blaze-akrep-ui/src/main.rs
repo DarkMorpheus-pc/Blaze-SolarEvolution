@@ -23,7 +23,7 @@ use crate::pages::threat_protection::{build_threat_protection_page, format_scan_
 use crate::state::{AppUiState, NoticeBanner, NoticeKind};
 use blaze_akrep_common::{
     ActionRequest, FlatpakScope, PrivacySessionController, ScanJobState, ScanProgress,
-    SessionPortalPipewireBackend, UserFlatpakManager,
+    SelinuxRuntimeMode, SessionPortalPipewireBackend, UserFlatpakManager,
 };
 use blaze_sentinel_core::{AkrepSeverity, AKREP_SCHEMA_VERSION, AKREP_VERSION};
 use gtk4::prelude::*;
@@ -168,7 +168,7 @@ fn render_page(
     });
 
     let page_widget = match active_tab {
-        "overview" => build_overview_page(state, on_select),
+        "overview" => build_overview_page(state, cmd_tx, on_select),
         "threat_protection" => build_threat_protection_page(state, cmd_tx, &widgets.window),
         "system_protection" => build_system_protection_page(state, cmd_tx),
         "firewall" => build_firewall_page(state, cmd_tx, on_rerender),
@@ -178,7 +178,7 @@ fn render_page(
         "profiles" => build_profiles_page(state, cmd_tx, &widgets.window, on_rerender),
         "history" => build_history_page(state, cmd_tx),
         "settings" => build_settings_page(state, cmd_tx, on_rerender),
-        _ => build_overview_page(state, on_select),
+        _ => build_overview_page(state, cmd_tx, on_select),
     };
 
     page_widget.set_margin_top(24);
@@ -436,15 +436,54 @@ fn main() {
             while let Ok(evt) = evt_rx.recv().await {
                 match evt {
                     UiEvent::Snapshot(snap) => {
-                        let (had_snap, tab) = {
+                        let (had_snap, meaningful_change, tab) = {
                             let mut st = st_ev.borrow_mut();
                             let had = st.snapshot.is_some();
+                            let changed = st.snapshot.as_ref().is_none_or(|prev| {
+                                prev.overall_status != snap.overall_status
+                                    || prev.active_overrides != snap.active_overrides
+                                    || prev.system_compat != snap.system_compat
+                                    || prev.driver_mok != snap.driver_mok
+                                    || prev.cards != snap.cards
+                            });
+                            if let Some(ref mut diag) = st.selinux_diag {
+                                if let Some(card) =
+                                    snap.cards.iter().find(|c| c.id == "system_protection")
+                                {
+                                    if card.metric.eq_ignore_ascii_case("Enforcing") {
+                                        diag.runtime_mode = SelinuxRuntimeMode::Enforcing;
+                                    } else if card.metric.eq_ignore_ascii_case("Permissive") {
+                                        diag.runtime_mode = SelinuxRuntimeMode::Permissive;
+                                    } else if card.metric.eq_ignore_ascii_case("Disabled") {
+                                        diag.runtime_mode = SelinuxRuntimeMode::Disabled;
+                                    }
+                                }
+                            }
+                            if let Some(ref mut fw) = st.firewall_state {
+                                if let Some(card) = snap.cards.iter().find(|c| c.id == "firewall") {
+                                    fw.running = !card.metric.eq_ignore_ascii_case("OFF");
+                                }
+                            }
                             st.snapshot = Some(*snap);
                             st.offline_reason = None;
-                            (had, st.active_tab)
+                            (had, changed, st.active_tab)
                         };
                         render_chrome(&w_ev, &st_ev, &cmd_ev);
-                        if !had_snap || matches!(tab, "overview" | "settings" | "profiles") {
+                        let editing_text = gtk4::prelude::GtkWindowExt::focus(&w_ev.window)
+                            .is_some_and(|w| w.is::<gtk4::Text>());
+                        if !had_snap
+                            || (meaningful_change
+                                && !editing_text
+                                && matches!(
+                                    tab,
+                                    "overview"
+                                        | "system_protection"
+                                        | "firewall"
+                                        | "device_security"
+                                        | "profiles"
+                                        | "settings"
+                                ))
+                        {
                             render_page(&w_ev, &st_ev, &cmd_ev);
                         }
                     }
@@ -970,5 +1009,325 @@ mod tests {
 
         let rb = mgr.rollback_user_override(&tx.tx_id).unwrap();
         assert_eq!(rb.state, TransactionState::RolledBack);
+    }
+
+    fn contains_emoji(s: &str) -> bool {
+        s.chars().any(|c| {
+            let cp = c as u32;
+            (0x1F300..=0x1FAFF).contains(&cp) || (0x2600..=0x27BF).contains(&cp)
+        })
+    }
+
+    #[test]
+    fn test_duration_choice_mapping_and_labels() {
+        use crate::components::{
+            duration_from_choice_idx, format_override_status_text, OOMD_DURATION_CHOICES,
+            PROTECTION_DURATION_CHOICES,
+        };
+        use blaze_akrep_common::OverrideDuration;
+        use blaze_sentinel_core::ActiveOverrideEntry;
+
+        assert_eq!(PROTECTION_DURATION_CHOICES.len(), 4);
+        assert_eq!(PROTECTION_DURATION_CHOICES[0].label_tr, "15 dk");
+        assert_eq!(
+            PROTECTION_DURATION_CHOICES[0].duration,
+            OverrideDuration::Timed { minutes: 15 }
+        );
+        assert_eq!(PROTECTION_DURATION_CHOICES[1].label_tr, "1 saat");
+        assert_eq!(
+            PROTECTION_DURATION_CHOICES[1].duration,
+            OverrideDuration::Timed { minutes: 60 }
+        );
+        assert_eq!(
+            PROTECTION_DURATION_CHOICES[2].label_tr,
+            "Yeniden başlatmaya kadar"
+        );
+        assert_eq!(
+            PROTECTION_DURATION_CHOICES[2].duration,
+            OverrideDuration::UntilReboot
+        );
+        assert_eq!(
+            PROTECTION_DURATION_CHOICES[3].label_tr,
+            "Ben tekrar değiştirene kadar"
+        );
+        assert_eq!(
+            PROTECTION_DURATION_CHOICES[3].duration,
+            OverrideDuration::UntilChanged
+        );
+
+        assert_eq!(OOMD_DURATION_CHOICES.len(), 4);
+        assert_eq!(OOMD_DURATION_CHOICES[0].label_tr, "1 saat");
+        assert_eq!(
+            OOMD_DURATION_CHOICES[0].duration,
+            OverrideDuration::Timed { minutes: 60 }
+        );
+        assert_eq!(OOMD_DURATION_CHOICES[1].label_tr, "4 saat");
+        assert_eq!(
+            OOMD_DURATION_CHOICES[1].duration,
+            OverrideDuration::Timed { minutes: 240 }
+        );
+        assert_eq!(
+            OOMD_DURATION_CHOICES[2].duration,
+            OverrideDuration::UntilReboot
+        );
+        assert_eq!(
+            OOMD_DURATION_CHOICES[3].duration,
+            OverrideDuration::UntilChanged
+        );
+
+        assert_eq!(
+            duration_from_choice_idx(&PROTECTION_DURATION_CHOICES, 99),
+            OverrideDuration::Timed { minutes: 15 }
+        );
+        assert_eq!(
+            duration_from_choice_idx(&OOMD_DURATION_CHOICES, 99),
+            OverrideDuration::Timed { minutes: 60 }
+        );
+
+        for c in PROTECTION_DURATION_CHOICES
+            .iter()
+            .chain(OOMD_DURATION_CHOICES.iter())
+        {
+            for txt in [c.label_tr, c.label_en] {
+                assert!(!txt.contains('!'), "Unexpected '!' in {}", txt);
+                assert!(
+                    !txt.to_ascii_lowercase().contains("polkit"),
+                    "Unexpected Polkit in {}",
+                    txt
+                );
+                assert!(!contains_emoji(txt), "Unexpected emoji in {}", txt);
+            }
+        }
+
+        let timed_entry = ActiveOverrideEntry {
+            subsystem: "selinux".to_string(),
+            duration_kind: "timed".to_string(),
+            minutes: Some(15),
+            started_at: "2026-11-26T15:00:00Z".to_string(),
+            expires_at: Some("2026-11-26T15:15:00Z".to_string()),
+            remaining_secs: Some(840),
+            boot_id: "boot-1".to_string(),
+        };
+        assert_eq!(
+            format_override_status_text(&timed_entry, Lang::Tr),
+            "14 dk kaldı"
+        );
+        assert_eq!(
+            format_override_status_text(&timed_entry, Lang::En),
+            "14 min remaining"
+        );
+
+        let reboot_entry = ActiveOverrideEntry {
+            duration_kind: "until_reboot".to_string(),
+            minutes: None,
+            expires_at: None,
+            remaining_secs: None,
+            ..timed_entry.clone()
+        };
+        assert_eq!(
+            format_override_status_text(&reboot_entry, Lang::Tr),
+            "Yeniden başlatmaya kadar"
+        );
+
+        let manual_entry = ActiveOverrideEntry {
+            duration_kind: "until_changed".to_string(),
+            ..reboot_entry
+        };
+        assert_eq!(
+            format_override_status_text(&manual_entry, Lang::Tr),
+            "Elle açılana kadar"
+        );
+    }
+
+    #[test]
+    fn test_flatpak_gamepad_input_toggle_delta() {
+        use crate::pages::applications::detect_gamepad_input_grant;
+        use blaze_akrep_common::{
+            validate_flatpak_override_changes, AppOrigin, FlatpakAppRecord, PermissionSourceLayer,
+            StructuredAppPermissions,
+        };
+
+        let (adds_grant, rems_grant) =
+            compute_capability_override_delta("Context.devices", "input", "!input", false);
+        assert_eq!(
+            adds_grant,
+            vec![("Context.devices".to_string(), "input".to_string())]
+        );
+        assert_eq!(
+            rems_grant,
+            vec![("Context.devices".to_string(), "!input".to_string())]
+        );
+        assert!(validate_flatpak_override_changes(&adds_grant, &rems_grant).is_ok());
+
+        let (adds_restrict, rems_restrict) =
+            compute_capability_override_delta("Context.devices", "input", "!input", true);
+        assert_eq!(
+            adds_restrict,
+            vec![("Context.devices".to_string(), "!input".to_string())]
+        );
+        assert_eq!(
+            rems_restrict,
+            vec![("Context.devices".to_string(), "input".to_string())]
+        );
+        assert!(validate_flatpak_override_changes(&adds_restrict, &rems_restrict).is_ok());
+
+        // Quick disk shortcuts /mnt and /run/media pass Flatpak override validation
+        assert!(validate_flatpak_override_changes(
+            &[("Context.filesystems".to_string(), "/mnt".to_string())],
+            &[]
+        )
+        .is_ok());
+        assert!(validate_flatpak_override_changes(
+            &[("Context.filesystems".to_string(), "/run/media".to_string())],
+            &[]
+        )
+        .is_ok());
+
+        let mut rec = FlatpakAppRecord {
+            app_id: "org.example.Game".to_string(),
+            display_name: "Example Game".to_string(),
+            version: "1.0".to_string(),
+            arch: "x86_64".to_string(),
+            branch: "stable".to_string(),
+            runtime: "org.freedesktop.Platform/x86_64/25.08".to_string(),
+            scope: FlatpakScope::User,
+            origin: AppOrigin::Flatpak {
+                app_id: "org.example.Game".to_string(),
+                scope: FlatpakScope::User,
+                arch: "x86_64".to_string(),
+                branch: "stable".to_string(),
+                runtime: "org.freedesktop.Platform/x86_64/25.08".to_string(),
+                sandbox_supported: true,
+            },
+            manifest_permissions: StructuredAppPermissions::default(),
+            global_override_raw: None,
+            app_override_raw: None,
+            effective_permissions: StructuredAppPermissions::default(),
+            running: false,
+        };
+        assert_eq!(detect_gamepad_input_grant(&rec), (false, None));
+
+        rec.app_override_raw = Some("[Context]\ndevices=input;\n".to_string());
+        assert_eq!(
+            detect_gamepad_input_grant(&rec),
+            (true, Some(PermissionSourceLayer::AppOverride))
+        );
+
+        rec.effective_permissions.camera.direct_devices_all = true;
+        rec.app_override_raw = Some("[Context]\ndevices=!input;\n".to_string());
+        assert_eq!(
+            detect_gamepad_input_grant(&rec),
+            (false, Some(PermissionSourceLayer::AppOverride))
+        );
+    }
+
+    #[test]
+    fn test_compat_helpers_until_changed_callout_and_state_defaults() {
+        use crate::components::plan_dialog::is_until_changed_relaxation;
+        use crate::pages::system_protection::{expand_user_container_path, nofile_action_request};
+        use blaze_akrep_common::{CompatPackageGroup, OverrideDuration, SelinuxDesiredMode};
+
+        let st = AppUiState::new(Lang::Tr);
+        assert_eq!(st.selinux_duration_idx, 0);
+        assert_eq!(st.firewall_duration_idx, 0);
+        assert_eq!(st.oomd_duration_idx, 0);
+        assert_eq!(st.container_dir_path, "");
+        assert!(st.container_dir_recursive);
+
+        assert_eq!(
+            expand_user_container_path("  ~/android  ", Some("/home/tester")),
+            "/home/tester/android"
+        );
+        assert_eq!(
+            expand_user_container_path("/mnt/aosp/", Some("/home/tester")),
+            "/mnt/aosp/"
+        );
+        assert_eq!(
+            expand_user_container_path("~", Some("/home/tester")),
+            "/home/tester"
+        );
+
+        let nofile_on = nofile_action_request(true);
+        let nofile_off = nofile_action_request(false);
+        assert!(nofile_on.validate_red_lines().is_ok());
+        assert!(nofile_off.validate_red_lines().is_ok());
+        assert_eq!(
+            nofile_on,
+            ActionRequest::DevLimitsSetNofile {
+                enabled: true,
+                soft_limit: 65536,
+                hard_limit: 524288,
+            }
+        );
+        assert_eq!(
+            nofile_off,
+            ActionRequest::DevLimitsSetNofile {
+                enabled: false,
+                soft_limit: 65536,
+                hard_limit: 524288,
+            }
+        );
+
+        assert!(is_until_changed_relaxation(&ActionRequest::SelinuxSetMode {
+            mode: SelinuxDesiredMode::Permissive,
+            duration: OverrideDuration::UntilChanged,
+        }));
+        assert!(!is_until_changed_relaxation(
+            &ActionRequest::SelinuxSetMode {
+                mode: SelinuxDesiredMode::Enforcing,
+                duration: OverrideDuration::UntilChanged,
+            }
+        ));
+        assert!(is_until_changed_relaxation(
+            &ActionRequest::FirewallSetState {
+                enabled: false,
+                duration: OverrideDuration::UntilChanged,
+            }
+        ));
+        assert!(!is_until_changed_relaxation(
+            &ActionRequest::FirewallSetState {
+                enabled: true,
+                duration: OverrideDuration::UntilChanged,
+            }
+        ));
+        assert!(is_until_changed_relaxation(&ActionRequest::OomdSetState {
+            enabled: false,
+            duration: OverrideDuration::UntilChanged,
+        }));
+        assert!(!is_until_changed_relaxation(&ActionRequest::OomdSetState {
+            enabled: false,
+            duration: OverrideDuration::Timed { minutes: 60 },
+        }));
+
+        for req in [
+            ActionRequest::SelinuxSetMode {
+                mode: SelinuxDesiredMode::Permissive,
+                duration: OverrideDuration::Timed { minutes: 15 },
+            },
+            ActionRequest::FirewallSetState {
+                enabled: false,
+                duration: OverrideDuration::UntilReboot,
+            },
+            ActionRequest::OomdSetState {
+                enabled: true,
+                duration: OverrideDuration::UntilChanged,
+            },
+            nofile_on,
+            ActionRequest::SelinuxLabelContainerDir {
+                target_path: "/mnt/aosp".to_string(),
+                recursive: true,
+            },
+            ActionRequest::InstallCompatibilityPackage {
+                package_group: CompatPackageGroup::AndroidUdevRules,
+            },
+        ] {
+            for lang in [Lang::Tr, Lang::En] {
+                let s = summarize_action_request(&req, lang);
+                assert_ne!(s, lang.pick("Güvenlik işlemi", "Security action"));
+                assert!(!s.contains('!'));
+                assert!(!s.to_ascii_lowercase().contains("polkit"));
+                assert!(!contains_emoji(&s));
+            }
+        }
     }
 }

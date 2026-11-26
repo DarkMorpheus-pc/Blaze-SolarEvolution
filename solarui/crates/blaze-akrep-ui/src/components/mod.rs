@@ -5,11 +5,217 @@ pub mod plan_dialog;
 pub mod status_card;
 
 use crate::i18n::Lang;
-use blaze_akrep_common::{RiskLevel, TransactionState};
-use blaze_sentinel_core::{AkrepSeverity, Availability};
+use blaze_akrep_common::{OverrideDuration, RiskLevel, TransactionState};
+use blaze_sentinel_core::{ActiveOverrideEntry, AkrepSeverity, Availability};
 use gtk4::pango::WrapMode;
 use gtk4::prelude::*;
-use gtk4::{Align, Box as GtkBox, Image, Label, Orientation};
+use gtk4::{Align, Box as GtkBox, Button, FlowBox, Image, Label, Orientation, SelectionMode};
+use std::cell::RefCell;
+use std::rc::Rc;
+
+/// Choice entry for a segmented protection override duration selector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DurationChoice {
+    pub label_tr: &'static str,
+    pub label_en: &'static str,
+    pub duration: OverrideDuration,
+}
+
+/// Duration choices for SELinux and Firewalld overrides.
+pub const PROTECTION_DURATION_CHOICES: [DurationChoice; 4] = [
+    DurationChoice {
+        label_tr: "15 dk",
+        label_en: "15 min",
+        duration: OverrideDuration::Timed { minutes: 15 },
+    },
+    DurationChoice {
+        label_tr: "1 saat",
+        label_en: "1 hour",
+        duration: OverrideDuration::Timed { minutes: 60 },
+    },
+    DurationChoice {
+        label_tr: "Yeniden başlatmaya kadar",
+        label_en: "Until reboot",
+        duration: OverrideDuration::UntilReboot,
+    },
+    DurationChoice {
+        label_tr: "Ben tekrar değiştirene kadar",
+        label_en: "Until I change it",
+        duration: OverrideDuration::UntilChanged,
+    },
+];
+
+/// Duration choices for `systemd-oomd` build-workload pauses.
+pub const OOMD_DURATION_CHOICES: [DurationChoice; 4] = [
+    DurationChoice {
+        label_tr: "1 saat",
+        label_en: "1 hour",
+        duration: OverrideDuration::Timed { minutes: 60 },
+    },
+    DurationChoice {
+        label_tr: "4 saat",
+        label_en: "4 hours",
+        duration: OverrideDuration::Timed { minutes: 240 },
+    },
+    DurationChoice {
+        label_tr: "Yeniden başlatmaya kadar",
+        label_en: "Until reboot",
+        duration: OverrideDuration::UntilReboot,
+    },
+    DurationChoice {
+        label_tr: "Ben tekrar değiştirene kadar",
+        label_en: "Until I change it",
+        duration: OverrideDuration::UntilChanged,
+    },
+];
+
+/// Maps a selected duration index safely back to `OverrideDuration`.
+pub fn duration_from_choice_idx(choices: &[DurationChoice], idx: usize) -> OverrideDuration {
+    choices.get(idx).unwrap_or(&choices[0]).duration
+}
+
+/// Formats an `OverrideDuration` cleanly for plan previews and transaction history.
+pub fn format_duration_badge(duration: OverrideDuration, lang: Lang) -> String {
+    match duration {
+        OverrideDuration::Timed { minutes } if minutes >= 60 && minutes % 60 == 0 => {
+            let hours = minutes / 60;
+            if lang == Lang::Tr {
+                format!("{} saat", hours)
+            } else if hours == 1 {
+                "1 hour".to_string()
+            } else {
+                format!("{} hours", hours)
+            }
+        }
+        OverrideDuration::Timed { minutes } => format!("{} {}", minutes, lang.pick("dk", "min")),
+        OverrideDuration::UntilReboot => {
+            lang.pick("Yeniden başlatmaya kadar", "Until reboot").to_string()
+        }
+        OverrideDuration::UntilChanged => lang
+            .pick("Ben tekrar değiştirene kadar", "Until manually enabled")
+            .to_string(),
+    }
+}
+
+/// Formats live remaining countdown or persistence mode for an active override entry.
+pub fn format_override_status_text(entry: &ActiveOverrideEntry, lang: Lang) -> String {
+    match entry.duration_kind.as_str() {
+        "timed" => {
+            let rem_secs = entry
+                .remaining_secs
+                .unwrap_or_else(|| i64::from(entry.minutes.unwrap_or(1)) * 60)
+                .max(1);
+            if rem_secs >= 60 {
+                let mins = (rem_secs + 59) / 60;
+                format!("{} {}", mins, lang.pick("dk kaldı", "min remaining"))
+            } else {
+                format!("{} {}", rem_secs, lang.pick("sn kaldı", "s remaining"))
+            }
+        }
+        "until_reboot" => {
+            lang.pick("Yeniden başlatmaya kadar", "Until reboot").to_string()
+        }
+        _ => lang
+            .pick("Elle açılana kadar", "Until manually enabled")
+            .to_string(),
+    }
+}
+
+/// Returns a localized display name for an active override subsystem.
+pub fn override_subsystem_label(subsystem: &str, lang: Lang) -> &'static str {
+    match subsystem {
+        "selinux" => lang.pick("SELinux (Permissive)", "SELinux (Permissive)"),
+        "firewalld" => lang.pick("Güvenlik duvarı (firewalld)", "Firewall (firewalld)"),
+        "oomd" => lang.pick(
+            "Bellek yöneticisi (systemd-oomd)",
+            "Memory manager (systemd-oomd)",
+        ),
+        _ => lang.pick("Sistem koruması", "System protection"),
+    }
+}
+
+/// Returns a short header summary string when one or more overrides are active.
+pub fn compact_override_summary(overrides: &[ActiveOverrideEntry], lang: Lang) -> String {
+    if overrides.len() == 1 {
+        let ov = &overrides[0];
+        let short_name = match ov.subsystem.as_str() {
+            "selinux" => "SELinux",
+            "firewalld" => "Firewalld",
+            "oomd" => "oomd",
+            _ => lang.pick("Koruma", "Guard"),
+        };
+        format!(
+            "{} · {}",
+            short_name,
+            format_override_status_text(ov, lang)
+        )
+    } else {
+        format!(
+            "{} {}",
+            overrides.len(),
+            lang.pick("etkin gevşetme", "active overrides")
+        )
+    }
+}
+
+/// Builds a wrapping FlowBox segmented selector so 4 duration choices never clip at 1060x720.
+pub fn build_duration_selector(
+    choices: &'static [DurationChoice],
+    selected_idx: usize,
+    lang: Lang,
+    on_select: Rc<dyn Fn(usize)>,
+) -> FlowBox {
+    let flow = FlowBox::new();
+    flow.set_selection_mode(SelectionMode::None);
+    flow.set_homogeneous(false);
+    flow.set_column_spacing(8);
+    flow.set_row_spacing(8);
+    flow.set_max_children_per_line(4);
+    flow.set_min_children_per_line(1);
+    flow.set_hexpand(true);
+
+    let clamped_idx = if choices.is_empty() {
+        0
+    } else {
+        selected_idx.min(choices.len() - 1)
+    };
+
+    let buttons: Rc<RefCell<Vec<Button>>> =
+        Rc::new(RefCell::new(Vec::with_capacity(choices.len())));
+
+    for (idx, choice) in choices.iter().enumerate() {
+        let btn = Button::with_label(lang.pick(choice.label_tr, choice.label_en));
+        btn.add_css_class(if idx == clamped_idx {
+            "akrep-seg-active"
+        } else {
+            "akrep-seg-btn"
+        });
+        buttons.borrow_mut().push(btn.clone());
+        flow.insert(&btn, -1);
+        if let Some(fc) = btn.parent() {
+            fc.set_can_focus(false);
+        }
+    }
+
+    for (idx, btn) in buttons.borrow().iter().enumerate() {
+        let btns_ref = Rc::clone(&buttons);
+        let cb = Rc::clone(&on_select);
+        btn.connect_clicked(move |_| {
+            for (i, b) in btns_ref.borrow().iter().enumerate() {
+                if i == idx {
+                    b.remove_css_class("akrep-seg-btn");
+                    b.add_css_class("akrep-seg-active");
+                } else {
+                    b.remove_css_class("akrep-seg-active");
+                    b.add_css_class("akrep-seg-btn");
+                }
+            }
+            cb(idx);
+        });
+    }
+
+    flow
+}
 
 pub fn severity_css_class(sev: AkrepSeverity) -> &'static str {
     match sev {

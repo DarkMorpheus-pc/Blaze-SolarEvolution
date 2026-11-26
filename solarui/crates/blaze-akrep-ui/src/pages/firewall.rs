@@ -1,7 +1,10 @@
-use crate::components::{build_admin_note, build_kv_row, build_status_indicator};
+use crate::components::{
+    build_admin_note, build_duration_selector, build_kv_row, build_status_indicator,
+    duration_from_choice_idx, format_override_status_text, PROTECTION_DURATION_CHOICES,
+};
 use crate::dbus_client::{dispatch_cmd, UiCommand};
 use crate::state::{AppUiState, FirewallRuleInputKind};
-use blaze_akrep_common::{ActionRequest, FirewallProto, RulePersistence};
+use blaze_akrep_common::{ActionRequest, FirewallProto, OverrideDuration, RulePersistence};
 use gtk4::pango::WrapMode;
 use gtk4::prelude::*;
 use gtk4::{
@@ -86,28 +89,41 @@ pub fn build_firewall_page(
     let snap = st.snapshot.clone();
     let fw_state = st.firewall_state.clone();
     let draft = st.firewall_draft.clone();
+    let firewall_duration_idx = st.firewall_duration_idx;
     drop(st);
+
+    let fw_override = snap.as_ref().and_then(|sn| {
+        sn.active_overrides
+            .iter()
+            .find(|o| o.subsystem == "firewalld")
+    });
+    let snap_fw_off = snap
+        .as_ref()
+        .and_then(|sn| sn.cards.iter().find(|c| c.id == "firewall"))
+        .is_some_and(|c| c.metric.eq_ignore_ascii_case("OFF"));
+    let is_paused =
+        fw_override.is_some() || fw_state.as_ref().is_some_and(|fw| !fw.running) || snap_fw_off;
 
     let root = GtkBox::new(Orientation::Vertical, 20);
 
     let page_desc = Label::new(Some(lang.pick(
-        "Firewalld bölgeleri, ağ arayüzleri ve süreli port kuralları",
-        "Firewalld zones, network interfaces and timed port rules",
+        "Firewalld durumu, bölgeler, ağ arayüzleri ve süreli port kuralları",
+        "Firewalld state, zones, network interfaces and timed port rules",
     )));
     page_desc.add_css_class("akrep-subtitle");
     page_desc.set_xalign(0.0);
     page_desc.set_wrap(true);
     root.append(&page_desc);
 
-    // 1. Active Zones & Interface Bindings Card (NO disable firewalld button)
+    // 1. Firewalld State, Pause/Resume & Active Zones Card
     let status_card = GtkBox::new(Orientation::Vertical, 12);
     status_card.add_css_class("akrep-detail-box");
 
     let s_hdr = GtkBox::new(Orientation::Horizontal, 12);
     s_hdr.set_valign(Align::Center);
     let s_title = Label::new(Some(lang.pick(
-        "Etkin bölgeler ve arayüzler",
-        "Active zones and interfaces",
+        "Güvenlik duvarı durumu ve bölgeler",
+        "Firewall state and zones",
     )));
     s_title.add_css_class("akrep-section-hdr");
     s_title.set_xalign(0.0);
@@ -130,21 +146,136 @@ pub fn build_firewall_page(
     s_hdr.append(&inspect_btn);
     status_card.append(&s_hdr);
 
-    if let Some(fw) = &fw_state {
-        status_card.append(&build_status_indicator(
-            if fw.running {
-                "akrep-sev-protected"
-            } else {
-                "akrep-sev-critical"
-            },
-            if fw.running {
-                lang.pick("Firewalld etkin", "Firewalld active")
-            } else {
-                lang.pick("Firewalld pasif", "Firewalld inactive")
-            },
-            false,
+    let state_box = GtkBox::new(Orientation::Vertical, 8);
+    state_box.add_css_class("akrep-diff-row");
+
+    if is_paused {
+        let state_top = GtkBox::new(Orientation::Horizontal, 12);
+        state_top.set_valign(Align::Center);
+        let dot_cls = if fw_override.is_some_and(|o| o.duration_kind == "until_changed") {
+            "akrep-sev-critical"
+        } else {
+            "akrep-sev-attention"
+        };
+        let status_txt = if let Some(ov) = fw_override {
+            format!(
+                "{} · {}",
+                lang.pick("Duraklatıldı", "Paused"),
+                format_override_status_text(ov, lang)
+            )
+        } else {
+            lang.pick("Firewalld pasif", "Firewalld inactive")
+                .to_string()
+        };
+        let ind = build_status_indicator(dot_cls, &status_txt, false);
+        ind.set_hexpand(true);
+        state_top.append(&ind);
+
+        let enable_btn = Button::with_label(lang.pick("Etkinleştir", "Enable"));
+        enable_btn.add_css_class("akrep-primary-btn");
+        let cmd_en = cmd_tx.clone();
+        enable_btn.connect_clicked(move |_| {
+            dispatch_cmd(
+                &cmd_en,
+                UiCommand::CreatePlan {
+                    request: ActionRequest::FirewallSetState {
+                        enabled: true,
+                        duration: OverrideDuration::UntilChanged,
+                    },
+                },
+            );
+        });
+        state_top.append(&enable_btn);
+        state_box.append(&state_top);
+
+        let dur_row = GtkBox::new(Orientation::Horizontal, 8);
+        dur_row.set_valign(Align::Center);
+        let st_fd = Rc::clone(state);
+        dur_row.append(&build_duration_selector(
+            &PROTECTION_DURATION_CHOICES,
+            firewall_duration_idx,
+            lang,
+            Rc::new(move |idx| {
+                st_fd.borrow_mut().firewall_duration_idx = idx;
+            }),
         ));
 
+        let upd_btn = Button::with_label(lang.pick("Süreyi güncelle", "Update duration"));
+        upd_btn.add_css_class("akrep-ghost-btn");
+        upd_btn.set_valign(Align::Center);
+        let st_upd = Rc::clone(state);
+        let cmd_upd = cmd_tx.clone();
+        upd_btn.connect_clicked(move |_| {
+            let idx = st_upd.borrow().firewall_duration_idx;
+            let duration = duration_from_choice_idx(&PROTECTION_DURATION_CHOICES, idx);
+            dispatch_cmd(
+                &cmd_upd,
+                UiCommand::CreatePlan {
+                    request: ActionRequest::FirewallSetState {
+                        enabled: false,
+                        duration,
+                    },
+                },
+            );
+        });
+        dur_row.append(&upd_btn);
+        state_box.append(&dur_row);
+    } else {
+        let active_txt = if fw_state.is_some() || snap.is_some() {
+            (
+                "akrep-sev-protected",
+                lang.pick("Firewalld etkin", "Firewalld active"),
+                false,
+            )
+        } else {
+            (
+                "akrep-sev-unavailable",
+                lang.pick("Durum bekleniyor", "Awaiting state"),
+                true,
+            )
+        };
+        state_box.append(&build_status_indicator(
+            active_txt.0,
+            active_txt.1,
+            active_txt.2,
+        ));
+
+        let dur_row = GtkBox::new(Orientation::Horizontal, 8);
+        dur_row.set_valign(Align::Center);
+        let st_fd = Rc::clone(state);
+        dur_row.append(&build_duration_selector(
+            &PROTECTION_DURATION_CHOICES,
+            firewall_duration_idx,
+            lang,
+            Rc::new(move |idx| {
+                st_fd.borrow_mut().firewall_duration_idx = idx;
+            }),
+        ));
+
+        let pause_btn = Button::with_label(lang.pick("Duraklat", "Pause"));
+        pause_btn.add_css_class("akrep-ghost-btn");
+        pause_btn.set_valign(Align::Center);
+        let st_p = Rc::clone(state);
+        let cmd_p = cmd_tx.clone();
+        pause_btn.connect_clicked(move |_| {
+            let idx = st_p.borrow().firewall_duration_idx;
+            let duration = duration_from_choice_idx(&PROTECTION_DURATION_CHOICES, idx);
+            dispatch_cmd(
+                &cmd_p,
+                UiCommand::CreatePlan {
+                    request: ActionRequest::FirewallSetState {
+                        enabled: false,
+                        duration,
+                    },
+                },
+            );
+        });
+        dur_row.append(&pause_btn);
+        state_box.append(&dur_row);
+    }
+    status_card.append(&state_box);
+
+    if let Some(fw) = &fw_state {
         status_card.append(&build_kv_row(
             lang.pick("Varsayılan bölge", "Default zone"),
             &fw.default_zone,
@@ -238,12 +369,13 @@ pub fn build_firewall_page(
     status_card.append(&bind_actions);
 
     let guard_lbl = Label::new(Some(lang.pick(
-        "Güvenlik duvarı tamamen kapatılamaz; kural ekleyip çıkarabilirsiniz",
-        "Firewall cannot be disabled; you can add or remove rules",
+        "Güvenlik duvarını süreli veya yeniden etkinleştirene kadar duraklatabilir, bölge kuralları ekleyebilirsiniz",
+        "You can pause the firewall temporarily or until re-enabled, and manage zone rules",
     )));
     guard_lbl.add_css_class("akrep-meta");
     guard_lbl.set_xalign(0.0);
     guard_lbl.set_wrap(true);
+    guard_lbl.set_wrap_mode(WrapMode::WordChar);
     status_card.append(&guard_lbl);
     status_card.append(&build_admin_note(lang));
     root.append(&status_card);
@@ -264,10 +396,11 @@ pub fn build_firewall_page(
 
     let preset_flow = FlowBox::new();
     preset_flow.set_selection_mode(SelectionMode::None);
+    preset_flow.set_homogeneous(false);
     preset_flow.set_column_spacing(8);
     preset_flow.set_row_spacing(8);
     preset_flow.set_max_children_per_line(4);
-    preset_flow.set_min_children_per_line(2);
+    preset_flow.set_min_children_per_line(1);
 
     for (label_tr, label_en, kind, spec, proto, cidr) in [
         (
@@ -301,6 +434,38 @@ pub fn build_firewall_page(
             "443",
             FirewallProto::Tcp,
             "",
+        ),
+        (
+            "Samba (yerel ağ)",
+            "Samba (local network)",
+            FirewallRuleInputKind::Service,
+            "samba",
+            FirewallProto::Tcp,
+            "192.168.1.0/24",
+        ),
+        (
+            "Web geliştirme (3000/tcp)",
+            "Web dev (3000/tcp)",
+            FirewallRuleInputKind::Port,
+            "3000",
+            FirewallProto::Tcp,
+            "192.168.1.0/24",
+        ),
+        (
+            "Web geliştirme (8080/tcp)",
+            "Web dev (8080/tcp)",
+            FirewallRuleInputKind::Port,
+            "8080",
+            FirewallProto::Tcp,
+            "192.168.1.0/24",
+        ),
+        (
+            "Jellyfin (8096/tcp)",
+            "Jellyfin (8096/tcp)",
+            FirewallRuleInputKind::Port,
+            "8096",
+            FirewallProto::Tcp,
+            "192.168.1.0/24",
         ),
     ] {
         let pbtn = Button::with_label(lang.pick(label_tr, label_en));
@@ -449,7 +614,11 @@ pub fn build_firewall_page(
     row3.append(&cidr_entry);
 
     let add_btn = Button::with_label(lang.pick("Önizle", "Preview"));
-    add_btn.add_css_class("akrep-primary-btn");
+    add_btn.add_css_class(if is_paused {
+        "akrep-ghost-btn"
+    } else {
+        "akrep-primary-btn"
+    });
     let cmd_add = cmd_tx.clone();
     let st_add = Rc::clone(state);
     add_btn.connect_clicked(move |_| {

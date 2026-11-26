@@ -1,8 +1,10 @@
-use crate::components::{build_admin_note, build_kv_row, build_tx_state_indicator};
+use crate::components::{
+    build_admin_note, build_kv_row, build_tx_state_indicator, format_duration_badge,
+};
 use crate::dbus_client::{dispatch_cmd, UiCommand};
 use crate::i18n::Lang;
 use crate::state::AppUiState;
-use blaze_akrep_common::{ActionRequest, TransactionState};
+use blaze_akrep_common::{ActionRequest, SelinuxDesiredMode, TransactionState};
 use gtk4::pango::WrapMode;
 use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Button, Expander, Label, Orientation};
@@ -119,6 +121,74 @@ pub fn summarize_action_request(req: &ActionRequest, lang: Lang) -> String {
         ActionRequest::InstallOptionalScanner => {
             lang.pick("ClamAV kurulumu", "Install ClamAV").to_string()
         }
+        ActionRequest::SelinuxSetMode { mode, duration } => match mode {
+            SelinuxDesiredMode::Enforcing => lang
+                .pick("SELinux Enforcing moduna dön", "Return SELinux to Enforcing")
+                .to_string(),
+            SelinuxDesiredMode::Permissive => format!(
+                "{} ({})",
+                lang.pick("SELinux Permissive modu", "SELinux Permissive mode"),
+                format_duration_badge(*duration, lang)
+            ),
+        },
+        ActionRequest::FirewallSetState { enabled, duration } => {
+            if *enabled {
+                lang.pick("Güvenlik duvarını etkinleştir", "Enable firewall")
+                    .to_string()
+            } else {
+                format!(
+                    "{} ({})",
+                    lang.pick("Güvenlik duvarını duraklat", "Pause firewall"),
+                    format_duration_badge(*duration, lang)
+                )
+            }
+        }
+        ActionRequest::OomdSetState { enabled, duration } => {
+            if *enabled {
+                lang.pick("systemd-oomd etkinleştir", "Enable systemd-oomd")
+                    .to_string()
+            } else {
+                format!(
+                    "{} ({})",
+                    lang.pick("systemd-oomd duraklat", "Pause systemd-oomd"),
+                    format_duration_badge(*duration, lang)
+                )
+            }
+        }
+        ActionRequest::DevLimitsSetNofile {
+            enabled,
+            soft_limit,
+            hard_limit,
+        } => {
+            if *enabled {
+                format!(
+                    "{}: {} / {}",
+                    lang.pick("Açık dosya limiti", "Open file limit"),
+                    soft_limit,
+                    hard_limit
+                )
+            } else {
+                lang.pick(
+                    "Açık dosya limitini varsayılana döndür",
+                    "Restore default open file limit",
+                )
+                .to_string()
+            }
+        }
+        ActionRequest::SelinuxLabelContainerDir {
+            target_path,
+            recursive,
+        } => format!(
+            "{}: {}{}",
+            lang.pick("Konteyner klasör etiketi", "Container folder label"),
+            target_path,
+            if *recursive { " (-R)" } else { "" }
+        ),
+        ActionRequest::InstallCompatibilityPackage { package_group } => format!(
+            "{}: {}",
+            lang.pick("Uyumluluk paketi kur", "Install compatibility package"),
+            package_group.rpm_packages().join(", ")
+        ),
         #[allow(unreachable_patterns)]
         _ => lang.pick("Güvenlik işlemi", "Security action").to_string(),
     }

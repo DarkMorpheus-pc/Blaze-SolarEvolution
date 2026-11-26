@@ -3,7 +3,8 @@ use crate::dbus_client::{dispatch_cmd, UiCommand};
 use crate::i18n::Lang;
 use crate::state::{AppFilterTab, AppUiState};
 use blaze_akrep_common::{
-    ActionRequest, BusKind, FlatpakAppRecord, FlatpakScope, PermissionSourceLayer, TransactionState,
+    ActionRequest, BusKind, FlatpakAppRecord, FlatpakOverrideDocument, FlatpakScope,
+    PermissionSourceLayer, TransactionState, SECTION_CONTEXT,
 };
 use gtk4::pango::WrapMode;
 use gtk4::prelude::*;
@@ -37,6 +38,47 @@ pub fn compute_capability_override_delta(
             vec![(spec_key.to_string(), neg_tok.to_string())],
         )
     }
+}
+
+/// Detects whether `Context.devices=input` (gamepad evdev access) is active from override layers or `devices=all`.
+pub fn detect_gamepad_input_grant(app: &FlatpakAppRecord) -> (bool, Option<PermissionSourceLayer>) {
+    let mut granted = app.effective_permissions.camera.direct_devices_all;
+    let mut source = if granted {
+        app.effective_permissions.camera.source
+    } else {
+        None
+    };
+
+    for (layer, raw_opt) in [
+        (
+            PermissionSourceLayer::GlobalOverride,
+            app.global_override_raw.as_deref(),
+        ),
+        (
+            PermissionSourceLayer::AppOverride,
+            app.app_override_raw.as_deref(),
+        ),
+    ] {
+        let Some(raw) = raw_opt else { continue };
+        let Ok(doc) = FlatpakOverrideDocument::parse(raw) else {
+            continue;
+        };
+        for tok in doc.get_tokens(SECTION_CONTEXT, "devices") {
+            match tok.trim() {
+                "input" => {
+                    granted = true;
+                    source = Some(layer);
+                }
+                "!input" => {
+                    granted = false;
+                    source = Some(layer);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    (granted, source)
 }
 
 fn source_layer_label(layer: Option<PermissionSourceLayer>, lang: Lang) -> &'static str {
@@ -396,6 +438,7 @@ pub fn build_applications_page(
         }
 
         let ep = &app.effective_permissions;
+        let (gamepad_granted, gamepad_src) = detect_gamepad_input_grant(app);
         let toggles: Vec<CapabilityToggleSpec<'_>> = vec![
             (
                 lang.pick("Ağ erişimi", "Network access"),
@@ -414,6 +457,12 @@ pub fn build_applications_page(
                 ep.camera.direct_devices_all,
                 ep.camera.source,
                 ("Context.devices", "all", "!all"),
+            ),
+            (
+                lang.pick("Oyun kumandası (input)", "Gamepads (input)"),
+                gamepad_granted,
+                gamepad_src,
+                ("Context.devices", "input", "!input"),
             ),
             (
                 lang.pick("USB aygıtları", "USB devices"),
@@ -576,6 +625,31 @@ pub fn build_applications_page(
         });
         add_fs_row.append(&add_fs_btn);
         perm_card.append(&add_fs_row);
+
+        let quick_fs_row = GtkBox::new(Orientation::Horizontal, 8);
+        quick_fs_row.set_valign(Align::Center);
+        let qfs_lbl = Label::new(Some(lang.pick("Hızlı disk erişimi", "Quick disk access")));
+        qfs_lbl.add_css_class("akrep-meta");
+        qfs_lbl.set_xalign(0.0);
+        quick_fs_row.append(&qfs_lbl);
+
+        for mount_path in ["/mnt", "/run/media"] {
+            let qbtn = Button::with_label(mount_path);
+            qbtn.add_css_class("akrep-ghost-btn");
+            let app_q = app.clone();
+            let cmd_q = cmd_tx.clone();
+            let mp = mount_path.to_string();
+            qbtn.connect_clicked(move |_| {
+                dispatch_override(
+                    &app_q,
+                    vec![("Context.filesystems".to_string(), mp.clone())],
+                    vec![],
+                    &cmd_q,
+                );
+            });
+            quick_fs_row.append(&qbtn);
+        }
+        perm_card.append(&quick_fs_row);
 
         // Bus policies viewer & restriction controls
         let bus_hdr = Label::new(Some(lang.pick(

@@ -134,6 +134,12 @@ button.akrep-nav-btn-active .akrep-nav-indicator {
     border-radius: 12px;
     padding: 16px 20px;
 }
+.akrep-override-card {
+    background-color: #19191b;
+    border: 1px solid rgba(217, 160, 63, 0.35);
+    border-radius: 12px;
+    padding: 16px 20px;
+}
 .akrep-diff-row {
     background-color: #141415;
     border: 1px solid rgba(237, 237, 237, 0.08);
@@ -164,6 +170,13 @@ button.akrep-card:active {
 .akrep-offline-banner {
     background-color: #19191b;
     border: 1px solid rgba(217, 160, 63, 0.35);
+    border-radius: 8px;
+    padding: 12px 16px;
+    color: #ededed;
+}
+.akrep-high-risk-banner {
+    background-color: #19191b;
+    border: 1px solid rgba(229, 72, 77, 0.45);
     border-radius: 8px;
     padding: 12px 16px;
     color: #ededed;

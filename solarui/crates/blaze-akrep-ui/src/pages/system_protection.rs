@@ -1,20 +1,487 @@
 use crate::components::{
-    build_admin_note, build_kv_row, build_risk_indicator, build_severity_indicator,
-    build_status_indicator, risk_css_class,
+    build_admin_note, build_duration_selector, build_kv_row, build_risk_indicator,
+    build_severity_indicator, build_status_indicator, duration_from_choice_idx,
+    format_override_status_text, risk_css_class, OOMD_DURATION_CHOICES,
+    PROTECTION_DURATION_CHOICES,
 };
 use crate::dbus_client::{dispatch_cmd, UiCommand};
 use crate::i18n::Lang;
 use crate::state::AppUiState;
 use blaze_akrep_common::{
-    ActionRequest, SelinuxBooleanEntry, SelinuxDiagnoseQuery, SelinuxRuntimeMode,
-    SuggestedSelinuxFix,
+    ActionRequest, CompatPackageGroup, OverrideDuration, SelinuxBooleanEntry, SelinuxDesiredMode,
+    SelinuxDiagnoseQuery, SelinuxRuntimeMode, SuggestedSelinuxFix,
 };
-use blaze_sentinel_core::AkrepSeverity;
+use blaze_sentinel_core::{AkrepSeverity, AkrepSnapshot};
 use gtk4::pango::WrapMode;
 use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Button, CheckButton, Entry, Label, Orientation};
 use std::cell::RefCell;
 use std::rc::Rc;
+
+/// Expands leading `~/` or `~` using `HOME` (or test override) for container folder actions.
+pub fn expand_user_container_path(raw: &str, home_override: Option<&str>) -> String {
+    let trimmed = raw.trim();
+    let home = home_override
+        .map(ToString::to_string)
+        .or_else(|| std::env::var("HOME").ok())
+        .filter(|h| !h.trim().is_empty() && h != "/");
+    if let Some(h) = home {
+        let h_clean = h.trim_end_matches('/');
+        if trimmed == "~" {
+            return h_clean.to_string();
+        }
+        if let Some(rest) = trimmed.strip_prefix("~/") {
+            return format!("{}/{}", h_clean, rest);
+        }
+    }
+    trimmed.to_string()
+}
+
+/// Builds a `DevLimitsSetNofile` request keeping Fedora's 524288 hard limit intact.
+pub fn nofile_action_request(enabled: bool) -> ActionRequest {
+    ActionRequest::DevLimitsSetNofile {
+        enabled,
+        soft_limit: 65_536,
+        hard_limit: 524_288,
+    }
+}
+
+fn detect_selinux_mode_state(
+    snap: Option<&AkrepSnapshot>,
+    diag: Option<&blaze_akrep_common::SelinuxDiagnoseResponse>,
+) -> (bool, bool, Option<AkrepSeverity>) {
+    let sel_override = snap.and_then(|sn| {
+        sn.active_overrides
+            .iter()
+            .find(|o| o.subsystem == "selinux")
+    });
+    let snap_metric = snap.and_then(|sn| {
+        sn.cards
+            .iter()
+            .find(|c| c.id == "system_protection")
+            .map(|c| c.metric.as_str())
+    });
+    let is_permissive = sel_override.is_some()
+        || snap_metric.is_some_and(|m| m.eq_ignore_ascii_case("Permissive"))
+        || (snap_metric.is_none()
+            && diag.is_some_and(|d| d.runtime_mode == SelinuxRuntimeMode::Permissive));
+    let is_disabled = snap_metric.is_some_and(|m| m.eq_ignore_ascii_case("Disabled"))
+        || (snap_metric.is_none()
+            && diag.is_some_and(|d| d.runtime_mode == SelinuxRuntimeMode::Disabled));
+
+    let sev = if is_disabled {
+        Some(AkrepSeverity::Critical)
+    } else if is_permissive {
+        Some(AkrepSeverity::Attention)
+    } else if snap_metric.is_some_and(|m| m.eq_ignore_ascii_case("Enforcing"))
+        || diag.is_some_and(|d| d.runtime_mode == SelinuxRuntimeMode::Enforcing)
+    {
+        Some(AkrepSeverity::Protected)
+    } else {
+        None
+    };
+
+    (is_permissive, is_disabled, sev)
+}
+
+fn build_dev_compat_card(
+    state: &Rc<RefCell<AppUiState>>,
+    cmd_tx: &async_channel::Sender<UiCommand>,
+    snap: Option<&AkrepSnapshot>,
+    lang: Lang,
+) -> GtkBox {
+    let st = state.borrow();
+    let oomd_duration_idx = st.oomd_duration_idx;
+    let container_dir_path = st.container_dir_path.clone();
+    let container_dir_recursive = st.container_dir_recursive;
+    drop(st);
+
+    let compat = snap.and_then(|s| s.system_compat.as_ref());
+    let oomd_override =
+        snap.and_then(|s| s.active_overrides.iter().find(|o| o.subsystem == "oomd"));
+
+    let card = GtkBox::new(Orientation::Vertical, 12);
+    card.add_css_class("akrep-detail-box");
+
+    let hdr = Label::new(Some(lang.pick(
+        "Geliştirici ve derleme uyumluluğu",
+        "Developer and build compatibility",
+    )));
+    hdr.add_css_class("akrep-section-hdr");
+    hdr.set_xalign(0.0);
+    card.append(&hdr);
+
+    let sub = Label::new(Some(lang.pick(
+        "Ağır derleme iş yükleri, konteyner klasörleri ve Android geliştirme araçları",
+        "Heavy build workloads, container folders and Android development tools",
+    )));
+    sub.add_css_class("akrep-subtitle");
+    sub.set_xalign(0.0);
+    sub.set_wrap(true);
+    sub.set_wrap_mode(WrapMode::WordChar);
+    card.append(&sub);
+    card.append(&build_admin_note(lang));
+
+    // 1. systemd-oomd pause/resume + duration selector
+    let oomd_box = GtkBox::new(Orientation::Vertical, 8);
+    oomd_box.add_css_class("akrep-diff-row");
+
+    let oomd_top = GtkBox::new(Orientation::Horizontal, 12);
+    oomd_top.set_valign(Align::Center);
+    let oomd_title = Label::new(Some(lang.pick(
+        "Bellek yöneticisi (systemd-oomd)",
+        "Memory manager (systemd-oomd)",
+    )));
+    oomd_title.add_css_class("akrep-card-title");
+    oomd_title.set_xalign(0.0);
+    oomd_title.set_wrap(true);
+    oomd_title.set_hexpand(true);
+    oomd_top.append(&oomd_title);
+
+    let oomd_paused = oomd_override.is_some() || compat.is_some_and(|c| !c.oomd_active);
+    if oomd_paused {
+        let status_lbl = if let Some(ov) = oomd_override {
+            format!(
+                "{} · {}",
+                lang.pick("Duraklatıldı", "Paused"),
+                format_override_status_text(ov, lang)
+            )
+        } else {
+            lang.pick("Duraklatıldı", "Paused").to_string()
+        };
+        oomd_top.append(&build_status_indicator(
+            "akrep-sev-attention",
+            &status_lbl,
+            false,
+        ));
+        let resume_btn = Button::with_label(lang.pick("Etkinleştir", "Enable"));
+        resume_btn.add_css_class("akrep-ghost-btn");
+        let cmd_on = cmd_tx.clone();
+        resume_btn.connect_clicked(move |_| {
+            dispatch_cmd(
+                &cmd_on,
+                UiCommand::CreatePlan {
+                    request: ActionRequest::OomdSetState {
+                        enabled: true,
+                        duration: OverrideDuration::UntilChanged,
+                    },
+                },
+            );
+        });
+        oomd_top.append(&resume_btn);
+    } else {
+        let (dot_cls, dot_txt, muted) = if compat.is_some() {
+            ("akrep-sev-protected", lang.pick("Etkin", "Active"), false)
+        } else {
+            (
+                "akrep-sev-unavailable",
+                lang.pick("Durum bekleniyor", "Awaiting state"),
+                true,
+            )
+        };
+        oomd_top.append(&build_status_indicator(dot_cls, dot_txt, muted));
+    }
+    oomd_box.append(&oomd_top);
+
+    let oomd_desc = Label::new(Some(lang.pick(
+        "AOSP, Rust veya C++ derlemelerinde yüksek bellek nedeniyle süreç sonlandırmayı önler",
+        "Prevents premature process termination during heavy AOSP, Rust or C++ builds",
+    )));
+    oomd_desc.add_css_class("akrep-meta");
+    oomd_desc.set_xalign(0.0);
+    oomd_desc.set_wrap(true);
+    oomd_desc.set_wrap_mode(WrapMode::WordChar);
+    oomd_box.append(&oomd_desc);
+
+    let oomd_ctrl = GtkBox::new(Orientation::Horizontal, 8);
+    oomd_ctrl.set_valign(Align::Center);
+    let st_od = Rc::clone(state);
+    let oomd_sel = build_duration_selector(
+        &OOMD_DURATION_CHOICES,
+        oomd_duration_idx,
+        lang,
+        Rc::new(move |idx| {
+            st_od.borrow_mut().oomd_duration_idx = idx;
+        }),
+    );
+    oomd_ctrl.append(&oomd_sel);
+
+    let oomd_pause_btn = Button::with_label(if oomd_paused {
+        lang.pick("Süreyi güncelle", "Update duration")
+    } else {
+        lang.pick("Duraklat", "Pause")
+    });
+    oomd_pause_btn.add_css_class("akrep-ghost-btn");
+    oomd_pause_btn.set_valign(Align::Center);
+    let st_op = Rc::clone(state);
+    let cmd_op = cmd_tx.clone();
+    oomd_pause_btn.connect_clicked(move |_| {
+        let idx = st_op.borrow().oomd_duration_idx;
+        let duration = duration_from_choice_idx(&OOMD_DURATION_CHOICES, idx);
+        dispatch_cmd(
+            &cmd_op,
+            UiCommand::CreatePlan {
+                request: ActionRequest::OomdSetState {
+                    enabled: false,
+                    duration,
+                },
+            },
+        );
+    });
+    oomd_ctrl.append(&oomd_pause_btn);
+    oomd_box.append(&oomd_ctrl);
+    card.append(&oomd_box);
+
+    // 2. Open file descriptor limit (nofile 65536 / 524288)
+    let nofile_box = GtkBox::new(Orientation::Horizontal, 12);
+    nofile_box.add_css_class("akrep-diff-row");
+    nofile_box.set_valign(Align::Center);
+
+    let nf_col = GtkBox::new(Orientation::Vertical, 4);
+    nf_col.set_hexpand(true);
+    let nf_title = Label::new(Some(lang.pick(
+        "Açık dosya limiti (nofile 65536 / 524288)",
+        "Open file limit (nofile 65536 / 524288)",
+    )));
+    nf_title.add_css_class("akrep-card-title");
+    nf_title.set_xalign(0.0);
+    nf_title.set_wrap(true);
+    nf_col.append(&nf_title);
+
+    let nf_desc = Label::new(Some(lang.pick(
+        "Yumuşak sınırı 65536 yaparken Fedora sert sınırını (524288) korur",
+        "Raises soft limit to 65536 while preserving Fedora hard limit (524288)",
+    )));
+    nf_desc.add_css_class("akrep-meta");
+    nf_desc.set_xalign(0.0);
+    nf_desc.set_wrap(true);
+    nf_desc.set_wrap_mode(WrapMode::WordChar);
+    nf_col.append(&nf_desc);
+    nofile_box.append(&nf_col);
+
+    let nofile_active = compat.is_some_and(|c| c.nofile_enabled);
+    let (nf_dot, nf_txt, nf_muted) = if let Some(c) = compat {
+        if c.nofile_enabled {
+            (
+                "akrep-sev-protected",
+                format!(
+                    "{} / {} {}",
+                    c.nofile_soft,
+                    c.nofile_hard,
+                    lang.pick("etkin", "active")
+                ),
+                false,
+            )
+        } else {
+            (
+                "akrep-sev-unavailable",
+                format!(
+                    "{} ({} / {})",
+                    lang.pick("Varsayılan", "Default"),
+                    c.nofile_soft,
+                    c.nofile_hard
+                ),
+                false,
+            )
+        }
+    } else {
+        (
+            "akrep-sev-unavailable",
+            lang.pick("Varsayılan", "Default").to_string(),
+            true,
+        )
+    };
+    nofile_box.append(&build_status_indicator(nf_dot, &nf_txt, nf_muted));
+
+    let nf_btn = Button::with_label(if nofile_active {
+        lang.pick("Varsayılana dön", "Restore default")
+    } else {
+        lang.pick("Etkinleştir", "Enable")
+    });
+    nf_btn.add_css_class("akrep-ghost-btn");
+    let cmd_nf = cmd_tx.clone();
+    nf_btn.connect_clicked(move |_| {
+        dispatch_cmd(
+            &cmd_nf,
+            UiCommand::CreatePlan {
+                request: nofile_action_request(!nofile_active),
+            },
+        );
+    });
+    nofile_box.append(&nf_btn);
+    card.append(&nofile_box);
+
+    // 3. Container / ROM workspace directory label + restorecon
+    let cdir_box = GtkBox::new(Orientation::Vertical, 8);
+    cdir_box.add_css_class("akrep-diff-row");
+
+    let cdir_title = Label::new(Some(lang.pick(
+        "Konteyner / ROM derleme klasörü izni",
+        "Container / ROM build folder label",
+    )));
+    cdir_title.add_css_class("akrep-card-title");
+    cdir_title.set_xalign(0.0);
+    cdir_box.append(&cdir_title);
+
+    let cdir_desc = Label::new(Some(lang.pick(
+        "Çalışma klasörüne container_file_t etiketi uygular (ör. ~/android veya /mnt/aosp)",
+        "Applies container_file_t label to workspace folders (e.g. ~/android or /mnt/aosp)",
+    )));
+    cdir_desc.add_css_class("akrep-meta");
+    cdir_desc.set_xalign(0.0);
+    cdir_desc.set_wrap(true);
+    cdir_desc.set_wrap_mode(WrapMode::WordChar);
+    cdir_box.append(&cdir_desc);
+
+    let cdir_in_row = GtkBox::new(Orientation::Horizontal, 8);
+    cdir_in_row.set_valign(Align::Center);
+    let cdir_ent = Entry::new();
+    cdir_ent.add_css_class("akrep-entry");
+    cdir_ent.set_width_chars(14);
+    cdir_ent.set_hexpand(true);
+    cdir_ent.set_placeholder_text(Some("/home/kullanici/android"));
+    cdir_ent.set_text(&container_dir_path);
+    let st_cd = Rc::clone(state);
+    cdir_ent.connect_changed(move |ent| {
+        st_cd.borrow_mut().container_dir_path = ent.text().to_string();
+    });
+    cdir_in_row.append(&cdir_ent);
+
+    let cdir_rec = CheckButton::with_label(lang.pick("Alt klasörler dahil", "Include subfolders"));
+    cdir_rec.set_active(container_dir_recursive);
+    let st_cr = Rc::clone(state);
+    cdir_rec.connect_toggled(move |chk| {
+        st_cr.borrow_mut().container_dir_recursive = chk.is_active();
+    });
+    cdir_in_row.append(&cdir_rec);
+    cdir_box.append(&cdir_in_row);
+
+    let cdir_btn_row = GtkBox::new(Orientation::Horizontal, 8);
+    let label_btn = Button::with_label(lang.pick("Etiket uygula", "Apply label"));
+    label_btn.add_css_class("akrep-ghost-btn");
+    let st_lb = Rc::clone(state);
+    let cmd_lb = cmd_tx.clone();
+    label_btn.connect_clicked(move |_| {
+        let s = st_lb.borrow();
+        let path = expand_user_container_path(&s.container_dir_path, None);
+        let rec = s.container_dir_recursive;
+        drop(s);
+        dispatch_cmd(
+            &cmd_lb,
+            UiCommand::CreatePlan {
+                request: ActionRequest::SelinuxLabelContainerDir {
+                    target_path: path,
+                    recursive: rec,
+                },
+            },
+        );
+    });
+    cdir_btn_row.append(&label_btn);
+
+    let restore_btn = Button::with_label(lang.pick("Varsayılan etikete dön", "Restore default label"));
+    restore_btn.add_css_class("akrep-ghost-btn");
+    let st_rs = Rc::clone(state);
+    let cmd_rs = cmd_tx.clone();
+    restore_btn.connect_clicked(move |_| {
+        let s = st_rs.borrow();
+        let path = expand_user_container_path(&s.container_dir_path, None);
+        let rec = s.container_dir_recursive;
+        drop(s);
+        dispatch_cmd(
+            &cmd_rs,
+            UiCommand::CreatePlan {
+                request: ActionRequest::SelinuxRestorecon {
+                    target_path: path,
+                    recursive: rec,
+                },
+            },
+        );
+    });
+    cdir_btn_row.append(&restore_btn);
+    cdir_box.append(&cdir_btn_row);
+    card.append(&cdir_box);
+
+    // 4. Android compatibility packages
+    let pkg_box = GtkBox::new(Orientation::Vertical, 8);
+    pkg_box.add_css_class("akrep-diff-row");
+    let pkg_hdr = Label::new(Some(lang.pick(
+        "Android geliştirme paketleri",
+        "Android development packages",
+    )));
+    pkg_hdr.add_css_class("akrep-card-title");
+    pkg_hdr.set_xalign(0.0);
+    pkg_box.append(&pkg_hdr);
+
+    for (pkg_name, desc_tr, desc_en, installed_opt, group) in [
+        (
+            "android-udev-rules",
+            "ADB ve Fastboot aygıt kuralları",
+            "ADB and Fastboot device rules",
+            compat.map(|c| c.android_udev_installed),
+            CompatPackageGroup::AndroidUdevRules,
+        ),
+        (
+            "ncurses-compat-libs",
+            "Eski Android derleme araçları uyumluluğu",
+            "Legacy Android build tools compatibility",
+            compat.map(|c| c.ncurses_compat_installed),
+            CompatPackageGroup::AndroidLegacyLibs,
+        ),
+    ] {
+        let prow = GtkBox::new(Orientation::Horizontal, 12);
+        prow.set_valign(Align::Center);
+
+        let pcol = GtkBox::new(Orientation::Vertical, 2);
+        pcol.set_hexpand(true);
+        let pn = Label::new(Some(pkg_name));
+        pn.add_css_class("akrep-mono");
+        pn.set_xalign(0.0);
+        pcol.append(&pn);
+
+        let pd = Label::new(Some(lang.pick(desc_tr, desc_en)));
+        pd.add_css_class("akrep-meta");
+        pd.set_xalign(0.0);
+        pd.set_wrap(true);
+        pcol.append(&pd);
+        prow.append(&pcol);
+
+        let (pdot, ptxt, pmuted) = match installed_opt {
+            Some(true) => ("akrep-sev-protected", lang.pick("Kurulu", "Installed"), false),
+            Some(false) => (
+                "akrep-sev-unavailable",
+                lang.pick("Kurulu değil", "Not installed"),
+                true,
+            ),
+            None => (
+                "akrep-sev-unavailable",
+                lang.pick("Durum bekleniyor", "Awaiting state"),
+                true,
+            ),
+        };
+        prow.append(&build_status_indicator(pdot, ptxt, pmuted));
+
+        if installed_opt != Some(true) {
+            let ibtn = Button::with_label(lang.pick("Kur", "Install"));
+            ibtn.add_css_class("akrep-ghost-btn");
+            let cmd_in = cmd_tx.clone();
+            ibtn.connect_clicked(move |_| {
+                dispatch_cmd(
+                    &cmd_in,
+                    UiCommand::CreatePlan {
+                        request: ActionRequest::InstallCompatibilityPackage {
+                            package_group: group,
+                        },
+                    },
+                );
+            });
+            prow.append(&ibtn);
+        }
+        pkg_box.append(&prow);
+    }
+    card.append(&pkg_box);
+
+    card
+}
 
 fn populate_boolean_rows(
     list_box: &GtkBox,
@@ -158,20 +625,29 @@ pub fn build_system_protection_page(
     let snap = st.snapshot.clone();
     let diag = st.selinux_diag.clone();
     let draft = st.selinux_draft.clone();
+    let selinux_duration_idx = st.selinux_duration_idx;
     drop(st);
 
     let root = GtkBox::new(Orientation::Vertical, 20);
 
     let page_desc = Label::new(Some(lang.pick(
-        "SELinux erişim kontrolü, politika anahtarları ve dosya bağlamı onarımı",
-        "SELinux access control, policy booleans and file context repair",
+        "SELinux erişim kontrolü, geliştirici uyumluluğu, politika anahtarları ve dosya bağlamı onarımı",
+        "SELinux access control, developer compatibility, policy booleans and file context repair",
     )));
     page_desc.add_css_class("akrep-subtitle");
     page_desc.set_xalign(0.0);
     page_desc.set_wrap(true);
     root.append(&page_desc);
 
-    // 1. SELinux Mode & Guardrail Status Card (NO disable SELinux button)
+    let (is_permissive, is_disabled, m_sev_opt) =
+        detect_selinux_mode_state(snap.as_ref(), diag.as_ref());
+    let sel_override = snap.as_ref().and_then(|sn| {
+        sn.active_overrides
+            .iter()
+            .find(|o| o.subsystem == "selinux")
+    });
+
+    // 1. SELinux Mode & Guardrail Status Card (NO SELINUX=disabled option)
     let status_box = GtkBox::new(Orientation::Vertical, 12);
     status_box.add_css_class("akrep-detail-box");
 
@@ -183,12 +659,7 @@ pub fn build_system_protection_page(
     st_hdr.set_hexpand(true);
     top_row.append(&st_hdr);
 
-    if let Some(d) = &diag {
-        let m_sev = match d.runtime_mode {
-            SelinuxRuntimeMode::Enforcing => AkrepSeverity::Protected,
-            SelinuxRuntimeMode::Permissive => AkrepSeverity::Attention,
-            SelinuxRuntimeMode::Disabled => AkrepSeverity::Critical,
-        };
+    if let Some(m_sev) = m_sev_opt {
         top_row.append(&build_severity_indicator(m_sev, lang));
     }
     status_box.append(&top_row);
@@ -205,9 +676,128 @@ pub fn build_system_protection_page(
         }
     }
 
+    let mode_box = GtkBox::new(Orientation::Vertical, 8);
+    mode_box.add_css_class("akrep-diff-row");
+
+    if is_permissive {
+        let mode_top = GtkBox::new(Orientation::Horizontal, 12);
+        mode_top.set_valign(Align::Center);
+        let status_txt = if let Some(ov) = sel_override {
+            format!("Permissive · {}", format_override_status_text(ov, lang))
+        } else {
+            lang.pick("Permissive etkin", "Permissive active")
+                .to_string()
+        };
+        let ind = build_status_indicator("akrep-sev-attention", &status_txt, false);
+        ind.set_hexpand(true);
+        mode_top.append(&ind);
+
+        let enforce_btn = Button::with_label(lang.pick(
+            "Enforcing moduna dön",
+            "Return to Enforcing",
+        ));
+        enforce_btn.add_css_class("akrep-primary-btn");
+        let cmd_enf = cmd_tx.clone();
+        enforce_btn.connect_clicked(move |_| {
+            dispatch_cmd(
+                &cmd_enf,
+                UiCommand::CreatePlan {
+                    request: ActionRequest::SelinuxSetMode {
+                        mode: SelinuxDesiredMode::Enforcing,
+                        duration: OverrideDuration::UntilChanged,
+                    },
+                },
+            );
+        });
+        mode_top.append(&enforce_btn);
+        mode_box.append(&mode_top);
+
+        let dur_row = GtkBox::new(Orientation::Horizontal, 8);
+        dur_row.set_valign(Align::Center);
+        let st_sd = Rc::clone(state);
+        dur_row.append(&build_duration_selector(
+            &PROTECTION_DURATION_CHOICES,
+            selinux_duration_idx,
+            lang,
+            Rc::new(move |idx| {
+                st_sd.borrow_mut().selinux_duration_idx = idx;
+            }),
+        ));
+
+        let upd_btn = Button::with_label(lang.pick("Süreyi güncelle", "Update duration"));
+        upd_btn.add_css_class("akrep-ghost-btn");
+        upd_btn.set_valign(Align::Center);
+        let st_upd = Rc::clone(state);
+        let cmd_upd = cmd_tx.clone();
+        upd_btn.connect_clicked(move |_| {
+            let idx = st_upd.borrow().selinux_duration_idx;
+            let duration = duration_from_choice_idx(&PROTECTION_DURATION_CHOICES, idx);
+            dispatch_cmd(
+                &cmd_upd,
+                UiCommand::CreatePlan {
+                    request: ActionRequest::SelinuxSetMode {
+                        mode: SelinuxDesiredMode::Permissive,
+                        duration,
+                    },
+                },
+            );
+        });
+        dur_row.append(&upd_btn);
+        mode_box.append(&dur_row);
+    } else {
+        let (dot_cls, dot_txt) = if is_disabled {
+            ("akrep-sev-critical", lang.pick("Devre dışı", "Disabled"))
+        } else {
+            (
+                "akrep-sev-protected",
+                lang.pick("Enforcing etkin", "Enforcing active"),
+            )
+        };
+        mode_box.append(&build_status_indicator(dot_cls, dot_txt, false));
+
+        let dur_row = GtkBox::new(Orientation::Horizontal, 8);
+        dur_row.set_valign(Align::Center);
+        let st_sd = Rc::clone(state);
+        dur_row.append(&build_duration_selector(
+            &PROTECTION_DURATION_CHOICES,
+            selinux_duration_idx,
+            lang,
+            Rc::new(move |idx| {
+                st_sd.borrow_mut().selinux_duration_idx = idx;
+            }),
+        ));
+
+        let perm_btn = Button::with_label(lang.pick(
+            "Permissive moduna geç",
+            "Switch to Permissive",
+        ));
+        perm_btn.add_css_class("akrep-ghost-btn");
+        perm_btn.set_valign(Align::Center);
+        let st_perm = Rc::clone(state);
+        let cmd_perm = cmd_tx.clone();
+        perm_btn.connect_clicked(move |_| {
+            let idx = st_perm.borrow().selinux_duration_idx;
+            let duration = duration_from_choice_idx(&PROTECTION_DURATION_CHOICES, idx);
+            dispatch_cmd(
+                &cmd_perm,
+                UiCommand::CreatePlan {
+                    request: ActionRequest::SelinuxSetMode {
+                        mode: SelinuxDesiredMode::Permissive,
+                        duration,
+                    },
+                },
+            );
+        });
+        dur_row.append(&perm_btn);
+        mode_box.append(&dur_row);
+    }
+
+    mode_box.append(&build_admin_note(lang));
+    status_box.append(&mode_box);
+
     let guardrail_note = Label::new(Some(lang.pick(
-        "SELinux tamamen kapatılamaz; politika anahtarları ve dosya bağlamları buradan yönetilebilir",
-        "SELinux cannot be disabled; policy booleans and file contexts can be managed here",
+        "SELinux tamamen kapatılamaz; geçici veya kalıcı Permissive modda dosya etiketleri korunur",
+        "SELinux cannot be disabled; file labels remain intact in temporary or persistent Permissive mode",
     )));
     guardrail_note.add_css_class("akrep-meta");
     guardrail_note.set_xalign(0.0);
@@ -215,7 +805,10 @@ pub fn build_system_protection_page(
     status_box.append(&guardrail_note);
     root.append(&status_box);
 
-    // 2. Boolean Table & AVC Diagnosis Trigger
+    // 2. Developer and Build Compatibility Card
+    root.append(&build_dev_compat_card(state, cmd_tx, snap.as_ref(), lang));
+
+    // 3. Boolean Table & AVC Diagnosis Trigger
     let bool_card = GtkBox::new(Orientation::Vertical, 12);
     bool_card.add_css_class("akrep-detail-box");
 
@@ -228,7 +821,11 @@ pub fn build_system_protection_page(
     b_hdr.append(&b_title);
 
     let diag_btn = Button::with_label(lang.pick("Tanıla", "Diagnose"));
-    diag_btn.add_css_class("akrep-primary-btn");
+    diag_btn.add_css_class(if is_permissive {
+        "akrep-ghost-btn"
+    } else {
+        "akrep-primary-btn"
+    });
     diag_btn.set_valign(Align::Center);
     let cmd_diag = cmd_tx.clone();
     diag_btn.connect_clicked(move |_| {

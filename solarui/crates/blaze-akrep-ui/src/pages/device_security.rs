@@ -2,12 +2,150 @@ use crate::components::{
     build_admin_note, build_kv_row, build_severity_indicator, build_status_indicator,
 };
 use crate::dbus_client::{dispatch_cmd, UiCommand};
+use crate::i18n::Lang;
 use crate::state::AppUiState;
+use blaze_sentinel_core::DriverMokSummary;
 use gtk4::pango::WrapMode;
 use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Button, Label, Orientation};
 use std::cell::RefCell;
 use std::rc::Rc;
+
+fn build_driver_mok_card(mok_opt: Option<&DriverMokSummary>, lang: Lang) -> GtkBox {
+    let card = GtkBox::new(Orientation::Vertical, 12);
+    card.add_css_class("akrep-detail-box");
+
+    let hdr = GtkBox::new(Orientation::Horizontal, 12);
+    hdr.set_valign(Align::Center);
+    let title = Label::new(Some(lang.pick(
+        "Secure Boot ve sürücü uyumluluğu (MOK)",
+        "Secure Boot and driver compatibility (MOK)",
+    )));
+    title.add_css_class("akrep-section-hdr");
+    title.set_xalign(0.0);
+    title.set_wrap(true);
+    title.set_hexpand(true);
+    hdr.append(&title);
+
+    if let Some(mok) = mok_opt {
+        let (dot_cls, dot_txt, muted) = if mok.unsigned_risk {
+            (
+                "akrep-sev-attention",
+                lang.pick("MOK kaydı gerekli", "MOK enrollment needed"),
+                false,
+            )
+        } else if mok.secure_boot_enabled == Some(true) {
+            (
+                "akrep-sev-protected",
+                lang.pick("Uyumlu", "Compatible"),
+                false,
+            )
+        } else if mok.secure_boot_enabled == Some(false) {
+            (
+                "akrep-sev-unavailable",
+                lang.pick("Secure Boot kapalı", "Secure Boot disabled"),
+                true,
+            )
+        } else {
+            (
+                "akrep-sev-unknown",
+                lang.pick("Doğrulanamadı", "Unavailable"),
+                true,
+            )
+        };
+        hdr.append(&build_status_indicator(dot_cls, dot_txt, muted));
+    } else {
+        hdr.append(&build_status_indicator(
+            "akrep-sev-unavailable",
+            lang.pick("Bekleniyor", "Pending"),
+            true,
+        ));
+    }
+    card.append(&hdr);
+
+    let Some(mok) = mok_opt else {
+        let sub = Label::new(Some(lang.pick(
+            "Secure Boot ve MOK telemetrisi bekleniyor",
+            "Awaiting Secure Boot and MOK telemetry",
+        )));
+        sub.add_css_class("akrep-subtitle");
+        sub.set_xalign(0.0);
+        sub.set_wrap(true);
+        card.append(&sub);
+        return card;
+    };
+
+    let sb_val = match mok.secure_boot_enabled {
+        Some(true) => lang.pick("Etkin", "Enabled"),
+        Some(false) => lang.pick("Devre dışı", "Disabled"),
+        None => lang.pick("Kullanılamıyor", "Unavailable"),
+    };
+    card.append(&build_kv_row("Secure Boot", sb_val));
+
+    let mok_val = match mok.mok_enrolled_count {
+        Some(n) => format!("{} {}", n, lang.pick("anahtar", "key(s)")),
+        None => lang.pick("Kullanılamıyor", "Unavailable").to_string(),
+    };
+    card.append(&build_kv_row(
+        lang.pick("Kayıtlı MOK anahtarı", "Enrolled MOK keys"),
+        &mok_val,
+    ));
+
+    let drv_val = match (mok.nvidia_module_loaded, mok.akmod_nvidia_installed) {
+        (true, true) => lang.pick(
+            "NVIDIA modülü yüklü · akmod-nvidia kurulu",
+            "NVIDIA module loaded · akmod-nvidia installed",
+        ),
+        (true, false) => lang.pick(
+            "NVIDIA çekirdek modülü yüklü",
+            "NVIDIA kernel module loaded",
+        ),
+        (false, true) => lang.pick(
+            "akmod-nvidia kurulu (modül yüklü değil)",
+            "akmod-nvidia installed (module not loaded)",
+        ),
+        (false, false) => lang.pick(
+            "Üçüncü parti NVIDIA sürücüsü yok",
+            "No third-party NVIDIA driver loaded",
+        ),
+    };
+    card.append(&build_kv_row(
+        lang.pick("NVIDIA / akmod durumu", "NVIDIA / akmod state"),
+        drv_val,
+    ));
+
+    let guidance_txt = lang.pick(&mok.guidance_tr, &mok.guidance_en);
+    if mok.unsigned_risk {
+        let warn_box = GtkBox::new(Orientation::Vertical, 6);
+        warn_box.add_css_class("akrep-offline-banner");
+        let glbl = Label::new(Some(guidance_txt));
+        glbl.add_css_class("akrep-subtitle");
+        glbl.set_xalign(0.0);
+        glbl.set_wrap(true);
+        glbl.set_wrap_mode(WrapMode::WordChar);
+        warn_box.append(&glbl);
+
+        let cmd_lbl = Label::new(Some(
+            "sudo mokutil --import /etc/pki/akmods/certs/public_key.der && mokutil --list-enrolled",
+        ));
+        cmd_lbl.add_css_class("akrep-mono");
+        cmd_lbl.set_xalign(0.0);
+        cmd_lbl.set_wrap(true);
+        cmd_lbl.set_wrap_mode(WrapMode::WordChar);
+        cmd_lbl.set_selectable(true);
+        warn_box.append(&cmd_lbl);
+        card.append(&warn_box);
+    } else {
+        let glbl = Label::new(Some(guidance_txt));
+        glbl.add_css_class("akrep-subtitle");
+        glbl.set_xalign(0.0);
+        glbl.set_wrap(true);
+        glbl.set_wrap_mode(WrapMode::WordChar);
+        card.append(&glbl);
+    }
+
+    card
+}
 
 pub fn build_device_security_page(
     state: &Rc<RefCell<AppUiState>>,
@@ -46,6 +184,12 @@ pub fn build_device_security_page(
     intro_col.append(&hdr_row);
     intro_col.append(&build_admin_note(lang));
     root.append(&intro_col);
+
+    let mok_opt = dev
+        .as_ref()
+        .and_then(|d| d.driver_mok.as_ref())
+        .or_else(|| snap.as_ref().and_then(|s| s.driver_mok.as_ref()));
+    root.append(&build_driver_mok_card(mok_opt, lang));
 
     if let Some(d) = &dev {
         let hw_card = GtkBox::new(Orientation::Vertical, 12);

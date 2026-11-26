@@ -1,5 +1,7 @@
 use crate::components::nav_rail::nav_title_for_tab;
-use crate::components::{build_severity_indicator, build_status_dot};
+use crate::components::{
+    build_severity_indicator, build_status_dot, build_status_indicator, compact_override_summary,
+};
 use crate::i18n::Lang;
 use crate::state::{NoticeBanner, NoticeKind};
 use blaze_sentinel_core::{AkrepSeverity, AkrepSnapshot};
@@ -50,6 +52,15 @@ pub fn build_header_banner(
     let sev = snap
         .map(|s| s.overall_status)
         .unwrap_or(AkrepSeverity::Unavailable);
+    if let Some(s) = snap {
+        if !s.active_overrides.is_empty() {
+            right.append(&build_status_indicator(
+                "akrep-sev-attention",
+                &compact_override_summary(&s.active_overrides, lang),
+                false,
+            ));
+        }
+    }
     right.append(&build_severity_indicator(sev, lang));
 
     let profile_lbl = format!(

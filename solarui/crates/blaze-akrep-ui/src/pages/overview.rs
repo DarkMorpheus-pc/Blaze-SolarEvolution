@@ -1,15 +1,38 @@
 use crate::components::finding_row::build_finding_row;
 use crate::components::nav_rail::map_card_id_to_tab;
 use crate::components::status_card::build_status_card;
-use crate::components::{build_severity_indicator, build_status_dot};
+use crate::components::{
+    build_admin_note, build_severity_indicator, build_status_dot, build_status_indicator,
+    format_override_status_text, override_subsystem_label,
+};
+use crate::dbus_client::{dispatch_cmd, UiCommand};
 use crate::i18n::Lang;
 use crate::state::AppUiState;
+use blaze_akrep_common::{ActionRequest, OverrideDuration, SelinuxDesiredMode};
 use blaze_sentinel_core::AkrepSeverity;
 use gtk4::pango::WrapMode;
 use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Button, Grid, Label, Orientation};
 use std::cell::RefCell;
 use std::rc::Rc;
+
+fn reenable_request_for_subsystem(subsystem: &str) -> Option<ActionRequest> {
+    match subsystem {
+        "selinux" => Some(ActionRequest::SelinuxSetMode {
+            mode: SelinuxDesiredMode::Enforcing,
+            duration: OverrideDuration::UntilChanged,
+        }),
+        "firewalld" => Some(ActionRequest::FirewallSetState {
+            enabled: true,
+            duration: OverrideDuration::UntilChanged,
+        }),
+        "oomd" => Some(ActionRequest::OomdSetState {
+            enabled: true,
+            duration: OverrideDuration::UntilChanged,
+        }),
+        _ => None,
+    }
+}
 
 fn format_timestamp_short(iso: &str) -> String {
     iso.chars().take(16).collect::<String>().replace('T', " ")
@@ -35,6 +58,7 @@ fn overview_headline(sev: AkrepSeverity, lang: Lang) -> &'static str {
 
 pub fn build_overview_page(
     state: &Rc<RefCell<AppUiState>>,
+    cmd_tx: &async_channel::Sender<UiCommand>,
     on_select_tab: Rc<dyn Fn(&'static str)>,
 ) -> GtkBox {
     let st = state.borrow();
@@ -97,6 +121,13 @@ pub fn build_overview_page(
             "Some optional components are not installed; core protections are active",
         )
         .to_string()
+    } else if !s.active_overrides.is_empty() {
+        format!(
+            "{}: {} · {}",
+            lang.pick("Etkin profil", "Active profile"),
+            lang.pick(&active_prof_tr, &active_prof_en),
+            lang.pick(&s.headline_tr, &s.headline_en)
+        )
     } else {
         format!(
             "{}: {} · {}",
@@ -141,6 +172,67 @@ pub fn build_overview_page(
 
     root.append(&hero);
 
+    if !s.active_overrides.is_empty() {
+        let ov_card = GtkBox::new(Orientation::Vertical, 12);
+        ov_card.add_css_class("akrep-override-card");
+
+        let ov_hdr = GtkBox::new(Orientation::Horizontal, 12);
+        ov_hdr.set_valign(Align::Center);
+        let ov_title = Label::new(Some(lang.pick("Etkin gevşetmeler", "Active overrides")));
+        ov_title.add_css_class("akrep-section-hdr");
+        ov_title.set_xalign(0.0);
+        ov_title.set_hexpand(true);
+        ov_hdr.append(&ov_title);
+        ov_hdr.append(&build_admin_note(lang));
+        ov_card.append(&ov_hdr);
+
+        for entry in &s.active_overrides {
+            let row = GtkBox::new(Orientation::Horizontal, 12);
+            row.add_css_class("akrep-diff-row");
+            row.set_valign(Align::Center);
+
+            let name_lbl = Label::new(Some(override_subsystem_label(&entry.subsystem, lang)));
+            name_lbl.add_css_class("akrep-card-title");
+            name_lbl.set_xalign(0.0);
+            name_lbl.set_wrap(true);
+            name_lbl.set_wrap_mode(WrapMode::WordChar);
+            name_lbl.set_hexpand(true);
+            row.append(&name_lbl);
+
+            let dot_cls =
+                if entry.subsystem == "firewalld" && entry.duration_kind == "until_changed" {
+                    "akrep-sev-critical"
+                } else {
+                    "akrep-sev-attention"
+                };
+            row.append(&build_status_indicator(
+                dot_cls,
+                &format_override_status_text(entry, lang),
+                false,
+            ));
+
+            if let Some(req) = reenable_request_for_subsystem(&entry.subsystem) {
+                let btn = Button::with_label(lang.pick("Etkinleştir", "Enable"));
+                btn.add_css_class("akrep-ghost-btn");
+                btn.set_valign(Align::Center);
+                let cmd_re = cmd_tx.clone();
+                btn.connect_clicked(move |_| {
+                    dispatch_cmd(
+                        &cmd_re,
+                        UiCommand::CreatePlan {
+                            request: req.clone(),
+                        },
+                    );
+                });
+                row.append(&btn);
+            }
+
+            ov_card.append(&row);
+        }
+
+        root.append(&ov_card);
+    }
+
     // Security areas 2-column grid
     let areas_sec = GtkBox::new(Orientation::Vertical, 12);
     let grid_hdr = Label::new(Some(lang.pick("Güvenlik alanları", "Security areas")));
@@ -157,14 +249,25 @@ pub fn build_overview_page(
     for (idx, card) in s.cards.iter().enumerate() {
         let mut adjusted_card = card.clone();
         if adjusted_card.id == "profiles" {
-            adjusted_card.summary_tr = format!(
-                "Etkin profil: {} · SELinux Enforcing ve güvenlik duvarı etkin",
-                active_prof_tr
-            );
-            adjusted_card.summary_en = format!(
-                "Active profile: {} · SELinux Enforcing and firewall active",
-                active_prof_en
-            );
+            if s.active_overrides.is_empty() {
+                adjusted_card.summary_tr = format!(
+                    "Etkin profil: {} · SELinux Enforcing ve güvenlik duvarı etkin",
+                    active_prof_tr
+                );
+                adjusted_card.summary_en = format!(
+                    "Active profile: {} · SELinux Enforcing and firewall active",
+                    active_prof_en
+                );
+            } else {
+                adjusted_card.summary_tr = format!(
+                    "Etkin profil: {} · Etkin gevşetmeler sürüyor",
+                    active_prof_tr
+                );
+                adjusted_card.summary_en = format!(
+                    "Active profile: {} · Active overrides in effect",
+                    active_prof_en
+                );
+            }
             adjusted_card.metric = active_prof_en.to_ascii_uppercase();
         }
         let cb = Rc::clone(&on_select_tab);

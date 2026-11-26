@@ -1,8 +1,9 @@
 use crate::components::{build_admin_note, build_kv_row, build_risk_indicator};
 use crate::dbus_client::{dispatch_cmd, UiCommand};
 use crate::i18n::Lang;
+use crate::pages::history::summarize_action_request;
 use crate::state::AppUiState;
-use blaze_akrep_common::ActionPlan;
+use blaze_akrep_common::{ActionPlan, ActionRequest, OverrideDuration, SelinuxDesiredMode};
 use gtk4::pango::WrapMode;
 use gtk4::prelude::*;
 use gtk4::{
@@ -11,6 +12,54 @@ use gtk4::{
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+
+/// Returns true when a previewed plan relaxes protection persistently until manually re-enabled.
+pub fn is_until_changed_relaxation(req: &ActionRequest) -> bool {
+    matches!(
+        req,
+        ActionRequest::SelinuxSetMode {
+            mode: SelinuxDesiredMode::Permissive,
+            duration: OverrideDuration::UntilChanged,
+        } | ActionRequest::FirewallSetState {
+            enabled: false,
+            duration: OverrideDuration::UntilChanged,
+        } | ActionRequest::OomdSetState {
+            enabled: false,
+            duration: OverrideDuration::UntilChanged,
+        }
+    )
+}
+
+fn format_diff_target_label(target: &str, lang: Lang) -> String {
+    match target {
+        "selinux.mode" => format!(
+            "{} ({})",
+            lang.pick("SELinux çalışma modu", "SELinux runtime mode"),
+            target
+        ),
+        "firewall.service_state" => format!(
+            "{} ({})",
+            lang.pick("Güvenlik duvarı servisi", "Firewall service"),
+            target
+        ),
+        "system.oomd_state" => format!(
+            "{} ({})",
+            lang.pick("Bellek yöneticisi (systemd-oomd)", "Memory manager (systemd-oomd)"),
+            target
+        ),
+        "system.limits.nofile" => format!(
+            "{} ({})",
+            lang.pick("Açık dosya limiti", "Open file descriptor limit"),
+            target
+        ),
+        t if t.starts_with("packages.compat.") => format!(
+            "{}: {}",
+            lang.pick("Uyumluluk paketi", "Compatibility package"),
+            t.trim_start_matches("packages.compat.")
+        ),
+        other => other.to_string(),
+    }
+}
 
 pub fn present_plan_preview_dialog(
     parent: &ApplicationWindow,
@@ -67,6 +116,14 @@ pub fn present_plan_preview_dialog(
 
     hdr_row.append(&build_risk_indicator(plan.risk, lang));
     hdr_col.append(&hdr_row);
+
+    let action_sum = Label::new(Some(&summarize_action_request(&plan.request, lang)));
+    action_sum.add_css_class("akrep-subtitle");
+    action_sum.set_xalign(0.0);
+    action_sum.set_wrap(true);
+    action_sum.set_wrap_mode(WrapMode::WordChar);
+    hdr_col.append(&action_sum);
+
     hdr_col.append(&build_admin_note(lang));
     root.append(&hdr_col);
 
@@ -76,6 +133,46 @@ pub fn present_plan_preview_dialog(
     scroller.set_policy(PolicyType::Never, PolicyType::Automatic);
 
     let content = GtkBox::new(Orientation::Vertical, 12);
+
+    if is_until_changed_relaxation(&plan.request) {
+        let callout = GtkBox::new(Orientation::Vertical, 6);
+        callout.add_css_class("akrep-high-risk-banner");
+
+        let chdr = GtkBox::new(Orientation::Horizontal, 8);
+        chdr.set_valign(Align::Center);
+        let cicon = Image::from_icon_name("dialog-warning-symbolic");
+        cicon.set_pixel_size(16);
+        cicon.add_css_class("akrep-icon-secondary");
+        chdr.append(&cicon);
+
+        let ctitle = Label::new(Some(lang.pick(
+            "Kalıcı gevşetme uyarısı",
+            "Persistent relaxation notice",
+        )));
+        ctitle.add_css_class("akrep-card-title");
+        ctitle.set_xalign(0.0);
+        ctitle.set_wrap(true);
+        ctitle.set_hexpand(true);
+        chdr.append(&ctitle);
+        callout.append(&chdr);
+
+        let cdesc = Label::new(Some(match &plan.request {
+            ActionRequest::OomdSetState { .. } => lang.pick(
+                "systemd-oomd siz yeniden etkinleştirene kadar yeniden başlatmalar arasında da duraklatılmış kalacaktır",
+                "systemd-oomd will remain paused across reboots until you re-enable it",
+            ),
+            _ => lang.pick(
+                "Bu gevşetme siz yeniden etkinleştirene kadar yeniden başlatmalar arasında da etkin kalacaktır",
+                "This override remains active across reboots until you re-enable protection",
+            ),
+        }));
+        cdesc.add_css_class("akrep-subtitle");
+        cdesc.set_xalign(0.0);
+        cdesc.set_wrap(true);
+        cdesc.set_wrap_mode(WrapMode::WordChar);
+        callout.append(&cdesc);
+        content.append(&callout);
+    }
 
     let diff_hdr = Label::new(Some(&format!(
         "{} ({})",
@@ -100,7 +197,7 @@ pub fn present_plan_preview_dialog(
             let d_card = GtkBox::new(Orientation::Vertical, 4);
             d_card.add_css_class("akrep-diff-row");
 
-            let t_lbl = Label::new(Some(&item.target));
+            let t_lbl = Label::new(Some(&format_diff_target_label(&item.target, lang)));
             t_lbl.add_css_class("akrep-mono");
             t_lbl.set_xalign(0.0);
             t_lbl.set_wrap(true);
