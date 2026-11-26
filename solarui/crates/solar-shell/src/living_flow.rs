@@ -122,9 +122,21 @@ pub const LIVING_FLOW_CORE_CSS: &str = r#"
         color: #ededed;
     }
 
-    *:focus-visible {
+    button:focus-visible,
+    row:focus-visible,
+    checkbutton:focus-visible,
+    radiobutton:focus-visible,
+    switch:focus-visible,
+    scale:focus-visible,
+    modelbutton:focus-visible {
         outline: 2px solid rgba(224, 87, 60, 0.65);
         outline-offset: 2px;
+    }
+
+    entry > text:focus-visible,
+    passwordentry > text:focus-visible,
+    spinbutton > text:focus-visible {
+        outline: none;
     }
 
     headerbar {

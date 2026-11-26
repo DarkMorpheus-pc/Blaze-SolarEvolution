@@ -313,12 +313,12 @@ pub const OMNIBAR_EXTRA_CSS: &str = r#"
 
     .blazeai-input-wrap:focus-within {
         background-color: #232325;
-        border-color: rgba(224, 87, 60, 0.65);
-        outline: 2px solid rgba(224, 87, 60, 0.65);
-        outline-offset: 1px;
+        border-color: rgba(224, 87, 60, 0.80);
+        outline: none;
     }
 
-    .blazeai-entry {
+    .blazeai-entry,
+    .blazeai-entry > text {
         background-color: transparent;
         background-image: none;
         border: none;
@@ -333,7 +333,9 @@ pub const OMNIBAR_EXTRA_CSS: &str = r#"
     }
 
     .blazeai-entry:focus,
-    .blazeai-entry:focus-within {
+    .blazeai-entry:focus-within,
+    .blazeai-entry > text:focus,
+    .blazeai-entry > text:focus-visible {
         background-color: transparent;
         border: none;
         outline: none;
@@ -383,12 +385,19 @@ pub const OMNIBAR_EXTRA_CSS: &str = r#"
                     color 150ms cubic-bezier(0.22, 1, 0.36, 1);
     }
 
+    .omnibar-entry > text,
+    .omnibar-entry > text:focus,
+    .omnibar-entry > text:focus-visible {
+        outline: none;
+        border: none;
+        box-shadow: none;
+    }
+
     .omnibar-entry:focus,
     .omnibar-entry:focus-within {
         background-color: #232325;
-        border-color: rgba(224, 87, 60, 0.65);
-        outline: 2px solid rgba(224, 87, 60, 0.65);
-        outline-offset: 1px;
+        border-color: rgba(224, 87, 60, 0.80);
+        outline: none;
         box-shadow: none;
     }
 
@@ -666,13 +675,22 @@ fn is_focus_within(window: &Window, container: &impl IsA<gtk4::Widget>) -> bool 
 }
 
 fn scroll_chat_to_bottom(scrolled: &ScrolledWindow) {
-    let sc = scrolled.downgrade();
+    let sc_idle = scrolled.downgrade();
     glib::idle_add_local_once(move || {
-        if let Some(s) = sc.upgrade() {
+        if let Some(s) = sc_idle.upgrade() {
             let adj = s.vadjustment();
             adj.set_value((adj.upper() - adj.page_size()).max(0.0));
         }
     });
+    for delay_ms in [45_u64, 120] {
+        let sc_delayed = scrolled.downgrade();
+        glib::timeout_add_local_once(std::time::Duration::from_millis(delay_ms), move || {
+            if let Some(s) = sc_delayed.upgrade() {
+                let adj = s.vadjustment();
+                adj.set_value((adj.upper() - adj.page_size()).max(0.0));
+            }
+        });
+    }
 }
 
 fn rebuild_chat_view(

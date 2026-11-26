@@ -369,8 +369,6 @@ window-rule {{
     match app-id="^solar-omnibar$"
     open-floating true
     server-titlebar false
-    default-column-width {{ fixed 720; }}
-    default-window-height {{ fixed 490; }}
     geometry-corner-radius 0
     clip-to-geometry true
 }}

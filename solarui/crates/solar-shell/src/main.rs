@@ -131,7 +131,10 @@ async fn main() -> Result<()> {
     } else {
         "run"
     };
-    let command = args.get(1).map(|s| s.trim()).unwrap_or(default_cmd);
+    let command = match args.get(1).map(|s| s.trim()) {
+        Some(arg) if !arg.starts_with('-') => arg,
+        _ => default_cmd,
+    };
 
     match command {
         "apps" => {

@@ -26,13 +26,13 @@ static TEMP_SEQ: AtomicU64 = AtomicU64::new(1);
 
 pub const BLAZEOS_SYSTEM_GUIDE: &str = "\
 BlazeOS / SolarEvolution sistem rehberi:
-- Super+Bosluk: Solar Omnibar (uygulama baslatici, =hesaplama, kur/birim cevirici, cb pano gecmisi, kill surec ve BlazeAI)
-- Super+G: Blaze GameZone tam ekran oyun kabugu (solar-shell gamezone)
-- Super+I: SolarUI Ayarlari (ekran, duvar kagidi, kabuk motoru, Omnibar/BlazeAI)
-- Masastu kabuklari: Noctalia (varsayilan), Caelestia, end4-pC, We10X (solar-shell switch <kabuk>)
-- Akrep: Guvenlik merkezi (akrep-ui: SELinux, guvenlik duvari, Flatpak izinleri, ClamAV)
-- FireHub: Uygulama magazasi (firehub: Portadora ve Flathub uygulamalari)
-- BERP / BERE: Acil kurtarma ve Btrfs anlik goruntu konsolu (ptyxis -- blaze-recovery)";
+- Super+Boşluk: Solar Omnibar (uygulama başlatıcı, =hesaplama, kur/birim çevirici, cb pano geçmişi, kill süreç ve BlazeAI)
+- Super+G: Blaze GameZone tam ekran oyun kabuğu (solar-shell gamezone)
+- Super+I: SolarUI Ayarları (ekran, duvar kağıdı, kabuk motoru, Omnibar/BlazeAI)
+- Masaüstü kabukları: Noctalia (varsayılan), Caelestia, end4-pC, We10X (solar-shell switch <kabuk>)
+- Akrep: Güvenlik merkezi (akrep-ui: SELinux, güvenlik duvarı, Flatpak izinleri, ClamAV)
+- FireHub: Uygulama mağazası (firehub: Portadora ve Flathub uygulamaları)
+- BERP / BERE: Acil kurtarma ve Btrfs anlık görüntü konsolu (ptyxis -- blaze-recovery)";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct BlazeAiSecrets {
@@ -331,7 +331,7 @@ impl LocalMemoryStore {
             return Ok(false);
         }
         let note = format!(
-            "[Karakter gecisi: {} -> {} ({})]",
+            "[Karakter geçişi: {} -> {} ({})]",
             from_name.trim(),
             to_name.trim(),
             to_expr.title_tr()
@@ -430,18 +430,18 @@ pub fn build_system_prompt(cfg: &OmnibarConfig, memory_facts: &[MemoryFact]) -> 
 
     // Layer 1: Immutable technical & safety core
     parts.push(
-        "Sen BlazeOS / SolarEvolution masaustunde calisan yerel bir asistansin. \
-Teknik olarak dogru, durust, kisa ve net yanit ver. Bilmedigin bir bayragi veya \
-komutu uydurma; veri kaybi yaratabilecek komutlarda kullaniciyi uyar. \
-Emoji ve gereksiz suslu ifade kullanma. Kullanici Turkce yazarsa Turkce, \
-Ingilizce yazarsa Ingilizce yanitla."
+        "Sen BlazeOS / SolarEvolution masaüstünde çalışan yerel bir asistansın. \
+Teknik olarak doğru, dürüst, kısa ve net yanıt ver. Bilmediğin bir bayrağı veya \
+komutu uydurma; veri kaybı yaratabilecek komutlarda kullanıcıyı uyar. \
+Emoji ve gereksiz süslü ifade kullanma. Kullanıcı Türkçe yazarsa Türkçe, \
+İngilizce yazarsa İngilizce yanıtla."
             .to_string(),
     );
 
     if cfg.ai_local_memory_enabled {
         parts.push(
-            "Kullanici kalici bir tercih veya sistem bilgisi paylasirsa yanitinin sonuna \
-en fazla bir adet [HAFIZA: kisa gercek] etiketi ekleyebilirsin; gerekmiyorsa ekleme."
+            "Kullanıcı kalıcı bir tercih veya sistem bilgisi paylaşırsa yanıtının sonuna \
+en fazla bir adet [HAFIZA: kısa gerçek] etiketi ekleyebilirsin; gerekmiyorsa ekleme."
                 .to_string(),
         );
     }
@@ -451,7 +451,7 @@ en fazla bir adet [HAFIZA: kisa gercek] etiketi ekleyebilirsin; gerekmiyorsa ekl
     }
 
     if cfg.ai_local_memory_enabled && !memory_facts.is_empty() {
-        let mut mem_block = String::from("Yerel kullanici hafizasi:");
+        let mut mem_block = String::from("Yerel kullanıcı hafızası:");
         for fact in memory_facts {
             mem_block.push_str("\n- ");
             mem_block.push_str(&fact.text);
@@ -466,31 +466,31 @@ en fazla bir adet [HAFIZA: kisa gercek] etiketi ekleyebilirsin; gerekmiyorsa ekl
 
     let persona_block = if lower_name == "persephone" {
         format!(
-            "Karakter kimligi: Adin Persephone. Dengeli, dost canlisi ve korumacisin; \
-riskli adimlarda nazikce uyarir, net ve guven verici teknik rehberlik sunarsin. \
+            "Karakter kimliği: Adın Persephone. Dengeli, dost canlısı ve korumacısın; \
+riskli adımlarda nazikçe uyarır, net ve güven verici teknik rehberlik sunarsın. \
 Aktif ifade tonu ({}): {}",
             expr.title_tr(),
             expr.persona_prompt_tr()
         )
     } else if lower_name == "köz" || lower_name == "koz" {
         format!(
-            "Karakter kimligi: Adin Koz. Ciddi, dogrudan ve tavizsiz bir muhendislik \
-elestirmenisin; zayif fikirleri, usengec cozumleri ve guvenlik hatalarini acikca \
-yuzune vurur, hemen ardindan en saglam teknik cozumunu soylersin. \
+            "Karakter kimliği: Adın Köz. Ciddi, doğrudan ve tavizsiz bir mühendislik \
+eleştirmenisin; zayıf fikirleri, üşengeç çözümleri ve güvenlik hatalarını açıkça \
+yüzüne vurur, hemen ardından en sağlam teknik çözümünü söylersin. \
 Aktif ifade tonu ({}): {}",
             expr.title_tr(),
             expr.persona_prompt_tr()
         )
     } else if lower_name == "kıvılcım" || lower_name == "kivilcim" {
         format!(
-            "Karakter kimligi: Adin Kivilcim. Merakli, cevik ve analitik bir arastirmacisin. \
+            "Karakter kimliği: Adın Kıvılcım. Meraklı, çevik ve analitik bir araştırmacısın. \
 Aktif ifade tonu ({}): {}",
             expr.title_tr(),
             expr.persona_prompt_tr()
         )
     } else {
         format!(
-            "Karakter kimligi: Adin {}. Aktif arketip ({}): {}",
+            "Karakter kimliği: Adın {}. Aktif arketip ({}): {}",
             name,
             expr.title_tr(),
             expr.persona_prompt_tr()
@@ -658,13 +658,13 @@ pub struct ProviderEndpoint {
 pub fn validate_http_url(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err("Bos API adresi".to_string());
+        return Err("Boş API adresi".to_string());
     }
     if trimmed.chars().any(|c| c.is_control() || c.is_whitespace()) {
-        return Err("API adresinde gecersiz bosluk veya kontrol karakteri var".to_string());
+        return Err("API adresinde geçersiz boşluk veya kontrol karakteri var".to_string());
     }
     if !(trimmed.starts_with("https://") || trimmed.starts_with("http://")) {
-        return Err("Yalnizca http:// veya https:// API adresleri desteklenir".to_string());
+        return Err("Yalnızca http:// veya https:// API adresleri desteklenir".to_string());
     }
     Ok(trimmed.to_string())
 }
@@ -678,7 +678,7 @@ pub fn build_provider_endpoint(
     match cfg.ai_provider {
         BlazeAiProvider::Gemini => {
             if model.chars().any(|c| c.is_whitespace() || c == '/' || c == '?' || c == '#') {
-                return Err("Gecersiz Gemini model adi".to_string());
+                return Err("Geçersiz Gemini model adı".to_string());
             }
             let url = format!(
                 "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
@@ -847,7 +847,7 @@ pub fn build_provider_request_payload(
 
 pub fn parse_provider_response(provider: BlazeAiProvider, raw_body: &str) -> Result<String, String> {
     let val: serde_json::Value = serde_json::from_str(raw_body)
-        .map_err(|e| format!("Gecersiz JSON yaniti: {}", e))?;
+        .map_err(|e| format!("Geçersiz JSON yanıtı: {}", e))?;
 
     if let Some(err_msg) = val
         .get("error")
@@ -903,7 +903,7 @@ pub fn parse_provider_response(provider: BlazeAiProvider, raw_body: &str) -> Res
 
     match extracted {
         Some(text) if !text.trim().is_empty() => Ok(text.trim().to_string()),
-        _ => Err("Saglayici bos veya beklenmeyen formatta yanit dondurdu".to_string()),
+        _ => Err("Sağlayıcı boş veya beklenmeyen formatta yanıt döndürdü".to_string()),
     }
 }
 
@@ -981,20 +981,20 @@ pub fn probe_ollama_models(base_url: &str) -> Result<Vec<String>, String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("curl baslatilamadi: {}", e))?;
+        .map_err(|e| format!("curl başlatılamadı: {}", e))?;
 
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(cfg_stdin.as_bytes());
     }
     let out = child
         .wait_with_output()
-        .map_err(|e| format!("Ollama erisim hatasi: {}", e))?;
+        .map_err(|e| format!("Ollama erişim hatası: {}", e))?;
     if !out.status.success() {
-        return Err("Ollama servisine ulasilamadi".to_string());
+        return Err("Ollama servisine ulaşılamadı".to_string());
     }
     let body = String::from_utf8_lossy(&out.stdout);
     let val: serde_json::Value =
-        serde_json::from_str(&body).map_err(|_| "Gecersiz Ollama etiket yaniti".to_string())?;
+        serde_json::from_str(&body).map_err(|_| "Geçersiz Ollama etiket yanıtı".to_string())?;
     let models = val
         .get("models")
         .and_then(|m| m.as_array())
@@ -1033,7 +1033,7 @@ pub fn send_chat_completion(
                     engine: cfg.search_engine.clone(),
                 });
             }
-            return Err("Yerel Ollama servisi calismiyor (127.0.0.1:11434)".to_string());
+            return Err("Yerel Ollama servisi çalışmıyor (127.0.0.1:11434)".to_string());
         }
     }
 
@@ -1042,15 +1042,15 @@ pub fn send_chat_completion(
     let system_prompt = build_system_prompt(cfg, memory_facts);
     let payload = build_provider_request_payload(cfg, &system_prompt, history);
     let payload_bytes = serde_json::to_vec(&payload)
-        .map_err(|e| format!("Istek JSON hazirlanamadi: {}", e))?;
+        .map_err(|e| format!("İstek JSON hazırlanamadı: {}", e))?;
 
     let tmp_dir = runtime_tmp_dir();
     ensure_private_dir(&tmp_dir)
-        .map_err(|e| format!("Gecici calisma dizini olusturulamadi: {}", e))?;
+        .map_err(|e| format!("Geçici çalışma dizini oluşturulamadı: {}", e))?;
     let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
     let payload_path = tmp_dir.join(format!("req-{}-{}.json", std::process::id(), seq));
     write_private_atomic(&payload_path, &payload_bytes)
-        .map_err(|e| format!("Gecici istek dosyasi yazilamadi: {}", e))?;
+        .map_err(|e| format!("Geçici istek dosyası yazılamadı: {}", e))?;
     let _guard = RuntimePayloadGuard {
         path: payload_path.clone(),
     };
@@ -1062,23 +1062,23 @@ pub fn send_chat_completion(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("curl calistirilamadi: {}", e))?;
+        .map_err(|e| format!("curl çalıştırılamadı: {}", e))?;
 
     if let Some(mut stdin) = child.stdin.take() {
         stdin
             .write_all(stdin_cfg.as_bytes())
-            .map_err(|e| format!("curl yapilandirmasi aktarilamadi: {}", e))?;
+            .map_err(|e| format!("curl yapılandırması aktarılamadı: {}", e))?;
     }
 
     let output = child
         .wait_with_output()
-        .map_err(|e| format!("Ag istegi tamamlanamadi: {}", e))?;
+        .map_err(|e| format!("Ağ isteği tamamlanamadı: {}", e))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if stderr.is_empty() {
-            "Saglayiciya baglanilamadi".to_string()
+            "Sağlayıcıya bağlanılamadı".to_string()
         } else {
-            format!("Ag hatasi: {}", stderr)
+            format!("Ağ hatası: {}", stderr)
         });
     }
 
@@ -1093,7 +1093,7 @@ pub fn send_chat_completion(
     if http_code >= 400 {
         let api_err = parse_provider_response(cfg.ai_provider, raw_body)
             .err()
-            .unwrap_or_else(|| format!("HTTP {} hatasi", http_code));
+            .unwrap_or_else(|| format!("HTTP {} hatası", http_code));
         return Err(format!("HTTP {}: {}", http_code, api_err));
     }
 
@@ -1328,14 +1328,14 @@ mod tests {
 
         cfg.set_companion_expression(CompanionExpression::Angry);
         let koz_prompt = build_system_prompt(&cfg, &facts);
-        assert!(koz_prompt.contains("Adin Koz"));
+        assert!(koz_prompt.contains("Adın Köz"));
         assert!(koz_prompt.contains("tavizsiz"));
 
         cfg.ai_include_blazeos_guide = false;
         cfg.ai_local_memory_enabled = false;
         let minimal_prompt = build_system_prompt(&cfg, &facts);
-        assert!(!minimal_prompt.contains("Super+Bosluk"));
-        assert!(!minimal_prompt.contains("Yerel kullanici hafizasi"));
+        assert!(!minimal_prompt.contains("Super+Boşluk"));
+        assert!(!minimal_prompt.contains("Yerel kullanıcı hafızası"));
     }
 
     #[test]
