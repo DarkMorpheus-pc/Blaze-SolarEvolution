@@ -2751,6 +2751,8 @@ impl OverrideAdapter {
         restore_selinux: bool,
         restore_firewalld: bool,
     ) -> Result<ProfileOverridePreState, AkrepError> {
+        let _locks = self.lock_store()?;
+
         let selinux_prev_runtime = if restore_selinux {
             Some(self.ensure_selinux_not_disabled()?)
         } else {
@@ -2772,7 +2774,6 @@ impl OverrideAdapter {
             None
         };
 
-        let _locks = self.lock_store()?;
         let mut doc = self.load_store_unlocked()?;
         let selinux_prev_override = if restore_selinux {
             doc.entries
@@ -2815,17 +2816,25 @@ impl OverrideAdapter {
         };
 
         if selinux_needs_restore {
-            self.ops.cancel_revert_timer(OverrideSubsystem::Selinux)?;
-            self.ensure_selinux_config_mode(SelinuxDesiredMode::Enforcing)?;
-            if selinux_prev_runtime != Some(SelinuxRuntimeMode::Enforcing) {
-                self.ops.setenforce(true)?;
+            pre.selinux_restored = true;
+            let sel_res = (|| -> Result<(), AkrepError> {
+                self.ops.cancel_revert_timer(OverrideSubsystem::Selinux)?;
+                self.ensure_selinux_config_mode(SelinuxDesiredMode::Enforcing)?;
+                if selinux_prev_runtime != Some(SelinuxRuntimeMode::Enforcing) {
+                    self.ops.setenforce(true)?;
+                }
+                Ok(())
+            })();
+            if let Err(err) = sel_res {
+                let _ = self.rollback_profile_override_restore_unlocked(&pre, &mut doc);
+                return Err(err);
             }
             doc.entries.remove(OverrideSubsystem::Selinux.as_str());
-            pre.selinux_restored = true;
         }
 
         if firewalld_needs_restore {
-            if let Err(err) = (|| -> Result<(), AkrepError> {
+            pre.firewalld_restored = true;
+            let fw_res = (|| -> Result<(), AkrepError> {
                 self.ops.cancel_revert_timer(OverrideSubsystem::Firewalld)?;
                 if firewalld_prev_enabled == Some(false) {
                     self.ops.enable_unit(SYSTEMD_FIREWALLD_UNIT)?;
@@ -2834,19 +2843,96 @@ impl OverrideAdapter {
                     self.ops.start_unit(SYSTEMD_FIREWALLD_UNIT)?;
                 }
                 Ok(())
-            })() {
-                drop(_locks);
-                let _ = self.rollback_profile_override_restore(&pre);
+            })();
+            if let Err(err) = fw_res {
+                let _ = self.rollback_profile_override_restore_unlocked(&pre, &mut doc);
                 return Err(err);
             }
             doc.entries.remove(OverrideSubsystem::Firewalld.as_str());
-            pre.firewalld_restored = true;
         }
 
         if pre.selinux_restored || pre.firewalld_restored {
-            self.save_store_unlocked(&doc)?;
+            if let Err(err) = self.save_store_unlocked(&doc) {
+                let _ = self.rollback_profile_override_restore_unlocked(&pre, &mut doc);
+                return Err(err);
+            }
         }
         Ok(pre)
+    }
+
+    fn rollback_profile_override_restore_unlocked(
+        &self,
+        pre: &ProfileOverridePreState,
+        doc: &mut OverrideStoreDocument,
+    ) -> Result<(), AkrepError> {
+        if !pre.selinux_restored && !pre.firewalld_restored {
+            return Ok(());
+        }
+
+        let mut first_err: Option<AkrepError> = None;
+        let mut record_err = |res: Result<(), AkrepError>| {
+            if let Err(err) = res {
+                if first_err.is_none() {
+                    first_err = Some(err);
+                }
+            }
+        };
+
+        if pre.firewalld_restored {
+            if let Some(was_enabled) = pre.firewalld_prev_enabled {
+                if self.ops.is_unit_enabled(SYSTEMD_FIREWALLD_UNIT).ok() != Some(was_enabled) {
+                    record_err(if was_enabled {
+                        self.ops.enable_unit(SYSTEMD_FIREWALLD_UNIT)
+                    } else {
+                        self.ops.disable_unit(SYSTEMD_FIREWALLD_UNIT)
+                    });
+                }
+            }
+            if let Some(was_active) = pre.firewalld_prev_active {
+                if self.ops.is_unit_active(SYSTEMD_FIREWALLD_UNIT).ok() != Some(was_active) {
+                    record_err(if was_active {
+                        self.ops.start_unit(SYSTEMD_FIREWALLD_UNIT)
+                    } else {
+                        self.ops.stop_unit(SYSTEMD_FIREWALLD_UNIT)
+                    });
+                }
+            }
+            record_err(self.restore_previous_entry(
+                OverrideSubsystem::Firewalld,
+                pre.firewalld_prev_override.clone(),
+                doc,
+            ));
+        }
+
+        if pre.selinux_restored {
+            if let Some(prev_cfg) = &pre.selinux_prev_config_raw {
+                if self.ops.read_selinux_config_raw().ok().flatten().as_deref()
+                    != Some(prev_cfg.as_str())
+                {
+                    record_err(self.ops.write_selinux_config_raw(prev_cfg));
+                }
+            }
+            if let Some(prev_rt) = pre.selinux_prev_runtime {
+                if self.ops.read_selinux_runtime_mode().ok() != Some(prev_rt) {
+                    match prev_rt {
+                        SelinuxRuntimeMode::Enforcing => record_err(self.ops.setenforce(true)),
+                        SelinuxRuntimeMode::Permissive => record_err(self.ops.setenforce(false)),
+                        SelinuxRuntimeMode::Disabled => {}
+                    }
+                }
+            }
+            record_err(self.restore_previous_entry(
+                OverrideSubsystem::Selinux,
+                pre.selinux_prev_override.clone(),
+                doc,
+            ));
+        }
+
+        record_err(self.save_store_unlocked(doc));
+        match first_err {
+            Some(err) => Err(err),
+            None => Ok(()),
+        }
     }
 
     pub fn rollback_profile_override_restore(
@@ -2859,47 +2945,7 @@ impl OverrideAdapter {
 
         let _locks = self.lock_store()?;
         let mut doc = self.load_store_unlocked()?;
-
-        if pre.firewalld_restored {
-            if let Some(was_enabled) = pre.firewalld_prev_enabled {
-                if was_enabled {
-                    self.ops.enable_unit(SYSTEMD_FIREWALLD_UNIT)?;
-                } else {
-                    self.ops.disable_unit(SYSTEMD_FIREWALLD_UNIT)?;
-                }
-            }
-            if let Some(was_active) = pre.firewalld_prev_active {
-                if was_active {
-                    self.ops.start_unit(SYSTEMD_FIREWALLD_UNIT)?;
-                } else {
-                    self.ops.stop_unit(SYSTEMD_FIREWALLD_UNIT)?;
-                }
-            }
-            self.restore_previous_entry(
-                OverrideSubsystem::Firewalld,
-                pre.firewalld_prev_override.clone(),
-                &mut doc,
-            )?;
-        }
-
-        if pre.selinux_restored {
-            if let Some(prev_cfg) = &pre.selinux_prev_config_raw {
-                self.ops.write_selinux_config_raw(prev_cfg)?;
-            }
-            match pre.selinux_prev_runtime {
-                Some(SelinuxRuntimeMode::Enforcing) => self.ops.setenforce(true)?,
-                Some(SelinuxRuntimeMode::Permissive) => self.ops.setenforce(false)?,
-                Some(SelinuxRuntimeMode::Disabled) | None => {}
-            }
-            self.restore_previous_entry(
-                OverrideSubsystem::Selinux,
-                pre.selinux_prev_override.clone(),
-                &mut doc,
-            )?;
-        }
-
-        self.save_store_unlocked(&doc)?;
-        Ok(())
+        self.rollback_profile_override_restore_unlocked(pre, &mut doc)
     }
 
     /// Reverts a timed override only if `generation_id` matches the active `Timed` entry.
@@ -3158,6 +3204,8 @@ mod tests {
         installed_packages: Mutex<HashSet<String>>,
         daemon_reloads: Mutex<usize>,
         recorded_ops: Mutex<Vec<String>>,
+        fail_setenforce_true: Mutex<Option<String>>,
+        fail_start_unit: Mutex<Option<String>>,
     }
 
     impl FakeOverrideOps {
@@ -3198,7 +3246,17 @@ SELINUXTYPE=targeted
                 installed_packages: Mutex::new(HashSet::new()),
                 daemon_reloads: Mutex::new(0),
                 recorded_ops: Mutex::new(Vec::new()),
+                fail_setenforce_true: Mutex::new(None),
+                fail_start_unit: Mutex::new(None),
             }
+        }
+
+        fn set_fail_setenforce_true(&self, msg: Option<&str>) {
+            *self.fail_setenforce_true.lock().unwrap() = msg.map(ToString::to_string);
+        }
+
+        fn set_fail_start_unit(&self, msg: Option<&str>) {
+            *self.fail_start_unit.lock().unwrap() = msg.map(ToString::to_string);
         }
 
         fn set_boot_id(&self, id: &str) {
@@ -3260,6 +3318,11 @@ SELINUXTYPE=targeted
         }
 
         fn setenforce(&self, enforcing: bool) -> Result<(), AkrepError> {
+            if enforcing {
+                if let Some(msg) = self.fail_setenforce_true.lock().unwrap().clone() {
+                    return Err(AkrepError::ApplyFailed(msg));
+                }
+            }
             let mut cur = self.selinux_runtime.lock().unwrap();
             if *cur == SelinuxRuntimeMode::Disabled {
                 return Err(AkrepError::BackendUnavailable(
@@ -3317,6 +3380,9 @@ SELINUXTYPE=targeted
         }
 
         fn start_unit(&self, unit: &str) -> Result<(), AkrepError> {
+            if let Some(msg) = self.fail_start_unit.lock().unwrap().clone() {
+                return Err(AkrepError::ApplyFailed(msg));
+            }
             if let Some(u) = self.units.lock().unwrap().get_mut(unit) {
                 u.active = true;
             }
@@ -4066,5 +4132,165 @@ SELINUXTYPE=targeted
         ops.set_selinux_runtime(SelinuxRuntimeMode::Disabled);
         let err = adapter.force_restore_for_profile(true, true).unwrap_err();
         assert!(matches!(err, AkrepError::BackendUnavailable(_)));
+    }
+
+    #[test]
+    fn test_force_restore_partial_failure_selinux_rolls_back_config_and_timer() {
+        let dir = TempDir::new().unwrap();
+        let pub_cache = dir.path().join("cache/active_overrides.json");
+        let ops = Arc::new(FakeOverrideOps::new());
+        let adapter =
+            OverrideAdapter::new_with_ops(dir.path().to_path_buf(), pub_cache.clone(), ops.clone());
+        let snap1 = dir.path().join("snap1");
+        let snap2 = dir.path().join("snap2");
+        fs::create_dir_all(&snap1).unwrap();
+        fs::create_dir_all(&snap2).unwrap();
+
+        // Case 1: SELinux UntilChanged -> force_restore_for_profile fails at setenforce(true)
+        // after rewriting /etc/selinux/config; config and override entry must be rolled back.
+        adapter
+            .apply_selinux_mode(
+                SelinuxDesiredMode::Permissive,
+                OverrideDuration::UntilChanged,
+                &snap1,
+            )
+            .unwrap();
+        ops.set_fail_setenforce_true(Some("simulated setenforce 1 failure"));
+
+        let err = adapter.force_restore_for_profile(true, false).unwrap_err();
+        assert!(matches!(err, AkrepError::ApplyFailed(_)));
+        assert_eq!(
+            ops.read_selinux_runtime_mode().unwrap(),
+            SelinuxRuntimeMode::Permissive
+        );
+        assert!(ops
+            .read_selinux_config_raw()
+            .unwrap()
+            .unwrap()
+            .contains("SELINUX=permissive"));
+        assert_eq!(
+            adapter
+                .active_override(OverrideSubsystem::Selinux)
+                .unwrap()
+                .map(|e| e.duration),
+            Some(OverrideDuration::UntilChanged)
+        );
+
+        // Case 2: SELinux Timed(15) -> force_restore_for_profile fails at setenforce(true)
+        // after canceling the timer; timer and override entry must be restored cleanly.
+        ops.set_fail_setenforce_true(None);
+        adapter
+            .apply_selinux_mode(
+                SelinuxDesiredMode::Permissive,
+                OverrideDuration::Timed { minutes: 15 },
+                &snap2,
+            )
+            .unwrap();
+        let pre_entry = adapter
+            .active_override(OverrideSubsystem::Selinux)
+            .unwrap()
+            .unwrap();
+        ops.set_fail_setenforce_true(Some("simulated setenforce 1 failure"));
+
+        let err2 = adapter.force_restore_for_profile(true, false).unwrap_err();
+        assert!(matches!(err2, AkrepError::ApplyFailed(_)));
+        assert_eq!(
+            ops.read_selinux_runtime_mode().unwrap(),
+            SelinuxRuntimeMode::Permissive
+        );
+        assert!(ops.has_any_timer(OverrideSubsystem::Selinux));
+        assert_eq!(
+            adapter
+                .active_override(OverrideSubsystem::Selinux)
+                .unwrap()
+                .map(|e| e.generation_id),
+            Some(pre_entry.generation_id)
+        );
+    }
+
+    #[test]
+    fn test_force_restore_partial_failure_firewalld_rolls_back_with_and_without_selinux() {
+        let dir = TempDir::new().unwrap();
+        let pub_cache = dir.path().join("cache/active_overrides.json");
+        let ops = Arc::new(FakeOverrideOps::new());
+        let adapter =
+            OverrideAdapter::new_with_ops(dir.path().to_path_buf(), pub_cache.clone(), ops.clone());
+        let snap1 = dir.path().join("snap1");
+        let snap2 = dir.path().join("snap2");
+        let snap3 = dir.path().join("snap3");
+        fs::create_dir_all(&snap1).unwrap();
+        fs::create_dir_all(&snap2).unwrap();
+        fs::create_dir_all(&snap3).unwrap();
+
+        // Case 1: SELinux stays Enforcing (selinux_restored=false), Firewalld is UntilChanged.
+        // start_unit fails after cancel_revert_timer + enable_unit succeeded.
+        adapter
+            .apply_firewall_state(false, OverrideDuration::UntilChanged, &snap1)
+            .unwrap();
+        ops.set_fail_start_unit(Some("simulated firewalld start failure"));
+
+        let err1 = adapter.force_restore_for_profile(true, true).unwrap_err();
+        assert!(matches!(err1, AkrepError::ApplyFailed(_)));
+        assert!(!ops.is_unit_enabled(SYSTEMD_FIREWALLD_UNIT).unwrap());
+        assert!(!ops.is_unit_active(SYSTEMD_FIREWALLD_UNIT).unwrap());
+        assert_eq!(
+            adapter
+                .active_override(OverrideSubsystem::Firewalld)
+                .unwrap()
+                .map(|e| e.duration),
+            Some(OverrideDuration::UntilChanged)
+        );
+
+        // Case 2: SELinux is Timed(15) AND Firewalld is Timed(15).
+        // SELinux succeeds, then Firewalld fails at start_unit; BOTH SELinux and Firewalld
+        // runtime, config, timers, and store entries must be rolled back.
+        ops.set_fail_start_unit(None);
+        adapter
+            .apply_selinux_mode(
+                SelinuxDesiredMode::Permissive,
+                OverrideDuration::Timed { minutes: 15 },
+                &snap2,
+            )
+            .unwrap();
+        adapter
+            .apply_firewall_state(false, OverrideDuration::Timed { minutes: 15 }, &snap3)
+            .unwrap();
+        let sel_gen = adapter
+            .active_override(OverrideSubsystem::Selinux)
+            .unwrap()
+            .unwrap()
+            .generation_id;
+        let fw_gen = adapter
+            .active_override(OverrideSubsystem::Firewalld)
+            .unwrap()
+            .unwrap()
+            .generation_id;
+
+        ops.set_fail_start_unit(Some("simulated firewalld start failure"));
+        let err2 = adapter.force_restore_for_profile(true, true).unwrap_err();
+        assert!(matches!(err2, AkrepError::ApplyFailed(_)));
+
+        assert_eq!(
+            ops.read_selinux_runtime_mode().unwrap(),
+            SelinuxRuntimeMode::Permissive
+        );
+        assert!(ops.has_any_timer(OverrideSubsystem::Selinux));
+        assert!(!ops.is_unit_active(SYSTEMD_FIREWALLD_UNIT).unwrap());
+        assert!(ops.is_unit_enabled(SYSTEMD_FIREWALLD_UNIT).unwrap());
+        assert!(ops.has_any_timer(OverrideSubsystem::Firewalld));
+        assert_eq!(
+            adapter
+                .active_override(OverrideSubsystem::Selinux)
+                .unwrap()
+                .map(|e| e.generation_id),
+            Some(sel_gen)
+        );
+        assert_eq!(
+            adapter
+                .active_override(OverrideSubsystem::Firewalld)
+                .unwrap()
+                .map(|e| e.generation_id),
+            Some(fw_gen)
+        );
     }
 }
