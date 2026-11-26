@@ -1,13 +1,14 @@
+use gtk4::gdk;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Box as GtkBox, Button, CssProvider, Grid, Label, Orientation, Window,
+    Box as GtkBox, Button, CssProvider, Grid, IconTheme, Label, Orientation, Window,
 };
 use std::process::Command;
 
 pub fn launch_snap_window() {
     glib::set_prgname(Some("solar-snap"));
-    glib::set_application_name("SolarUI Snap Layouts");
+    glib::set_application_name("SolarUI");
 
     if let Err(err) = gtk4::init() {
         eprintln!("Failed to initialize GTK4 for Snap HUD: {}", err);
@@ -152,68 +153,100 @@ fn build_snap_ui(main_loop: glib::MainLoop, target_win_id: Option<u64>) {
             background-color: transparent;
         }
 
+        *:focus-visible {
+            outline: 2px solid rgba(224, 87, 60, 0.65);
+            outline-offset: 2px;
+        }
+
         .snap-card {
-            background-color: alpha(#16191c, 0.94);
-            border: 1px solid alpha(#0095c7, 0.45);
+            background-color: #141415;
+            border: 1px solid rgba(237, 237, 237, 0.12);
             border-radius: 16px;
-            padding: 14px 18px 18px 18px;
-            box-shadow: 0 16px 44px rgba(0, 0, 0, 0.75);
+            padding: 16px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
         }
 
         .snap-header-label {
-            color: #d8e2e8;
-            font-size: 13px;
-            font-weight: 600;
-            letter-spacing: 0.3px;
+            color: #ededed;
+            font-size: 14px;
+            font-weight: 500;
+            letter-spacing: 0px;
         }
 
         .snap-close-btn {
             background-color: transparent;
-            color: alpha(#ffffff, 0.6);
-            border: none;
-            border-radius: 6px;
-            padding: 2px 6px;
+            background-image: none;
+            color: #85858b;
+            border: 1px solid transparent;
+            border-radius: 8px;
+            min-width: 28px;
+            min-height: 28px;
+            padding: 0px;
             font-size: 13px;
+            font-weight: 400;
+            box-shadow: none;
+            transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        .snap-close-btn image {
+            -gtk-icon-size: 16px;
         }
 
         .snap-close-btn:hover {
-            background-color: alpha(#ba1a1a, 0.35);
-            color: #ffb4ab;
+            background-color: #232325;
+            border-color: rgba(229, 72, 77, 0.35);
+            color: #e5484d;
+        }
+
+        .snap-close-btn:active {
+            transform: scale(0.98);
         }
 
         .snap-template-frame {
-            background-color: alpha(#ffffff, 0.04);
-            border: 1px solid alpha(#ffffff, 0.12);
+            background-color: #19191b;
+            border: 1px solid rgba(237, 237, 237, 0.08);
             border-radius: 8px;
             padding: 4px;
         }
 
         .snap-zone {
-            background-color: #555e64;
-            border: 1px solid alpha(#ffffff, 0.08);
+            background-color: #232325;
+            background-image: none;
+            border: 1px solid rgba(237, 237, 237, 0.10);
             border-radius: 4px;
-            transition: all 120ms ease-out;
-            padding: 0;
-            margin: 0;
+            box-shadow: none;
+            padding: 0px;
+            margin: 0px;
+            transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
         }
 
         .snap-zone:hover {
-            background-color: #0078d4;
-            border-color: #38c8ff;
-            box-shadow: 0 0 8px alpha(#0078d4, 0.6);
+            background-color: #c83b22;
+            border-color: #e0573c;
+            box-shadow: none;
+        }
+
+        .snap-zone:active {
+            transform: scale(0.98);
         }
     "#;
     provider.load_from_string(css);
+    let display = gdk::Display::default().expect("No default display");
     gtk4::style_context_add_provider_for_display(
-        &gtk4::gdk::Display::default().expect("No default display"),
+        &display,
         &provider,
         gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
 
     let window = Window::builder()
-        .title("SolarUI Snap Layouts")
-        .default_width(450)
-        .default_height(270)
+        .title("Pencere yerleşimi")
+        .default_width(452)
+        .default_height(268)
         .resizable(false)
         .decorated(false)
         .build();
@@ -228,7 +261,7 @@ fn build_snap_ui(main_loop: glib::MainLoop, target_win_id: Option<u64>) {
     let key_controller = gtk4::EventControllerKey::new();
     let loop_quit_key = main_loop.clone();
     key_controller.connect_key_pressed(move |_, key, _, _| {
-        if key == gtk4::gdk::Key::Escape {
+        if key == gdk::Key::Escape {
             loop_quit_key.quit();
             return glib::Propagation::Stop;
         }
@@ -236,19 +269,26 @@ fn build_snap_ui(main_loop: glib::MainLoop, target_win_id: Option<u64>) {
     });
     window.add_controller(key_controller);
 
-    let root_card = GtkBox::new(Orientation::Vertical, 10);
+    let root_card = GtkBox::new(Orientation::Vertical, 12);
     root_card.add_css_class("snap-card");
 
-    // Header with title and close button
-    let header_box = GtkBox::new(Orientation::Horizontal, 0);
-    let title_label = Label::new(Some("Pencere Yerleşim Düzenleri (Snap Layouts)"));
+    // Header with title and symbolic close button
+    let header_box = GtkBox::new(Orientation::Horizontal, 8);
+    let title_label = Label::new(Some("Pencere yerleşimi"));
     title_label.add_css_class("snap-header-label");
     title_label.set_hexpand(true);
     title_label.set_halign(gtk4::Align::Start);
+    title_label.set_valign(gtk4::Align::Center);
     header_box.append(&title_label);
 
-    let close_btn = Button::with_label("✕");
+    let icon_theme = IconTheme::for_display(&display);
+    let close_btn = if icon_theme.has_icon("window-close-symbolic") {
+        Button::from_icon_name("window-close-symbolic")
+    } else {
+        Button::with_label("✕")
+    };
     close_btn.add_css_class("snap-close-btn");
+    close_btn.set_tooltip_text(Some("Kapat"));
     let loop_quit_btn = main_loop.clone();
     close_btn.connect_clicked(move |_| {
         loop_quit_btn.quit();
@@ -258,15 +298,20 @@ fn build_snap_ui(main_loop: glib::MainLoop, target_win_id: Option<u64>) {
 
     // 6 Template Cards Grid (3 Columns x 2 Rows)
     let grid = Grid::new();
-    grid.set_column_spacing(10);
-    grid.set_row_spacing(10);
+    grid.set_column_spacing(12);
+    grid.set_row_spacing(12);
     grid.set_hexpand(true);
     grid.set_vexpand(true);
 
-    // Helper macro/closure to create zone buttons
-    let create_zone = |action_id: &'static str, target_id: Option<u64>, loop_handle: glib::MainLoop| -> Button {
+    // Helper closure to create zone buttons
+    let create_zone = |action_id: &'static str,
+                       tooltip: &'static str,
+                       target_id: Option<u64>,
+                       loop_handle: glib::MainLoop|
+     -> Button {
         let btn = Button::new();
         btn.add_css_class("snap-zone");
+        btn.set_tooltip_text(Some(tooltip));
         btn.connect_clicked(move |_| {
             execute_snap_action(action_id, target_id);
             loop_handle.quit();
@@ -274,18 +319,18 @@ fn build_snap_ui(main_loop: glib::MainLoop, target_win_id: Option<u64>) {
         btn
     };
 
-    // ── Template 1: [ 1/2 | 1/2 ] ──────────────────────────────────────────
+    // Template 1: [ 1/2 | 1/2 ]
     {
-        let frame = GtkBox::new(Orientation::Horizontal, 3);
+        let frame = GtkBox::new(Orientation::Horizontal, 4);
         frame.add_css_class("snap-template-frame");
-        frame.set_size_request(130, 85);
+        frame.set_size_request(128, 84);
 
-        let z1 = create_zone("half-left", target_win_id, main_loop.clone());
+        let z1 = create_zone("half-left", "Sol yarı (%50)", target_win_id, main_loop.clone());
         z1.set_hexpand(true);
         z1.set_vexpand(true);
         frame.append(&z1);
 
-        let z2 = create_zone("half-right", target_win_id, main_loop.clone());
+        let z2 = create_zone("half-right", "Sağ yarı (%50)", target_win_id, main_loop.clone());
         z2.set_hexpand(true);
         z2.set_vexpand(true);
         frame.append(&z2);
@@ -293,44 +338,64 @@ fn build_snap_ui(main_loop: glib::MainLoop, target_win_id: Option<u64>) {
         grid.attach(&frame, 0, 0, 1, 1);
     }
 
-    // ── Template 2: [ 70% | 30% ] ──────────────────────────────────────────
+    // Template 2: [ 67% | 33% ]
     {
-        let frame = GtkBox::new(Orientation::Horizontal, 3);
+        let frame = GtkBox::new(Orientation::Horizontal, 4);
         frame.add_css_class("snap-template-frame");
-        frame.set_size_request(130, 85);
+        frame.set_size_request(128, 84);
 
-        let z1 = create_zone("two-thirds-left", target_win_id, main_loop.clone());
+        let z1 = create_zone(
+            "two-thirds-left",
+            "Sol geniş (%67)",
+            target_win_id,
+            main_loop.clone(),
+        );
         z1.set_hexpand(true);
         z1.set_vexpand(true);
-        z1.set_size_request(84, 75);
+        z1.set_size_request(80, 76);
         frame.append(&z1);
 
-        let z2 = create_zone("one-third-right", target_win_id, main_loop.clone());
+        let z2 = create_zone(
+            "one-third-right",
+            "Sağ dar (%33)",
+            target_win_id,
+            main_loop.clone(),
+        );
         z2.set_hexpand(true);
         z2.set_vexpand(true);
-        z2.set_size_request(38, 75);
+        z2.set_size_request(36, 76);
         frame.append(&z2);
 
         grid.attach(&frame, 1, 0, 1, 1);
     }
 
-    // ── Template 3: [ 33% | 33% | 33% ] ────────────────────────────────────
+    // Template 3: [ 33% | 33% | 33% ]
     {
-        let frame = GtkBox::new(Orientation::Horizontal, 3);
+        let frame = GtkBox::new(Orientation::Horizontal, 4);
         frame.add_css_class("snap-template-frame");
-        frame.set_size_request(130, 85);
+        frame.set_size_request(128, 84);
 
-        let z1 = create_zone("third-left", target_win_id, main_loop.clone());
+        let z1 = create_zone("third-left", "Sol sütun (%33)", target_win_id, main_loop.clone());
         z1.set_hexpand(true);
         z1.set_vexpand(true);
         frame.append(&z1);
 
-        let z2 = create_zone("third-center", target_win_id, main_loop.clone());
+        let z2 = create_zone(
+            "third-center",
+            "Orta sütun (%33)",
+            target_win_id,
+            main_loop.clone(),
+        );
         z2.set_hexpand(true);
         z2.set_vexpand(true);
         frame.append(&z2);
 
-        let z3 = create_zone("third-right", target_win_id, main_loop.clone());
+        let z3 = create_zone(
+            "third-right",
+            "Sağ sütun (%33)",
+            target_win_id,
+            main_loop.clone(),
+        );
         z3.set_hexpand(true);
         z3.set_vexpand(true);
         frame.append(&z3);
@@ -338,27 +403,37 @@ fn build_snap_ui(main_loop: glib::MainLoop, target_win_id: Option<u64>) {
         grid.attach(&frame, 2, 0, 1, 1);
     }
 
-    // ── Template 4: [ 50% Left Full | 50% Right Split (Top/Bottom) ] ───────
+    // Template 4: [ 50% Left Full | 50% Right Split (Top/Bottom) ]
     {
-        let frame = GtkBox::new(Orientation::Horizontal, 3);
+        let frame = GtkBox::new(Orientation::Horizontal, 4);
         frame.add_css_class("snap-template-frame");
-        frame.set_size_request(130, 85);
+        frame.set_size_request(128, 84);
 
-        let z_left = create_zone("split-left-full", target_win_id, main_loop.clone());
+        let z_left = create_zone(
+            "split-left-full",
+            "Sol tam (%50)",
+            target_win_id,
+            main_loop.clone(),
+        );
         z_left.set_hexpand(true);
         z_left.set_vexpand(true);
         frame.append(&z_left);
 
-        let right_box = GtkBox::new(Orientation::Vertical, 3);
+        let right_box = GtkBox::new(Orientation::Vertical, 4);
         right_box.set_hexpand(true);
         right_box.set_vexpand(true);
 
-        let z_top = create_zone("split-right-top", target_win_id, main_loop.clone());
+        let z_top = create_zone("split-right-top", "Sağ üst", target_win_id, main_loop.clone());
         z_top.set_hexpand(true);
         z_top.set_vexpand(true);
         right_box.append(&z_top);
 
-        let z_bottom = create_zone("split-right-bottom", target_win_id, main_loop.clone());
+        let z_bottom = create_zone(
+            "split-right-bottom",
+            "Sağ alt",
+            target_win_id,
+            main_loop.clone(),
+        );
         z_bottom.set_hexpand(true);
         z_bottom.set_vexpand(true);
         right_box.append(&z_bottom);
@@ -368,30 +443,40 @@ fn build_snap_ui(main_loop: glib::MainLoop, target_win_id: Option<u64>) {
         grid.attach(&frame, 0, 1, 1, 1);
     }
 
-    // ── Template 5: 2x2 Grid (Four Quadrants) ──────────────────────────────
+    // Template 5: 2x2 Grid (Four Quadrants)
     {
         let frame = Grid::new();
         frame.add_css_class("snap-template-frame");
-        frame.set_column_spacing(3);
-        frame.set_row_spacing(3);
-        frame.set_size_request(130, 85);
+        frame.set_column_spacing(4);
+        frame.set_row_spacing(4);
+        frame.set_size_request(128, 84);
 
-        let z_tl = create_zone("quad-top-left", target_win_id, main_loop.clone());
+        let z_tl = create_zone("quad-top-left", "Sol üst çeyrek", target_win_id, main_loop.clone());
         z_tl.set_hexpand(true);
         z_tl.set_vexpand(true);
         frame.attach(&z_tl, 0, 0, 1, 1);
 
-        let z_tr = create_zone("quad-top-right", target_win_id, main_loop.clone());
+        let z_tr = create_zone("quad-top-right", "Sağ üst çeyrek", target_win_id, main_loop.clone());
         z_tr.set_hexpand(true);
         z_tr.set_vexpand(true);
         frame.attach(&z_tr, 1, 0, 1, 1);
 
-        let z_bl = create_zone("quad-bottom-left", target_win_id, main_loop.clone());
+        let z_bl = create_zone(
+            "quad-bottom-left",
+            "Sol alt çeyrek",
+            target_win_id,
+            main_loop.clone(),
+        );
         z_bl.set_hexpand(true);
         z_bl.set_vexpand(true);
         frame.attach(&z_bl, 0, 1, 1, 1);
 
-        let z_br = create_zone("quad-bottom-right", target_win_id, main_loop.clone());
+        let z_br = create_zone(
+            "quad-bottom-right",
+            "Sağ alt çeyrek",
+            target_win_id,
+            main_loop.clone(),
+        );
         z_br.set_hexpand(true);
         z_br.set_vexpand(true);
         frame.attach(&z_br, 1, 1, 1, 1);
@@ -399,28 +484,43 @@ fn build_snap_ui(main_loop: glib::MainLoop, target_win_id: Option<u64>) {
         grid.attach(&frame, 1, 1, 1, 1);
     }
 
-    // ── Template 6: Center Focus (25% / 50% / 25%) ─────────────────────────
+    // Template 6: Center Focus (25% / 50% / 25%)
     {
-        let frame = GtkBox::new(Orientation::Horizontal, 3);
+        let frame = GtkBox::new(Orientation::Horizontal, 4);
         frame.add_css_class("snap-template-frame");
-        frame.set_size_request(130, 85);
+        frame.set_size_request(128, 84);
 
-        let z1 = create_zone("focus-left-sidebar", target_win_id, main_loop.clone());
+        let z1 = create_zone(
+            "focus-left-sidebar",
+            "Sol yan sütun (%25)",
+            target_win_id,
+            main_loop.clone(),
+        );
         z1.set_hexpand(true);
         z1.set_vexpand(true);
-        z1.set_size_request(30, 75);
+        z1.set_size_request(28, 76);
         frame.append(&z1);
 
-        let z2 = create_zone("focus-center-main", target_win_id, main_loop.clone());
+        let z2 = create_zone(
+            "focus-center-main",
+            "Orta ana alan (%50)",
+            target_win_id,
+            main_loop.clone(),
+        );
         z2.set_hexpand(true);
         z2.set_vexpand(true);
-        z2.set_size_request(62, 75);
+        z2.set_size_request(56, 76);
         frame.append(&z2);
 
-        let z3 = create_zone("focus-right-sidebar", target_win_id, main_loop.clone());
+        let z3 = create_zone(
+            "focus-right-sidebar",
+            "Sağ yan sütun (%25)",
+            target_win_id,
+            main_loop.clone(),
+        );
         z3.set_hexpand(true);
         z3.set_vexpand(true);
-        z3.set_size_request(30, 75);
+        z3.set_size_request(28, 76);
         frame.append(&z3);
 
         grid.attach(&frame, 2, 1, 1, 1);

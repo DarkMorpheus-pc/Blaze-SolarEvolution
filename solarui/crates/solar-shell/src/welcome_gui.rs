@@ -2,7 +2,8 @@ use gtk4::gdk;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Box as GtkBox, Button, CheckButton, Grid, Label, Orientation, ScrolledWindow, Window,
+    Box as GtkBox, Button, CheckButton, Label, Orientation, ScrolledWindow, SizeGroup,
+    SizeGroupMode, Window,
 };
 use solar_common::SolarConfig;
 
@@ -15,60 +16,93 @@ const WELCOME_EMBLEM_PNG: &[u8] =
 
 const WELCOME_EXTRA_CSS: &str = r#"
     .welcome-body {
-        padding: 18px 22px 20px 22px;
+        padding: 16px 24px 20px 24px;
     }
 
-    .welcome-hero {
-        background: linear-gradient(135deg, rgba(38, 40, 48, 0.92) 0%, rgba(26, 27, 33, 0.96) 100%);
-        border: 1px solid rgba(255, 255, 255, 0.09);
-        border-radius: 18px;
-        padding: 14px 20px;
-        margin-bottom: 12px;
+    .welcome-header {
+        margin-bottom: 16px;
     }
 
     .welcome-title {
-        color: #f5f5f7;
-        font-size: 19px;
-        font-weight: 700;
-        letter-spacing: -0.2px;
+        color: #ededed;
+        font-size: 20px;
+        font-weight: 600;
+        letter-spacing: 0px;
     }
 
     .welcome-subtitle {
-        color: #a1a1aa;
-        font-size: 12.2px;
-        font-weight: 500;
+        color: #a1a1a6;
+        font-size: 13px;
+        font-weight: 400;
+        letter-spacing: 0px;
     }
 
     .shortcut-grid-card {
-        background: linear-gradient(180deg, rgba(30, 32, 38, 0.90) 0%, rgba(23, 25, 30, 0.94) 100%);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 18px;
-        padding: 14px 18px;
-        margin-bottom: 14px;
+        background-color: #19191b;
+        background-image: none;
+        border: 1px solid rgba(237, 237, 237, 0.08);
+        border-radius: 12px;
+        padding: 8px 12px;
+        margin-bottom: 16px;
+        box-shadow: none;
     }
 
-    .lf-keycap {
-        background-color: rgba(255, 255, 255, 0.08);
-        color: #f4f4f6;
-        border: 1px solid rgba(255, 255, 255, 0.13);
-        border-radius: 999px;
-        padding: 4px 12px;
-        font-size: 11.5px;
-        font-weight: 700;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
+    .shortcut-row {
+        padding: 4px 8px;
+        border-bottom: 1px solid rgba(237, 237, 237, 0.06);
+        transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .shortcut-row:last-child {
+        border-bottom: none;
+    }
+
+    .shortcut-row:hover {
+        background-color: rgba(237, 237, 237, 0.03);
     }
 
     .shortcut-desc {
-        color: #d4d4d8;
-        font-size: 12.6px;
-        font-weight: 500;
-        margin-left: 8px;
+        color: #a1a1a6;
+        font-size: 13px;
+        font-weight: 400;
+        letter-spacing: 0px;
     }
 "#;
 
+fn build_keycap_combo(chords: &[&[&str]]) -> GtkBox {
+    let combo = GtkBox::new(Orientation::Horizontal, 4);
+    combo.set_halign(gtk4::Align::Start);
+    combo.set_valign(gtk4::Align::Center);
+
+    for (chord_idx, chord) in chords.iter().enumerate() {
+        if chord_idx > 0 {
+            let sep = Label::new(Some("/"));
+            sep.add_css_class("lf-keycap-sep");
+            sep.set_valign(gtk4::Align::Center);
+            combo.append(&sep);
+        }
+
+        for (key_idx, key) in chord.iter().enumerate() {
+            if key_idx > 0 {
+                let plus = Label::new(Some("+"));
+                plus.add_css_class("lf-keycap-plus");
+                plus.set_valign(gtk4::Align::Center);
+                combo.append(&plus);
+            }
+
+            let cap = Label::new(Some(key));
+            cap.add_css_class("lf-keycap");
+            cap.set_valign(gtk4::Align::Center);
+            combo.append(&cap);
+        }
+    }
+
+    combo
+}
+
 pub fn launch_welcome_window() {
     glib::set_prgname(Some("solar-welcome"));
-    glib::set_application_name("SolarUI Welcome");
+    glib::set_application_name("SolarUI");
 
     if let Err(err) = gtk4::init() {
         eprintln!("Failed to initialize GTK4: {}", err);
@@ -84,7 +118,7 @@ fn build_welcome_ui(main_loop: glib::MainLoop) {
     apply_living_flow_theme(WELCOME_EXTRA_CSS);
 
     let window = Window::builder()
-        .title("SolarUI Desktop — Karşılama ve Kısayollar")
+        .title("SolarUI Masaüstü Rehberi")
         .decorated(false)
         .default_width(750)
         .default_height(590)
@@ -114,13 +148,13 @@ fn build_welcome_ui(main_loop: glib::MainLoop) {
     let shell_box = GtkBox::new(Orientation::Vertical, 0);
     shell_box.add_css_class("lf-window-shell");
 
-    let top_emblem = load_png_emblem(WELCOME_EMBLEM_PNG, 34);
+    let top_emblem = load_png_emblem(WELCOME_EMBLEM_PNG, 24);
     let loop_top = main_loop.clone();
     let topbar = build_living_flow_topbar(
         &window,
         Some(top_emblem),
-        "SolarUI Masaüstü Rehberi",
-        "Blaze Universe",
+        "SolarUI",
+        "Blaze SolarEvolution",
         None,
         Some(Box::new(move || loop_top.quit())),
     );
@@ -130,27 +164,22 @@ fn build_welcome_ui(main_loop: glib::MainLoop) {
     body.add_css_class("welcome-body");
     body.set_vexpand(true);
 
-    // Luminous Hero Banner (clean typography without wide logo)
-    let hero = GtkBox::new(Orientation::Vertical, 4);
-    hero.add_css_class("welcome-hero");
+    // Calm page header directly on graphite surface
+    let header = GtkBox::new(Orientation::Vertical, 4);
+    header.add_css_class("welcome-header");
 
-    let hero_txt = GtkBox::new(Orientation::Vertical, 2);
-    hero_txt.set_valign(gtk4::Align::Center);
-    let title = Label::new(Some("Blaze Universe & SolarUI Masaüstüne Hoş Geldiniz"));
+    let title = Label::new(Some("SolarUI kısayolları"));
     title.add_css_class("welcome-title");
     title.set_halign(gtk4::Align::Start);
-    hero_txt.append(&title);
+    header.append(&title);
 
-    let subtitle = Label::new(Some(
-        "Luminous Akış • Elastik Pencere Fiziği • Portadora & Flathub Hibrit Ekosistem",
-    ));
+    let subtitle = Label::new(Some("Sık kullanılan masaüstü, pencere ve oturum kısayolları"));
     subtitle.add_css_class("welcome-subtitle");
     subtitle.set_halign(gtk4::Align::Start);
-    hero_txt.append(&subtitle);
-    hero.append(&hero_txt);
-    body.append(&hero);
+    header.append(&subtitle);
+    body.append(&header);
 
-    // Scrollable Shortcut Grid inside Liquid-Acrylic Card
+    // Signature keycap shortcut sheet with aligned two-column rows
     let scroll = ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Never)
         .vscrollbar_policy(gtk4::PolicyType::Automatic)
@@ -158,45 +187,59 @@ fn build_welcome_ui(main_loop: glib::MainLoop) {
         .build();
     scroll.add_css_class("shortcut-grid-card");
 
-    let grid = Grid::new();
-    grid.set_column_spacing(20);
-    grid.set_row_spacing(7);
+    let rows_box = GtkBox::new(Orientation::Vertical, 0);
+    let key_col_group = SizeGroup::new(SizeGroupMode::Horizontal);
 
-    let shortcuts = [
-        ("Mod + Space", "Solar Omnibar — Uygulama, Matematik, Kur & Sistem Arama"),
-        ("Mod + Shift + Space", "Solar Omnibar (Doğrudan Zorla Aç)"),
-        ("Mod + G", "Blaze GameZone — Tam Ekran Konsol & Proton-GE Kabuğu"),
-        ("Mod + I / Mod+Shift+S", "SolarUI Masaüstü, Kabuk Motoru ve Görev Çubuğu Ayarları"),
-        ("Mod + S", "Kontrol Merkezi, Ses Mikseri ve Ağ Paneli"),
-        ("Mod + Enter", "Alacritty GPU Hızlandırmalı Uçbirim"),
-        ("Mod + T / F", "Serbest Yüzen Pencere (Floating) Moduna Geçiş"),
-        ("Mod + Sol / Sağ Tık", "Pencereyi Taşı / Boyutlandır (Elastik Yay Fiziği)"),
-        ("Mod + Y / Ctrl+Aşağı", "Pencereyi Görev Çubuğuna Küçült (Minimize)"),
-        ("Alt + F4 / Mod + Q", "Aktif Pencereyi Kapat"),
-        ("Mod + Alt + K", "SolarEvolution Retro Modu (Konami Kodu Sürprizi)"),
-        ("Mod + Shift + Q", "Oturumu Kapat / Güç Menüsü"),
+    let shortcuts: &[(&[&[&str]], &str)] = &[
+        (&[&["Super", "Space"]], "Omnibar uygulama ve sistem araması"),
+        (&[&["Super", "Shift", "Space"]], "Omnibar'ı doğrudan aç"),
+        (&[&["Super", "G"]], "GameZone oyun başlatıcısı"),
+        (
+            &[&["Super", "I"], &["Super", "Shift", "S"]],
+            "SolarUI masaüstü ve kabuk ayarları",
+        ),
+        (&[&["Super", "S"]], "Kontrol merkezi, ses ve ağ"),
+        (&[&["Super", "Enter"]], "Alacritty uçbirim"),
+        (&[&["Super", "T"], &["Super", "F"]], "Yüzen pencere modunu aç veya kapat"),
+        (
+            &[&["Super", "Sol tık"], &["Sağ tık"]],
+            "Pencereyi taşı veya boyutlandır",
+        ),
+        (
+            &[&["Super", "Y"], &["Ctrl", "↓"]],
+            "Pencereyi görev çubuğuna küçült",
+        ),
+        (&[&["Alt", "F4"], &["Super", "Q"]], "Etkin pencereyi kapat"),
+        (&[&["Super", "Alt", "K"]], "SolarEvolution retro modu"),
+        (&[&["Super", "Shift", "Q"]], "Oturum ve güç menüsü"),
     ];
 
-    for (i, (key, desc)) in shortcuts.iter().enumerate() {
-        let row = i as i32;
-        let key_label = Label::new(Some(key));
-        key_label.add_css_class("lf-keycap");
-        key_label.set_halign(gtk4::Align::Start);
+    for (chords, desc) in shortcuts {
+        let row = GtkBox::new(Orientation::Horizontal, 20);
+        row.add_css_class("shortcut-row");
+
+        let key_wrap = GtkBox::new(Orientation::Horizontal, 0);
+        key_wrap.set_halign(gtk4::Align::Start);
+        key_wrap.set_valign(gtk4::Align::Center);
+        key_wrap.append(&build_keycap_combo(chords));
+        key_col_group.add_widget(&key_wrap);
 
         let desc_label = Label::new(Some(desc));
         desc_label.add_css_class("shortcut-desc");
         desc_label.set_halign(gtk4::Align::Start);
+        desc_label.set_valign(gtk4::Align::Center);
         desc_label.set_hexpand(true);
         desc_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
 
-        grid.attach(&key_label, 0, row, 1, 1);
-        grid.attach(&desc_label, 1, row, 1, 1);
+        row.append(&key_wrap);
+        row.append(&desc_label);
+        rows_box.append(&row);
     }
-    scroll.set_child(Some(&grid));
+    scroll.set_child(Some(&rows_box));
     body.append(&scroll);
 
-    // Bottom Capsule Action Row
-    let bottom_box = GtkBox::new(Orientation::Horizontal, 10);
+    // Bottom action row
+    let bottom_box = GtkBox::new(Orientation::Horizontal, 8);
     bottom_box.set_valign(gtk4::Align::Center);
 
     let cfg = SolarConfig::load();
@@ -213,7 +256,7 @@ fn build_welcome_ui(main_loop: glib::MainLoop) {
     let has_solar_installer = std::path::Path::new("/usr/bin/solar-installer").exists();
     let has_liveinst = std::path::Path::new("/usr/bin/liveinst").exists();
     if has_solar_installer || has_liveinst {
-        let inst_btn = Button::with_label("Sistemi Kur");
+        let inst_btn = Button::with_label("Sistemi kur");
         inst_btn.add_css_class("lf-btn-glass");
         let win_weak_inst = window.downgrade();
         let loop_inst = main_loop.clone();
@@ -233,14 +276,14 @@ fn build_welcome_ui(main_loop: glib::MainLoop) {
         bottom_box.append(&inst_btn);
     }
 
-    let store_btn = Button::with_label("FireHub Mağaza");
-    store_btn.add_css_class("lf-btn-emerald");
+    let store_btn = Button::with_label("FireHub");
+    store_btn.add_css_class("lf-btn-glass");
     store_btn.connect_clicked(move |_| {
         let _ = std::process::Command::new("firehub").spawn();
     });
     bottom_box.append(&store_btn);
 
-    let start_btn = Button::with_label("Masaüstüne Başla →");
+    let start_btn = Button::with_label("Masaüstüne geç");
     start_btn.add_css_class("lf-btn-primary");
     let win_weak = window.downgrade();
     let loop_clone = main_loop.clone();

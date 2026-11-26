@@ -1,7 +1,7 @@
 // ==============================================================================
-// ColorOS 17 "Living Flow Design" System for Blaze Universe & SolarUI
-// Authentic Dark-Mode Architecture: Obsidian Smoked Glass, Condensed Light &
-// Physics-Driven Flexible Feedback (Zero Neon Glows, Pure Industrial Precision)
+// SolarUI Graphite + Blaze Ember Theme Module (GTK4)
+// Shared window chrome, status indicator, form controls, and token stylesheet
+// for SolarUI desktop utilities on Blaze SolarEvolution.
 // ==============================================================================
 
 use gtk4::gdk;
@@ -25,7 +25,6 @@ pub enum FluidCloudTone {
 #[derive(Clone)]
 pub struct FluidCloud {
     pill_box: GtkBox,
-    dot_lbl: Label,
     text_lbl: Label,
     generation: Rc<RefCell<u64>>,
 }
@@ -37,9 +36,14 @@ impl FluidCloud {
         pill_box.add_css_class("cloud-info");
         pill_box.set_valign(gtk4::Align::Center);
 
-        let dot_lbl = Label::new(Some("●"));
-        dot_lbl.add_css_class("lf-cloud-dot");
-        pill_box.append(&dot_lbl);
+        let dot = GtkBox::new(Orientation::Horizontal, 0);
+        dot.add_css_class("lf-cloud-dot");
+        dot.set_size_request(8, 8);
+        dot.set_halign(gtk4::Align::Center);
+        dot.set_valign(gtk4::Align::Center);
+        dot.set_hexpand(false);
+        dot.set_vexpand(false);
+        pill_box.append(&dot);
 
         let text_lbl = Label::new(Some(initial_text));
         text_lbl.add_css_class("lf-cloud-text");
@@ -49,7 +53,6 @@ impl FluidCloud {
 
         Self {
             pill_box,
-            dot_lbl,
             text_lbl,
             generation: Rc::new(RefCell::new(0)),
         }
@@ -59,8 +62,8 @@ impl FluidCloud {
         &self.pill_box
     }
 
-    /// Triggers a live ColorOS 17 Aqua Dynamics / Fluid Cloud morphing reaction
-    /// in the window topbar with tactile spring compression/expansion.
+    /// Updates the topbar status indicator message and semantic tone,
+    /// with a brief surface highlight and optional desktop notification.
     pub fn pulse(&self, message: &str, tone: FluidCloudTone, send_osd: bool) {
         let _ = crate::delight::play_acoustic_feedback("click");
 
@@ -68,14 +71,13 @@ impl FluidCloud {
             self.pill_box.remove_css_class(cls);
         }
 
-        let (tone_cls, symbol) = match tone {
-            FluidCloudTone::Info => ("cloud-info", "●"),
-            FluidCloudTone::Success => ("cloud-ok", "●"),
-            FluidCloudTone::Warning => ("cloud-warn", "▲"),
-            FluidCloudTone::Danger => ("cloud-danger", "◆"),
+        let tone_cls = match tone {
+            FluidCloudTone::Info => "cloud-info",
+            FluidCloudTone::Success => "cloud-ok",
+            FluidCloudTone::Warning => "cloud-warn",
+            FluidCloudTone::Danger => "cloud-danger",
         };
 
-        self.dot_lbl.set_text(symbol);
         self.text_lbl.set_text(message);
         self.pill_box.add_css_class(tone_cls);
         self.pill_box.add_css_class("cloud-pulse");
@@ -88,7 +90,7 @@ impl FluidCloud {
 
         let pill_ref = self.pill_box.clone();
         let gen_ref = self.generation.clone();
-        glib::timeout_add_local_once(std::time::Duration::from_millis(400), move || {
+        glib::timeout_add_local_once(std::time::Duration::from_millis(320), move || {
             if *gen_ref.borrow() == next_gen {
                 pill_ref.remove_css_class("cloud-pulse");
             }
@@ -103,7 +105,7 @@ impl FluidCloud {
                         "SolarUI",
                         "-i",
                         "solar-settings",
-                        "Blaze Universe",
+                        "SolarUI",
                         &msg_owned,
                     ])
                     .spawn();
@@ -113,181 +115,228 @@ impl FluidCloud {
 }
 
 pub const LIVING_FLOW_CORE_CSS: &str = r#"
-    @keyframes lf-elastic-morph {
-        0%   { transform: scale(1.0); }
-        40%  { transform: scale(1.028); }
-        100% { transform: scale(1.0); }
-    }
-
     window,
     window.background,
     window.csd {
-        background-color: #121316;
-        color: #f4f4f6;
+        background-color: #141415;
+        color: #ededed;
     }
 
-    *,
-    *:focus,
-    *:focus-visible,
-    *:focus-within {
-        outline-color: transparent;
-        outline-width: 0px;
-        outline-style: none;
+    *:focus-visible {
+        outline: 2px solid rgba(224, 87, 60, 0.65);
+        outline-offset: 2px;
     }
 
     headerbar {
-        background: #17181d;
+        background-color: #141415;
         background-image: none;
-        color: #f4f4f6;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+        color: #ededed;
+        border-bottom: 1px solid rgba(237, 237, 237, 0.08);
         box-shadow: none;
     }
 
     headerbar title,
     headerbar .title {
-        color: #f4f4f6;
-        font-weight: 700;
-    }
-
-    /* ColorOS 17 Obsidian Smoked Glass Window Shell + Condensed Light Rim */
-    .lf-window-shell {
-        background: linear-gradient(180deg, #17181d 0%, #111216 100%);
-        border: 1px solid rgba(255, 255, 255, 0.09);
-        border-radius: 20px;
-    }
-
-    .lf-topbar {
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.032) 0%, rgba(255, 255, 255, 0.012) 100%);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.065);
-        border-top-left-radius: 20px;
-        border-top-right-radius: 20px;
-        padding: 13px 20px;
-    }
-
-    .lf-topbar-title {
-        color: #f5f5f7;
-        font-size: 15.5px;
-        font-weight: 700;
-        letter-spacing: -0.2px;
-    }
-
-    .lf-topbar-subtitle {
-        color: #9ca3af;
-        font-size: 11.5px;
+        color: #ededed;
+        font-size: 14px;
         font-weight: 500;
     }
 
-    /* Authentic ColorOS 17 Aqua Dynamics / Fluid Cloud Capsule (Smoked Onyx, Zero Neon) */
+    /* Graphite Window Shell & Top Bar */
+    .lf-window-shell {
+        background-color: #141415;
+        background-image: none;
+        border: 1px solid rgba(237, 237, 237, 0.08);
+        border-radius: 16px;
+        box-shadow: none;
+    }
+
+    .lf-topbar {
+        background-color: #141415;
+        background-image: none;
+        border-bottom: 1px solid rgba(237, 237, 237, 0.08);
+        border-top-left-radius: 16px;
+        border-top-right-radius: 16px;
+        padding: 12px 20px;
+    }
+
+    .lf-topbar-icon {
+        color: #85858b;
+        -gtk-icon-size: 16px;
+    }
+
+    .lf-topbar-title {
+        color: #ededed;
+        font-size: 14px;
+        font-weight: 500;
+        letter-spacing: 0px;
+    }
+
+    .lf-topbar-subtitle {
+        color: #85858b;
+        font-size: 12px;
+        font-weight: 400;
+        letter-spacing: 0px;
+    }
+
+    /* Quiet Status Indicator (8px Dot + Plain Label) */
     .lf-fluid-cloud {
-        background-color: rgba(255, 255, 255, 0.055);
-        border: 1px solid rgba(255, 255, 255, 0.10);
-        border-radius: 999px;
-        padding: 5px 14px;
-        box-shadow: 0 3px 10px rgba(0, 0, 0, 0.32);
-        transition: all 220ms cubic-bezier(0.22, 1, 0.36, 1);
+        background-color: #19191b;
+        border: 1px solid rgba(237, 237, 237, 0.08);
+        border-radius: 6px;
+        padding: 4px 12px;
+        box-shadow: none;
+        transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    opacity 150ms cubic-bezier(0.22, 1, 0.36, 1);
     }
 
     .lf-fluid-cloud.cloud-pulse {
-        animation: lf-elastic-morph 340ms cubic-bezier(0.22, 1, 0.36, 1);
-        background-color: rgba(255, 255, 255, 0.09);
+        background-color: #232325;
+        border-color: rgba(237, 237, 237, 0.12);
     }
-
-    .lf-fluid-cloud.cloud-info .lf-cloud-dot   { color: #e04828; }
-    .lf-fluid-cloud.cloud-ok .lf-cloud-dot     { color: #34d399; }
-    .lf-fluid-cloud.cloud-warn .lf-cloud-dot   { color: #f59e0b; }
-    .lf-fluid-cloud.cloud-danger .lf-cloud-dot { color: #ef4444; }
 
     .lf-cloud-dot {
-        font-size: 10px;
-        font-weight: 800;
+        min-width: 8px;
+        min-height: 8px;
+        border-radius: 999px;
+        background-color: #e0573c;
     }
+
+    .lf-fluid-cloud.cloud-info .lf-cloud-dot   { background-color: #e0573c; }
+    .lf-fluid-cloud.cloud-ok .lf-cloud-dot     { background-color: #4cc38a; }
+    .lf-fluid-cloud.cloud-warn .lf-cloud-dot   { background-color: #d9a03f; }
+    .lf-fluid-cloud.cloud-danger .lf-cloud-dot { background-color: #e5484d; }
 
     .lf-cloud-text {
-        color: #e4e4e7;
+        color: #a1a1a6;
         font-size: 12px;
-        font-weight: 600;
+        font-weight: 400;
+        letter-spacing: 0px;
+        font-feature-settings: "tnum";
     }
 
-    /* Window Controls (Tactile Smoked Glass Pills) */
+    /* Window Controls (Symbolic Icons, Quiet Graphite Hover) */
     .lf-win-btn {
-        background-color: rgba(255, 255, 255, 0.065);
+        background-color: transparent;
         background-image: none;
-        color: #d4d4d8;
-        border: 1px solid rgba(255, 255, 255, 0.10);
-        border-radius: 999px;
-        min-width: 30px;
-        min-height: 30px;
-        padding: 0 10px;
-        font-size: 12px;
-        font-weight: 700;
-        transition: all 180ms cubic-bezier(0.22, 1, 0.36, 1);
+        color: #85858b;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        min-width: 32px;
+        min-height: 32px;
+        padding: 0px;
+        font-size: 13px;
+        font-weight: 400;
+        box-shadow: none;
+        transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    opacity 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .lf-win-btn image {
+        -gtk-icon-size: 16px;
     }
 
     .lf-win-btn:hover {
-        background-color: rgba(255, 255, 255, 0.14);
+        background-color: #232325;
         background-image: none;
-        color: #ffffff;
-        transform: scale(1.04);
+        border-color: rgba(237, 237, 237, 0.08);
+        color: #ededed;
     }
 
     .lf-win-btn:active {
-        transform: scale(0.94);
+        transform: scale(0.98);
     }
 
     .lf-win-close:hover {
-        background-color: #c83b22;
+        background-color: #232325;
         background-image: none;
-        border-color: rgba(255, 255, 255, 0.25);
-        color: #ffffff;
+        border-color: rgba(229, 72, 77, 0.35);
+        color: #e5484d;
     }
 
-    /* Frosted Smoked-Titanium Cards with Top Condensed Light Highlight */
+    /* Graphite Surface Cards */
     .lf-card,
     .section-box,
     .installer-card {
-        background: linear-gradient(180deg, rgba(32, 34, 40, 0.88) 0%, rgba(25, 27, 32, 0.92) 100%);
-        border-top: 1px solid rgba(255, 255, 255, 0.10);
-        border-left: 1px solid rgba(255, 255, 255, 0.07);
-        border-right: 1px solid rgba(255, 255, 255, 0.07);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        border-radius: 18px;
-        padding: 18px 20px;
-        margin-bottom: 14px;
-        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.30);
-        transition: border-color 200ms cubic-bezier(0.22, 1, 0.36, 1),
-                    background-color 200ms cubic-bezier(0.22, 1, 0.36, 1);
+        background-color: #19191b;
+        background-image: none;
+        border: 1px solid rgba(237, 237, 237, 0.08);
+        border-radius: 12px;
+        padding: 16px 20px;
+        margin-bottom: 16px;
+        box-shadow: none;
+        transition: border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    background-color 150ms cubic-bezier(0.22, 1, 0.36, 1);
     }
 
     .lf-card:hover,
     .section-box:hover,
     .installer-card:hover {
-        border-color: rgba(255, 255, 255, 0.14);
+        border-color: rgba(237, 237, 237, 0.12);
     }
 
     /* Typography Hierarchy */
     .lf-section-title,
     .section-title,
     .section-heading {
-        color: #f5f5f7;
-        font-size: 15px;
-        font-weight: 700;
-        margin-bottom: 6px;
-        letter-spacing: -0.15px;
+        color: #ededed;
+        font-size: 16px;
+        font-weight: 500;
+        margin-bottom: 4px;
+        letter-spacing: 0px;
     }
 
     .lf-label,
     .setting-label {
-        color: #e4e4e7;
-        font-size: 13.2px;
-        font-weight: 600;
+        color: #ededed;
+        font-size: 14px;
+        font-weight: 400;
+        letter-spacing: 0px;
     }
 
     .lf-subtext,
     .setting-subtext,
     .section-desc {
-        color: #a1a1aa;
+        color: #a1a1a6;
+        font-size: 13px;
+        font-weight: 400;
+        letter-spacing: 0px;
+    }
+
+    /* Reusable Keycap Signature */
+    .lf-keycap {
+        background-color: #232325;
+        color: #ededed;
+        border: 1px solid rgba(237, 237, 237, 0.12);
+        border-bottom: 2px solid rgba(0, 0, 0, 0.72);
+        border-radius: 6px;
+        padding: 2px 8px;
+        min-height: 20px;
+        font-family: monospace;
+        font-size: 12px;
+        font-weight: 500;
+        letter-spacing: 0px;
+        font-feature-settings: "tnum";
+        box-shadow: inset 0 1px 0 rgba(237, 237, 237, 0.08);
+    }
+
+    .lf-keycap-plus {
+        color: #85858b;
         font-size: 12px;
         font-weight: 400;
+        padding: 0px 2px;
+    }
+
+    .lf-keycap-sep {
+        color: #85858b;
+        font-size: 12px;
+        font-weight: 400;
+        padding: 0px 4px;
     }
 
     button {
@@ -296,342 +345,400 @@ pub const LIVING_FLOW_CORE_CSS: &str = r#"
         -gtk-icon-shadow: none;
     }
 
-    /* ColorOS 17 Tactile Buttons — Zero Neon, Warm Alabaster & Satin Vermilion */
+    button:disabled {
+        opacity: 0.45;
+    }
+
+    /* Primary Buttons: Off-white #ededed fill, #141415 text */
     .lf-btn-primary,
     .action-btn,
-    .start-btn {
-        background: #f2f3f5;
-        color: #111215;
-        border: 1px solid rgba(255, 255, 255, 0.92);
-        border-radius: 999px;
-        padding: 9px 22px;
-        font-size: 13px;
-        font-weight: 700;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-        transition: all 180ms cubic-bezier(0.22, 1, 0.36, 1);
+    .start-btn,
+    .lf-btn-flame,
+    .primary-btn {
+        background-color: #ededed;
+        background-image: none;
+        color: #141415;
+        border: 1px solid #ededed;
+        border-radius: 8px;
+        padding: 8px 16px;
+        min-height: 36px;
+        font-size: 14px;
+        font-weight: 500;
+        letter-spacing: 0px;
+        box-shadow: none;
+        transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    opacity 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
     }
 
     .lf-btn-primary:hover,
     .action-btn:hover,
-    .start-btn:hover {
-        background: #ffffff;
-        color: #09090b;
-        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.44);
-        transform: scale(1.015);
+    .start-btn:hover,
+    .lf-btn-flame:hover,
+    .primary-btn:hover {
+        background-color: #ffffff;
+        border-color: #ffffff;
+        color: #141415;
     }
 
     .lf-btn-primary:active,
     .action-btn:active,
-    .start-btn:active {
-        transform: scale(0.965);
-    }
-
-    .lf-btn-flame,
-    .primary-btn {
-        background: linear-gradient(180deg, #cf3f24 0%, #b03018 100%);
-        color: #ffffff;
-        border: 1px solid rgba(255, 255, 255, 0.16);
-        border-radius: 999px;
-        padding: 9px 24px;
-        font-size: 13.2px;
-        font-weight: 700;
-        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.38);
-        transition: all 180ms cubic-bezier(0.22, 1, 0.36, 1);
-    }
-
-    .lf-btn-flame:hover,
-    .primary-btn:hover {
-        background: linear-gradient(180deg, #dc472b 0%, #be361d 100%);
-        border-color: rgba(255, 255, 255, 0.26);
-        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.46);
-        transform: scale(1.015);
-    }
-
+    .start-btn:active,
     .lf-btn-flame:active,
     .primary-btn:active {
-        transform: scale(0.965);
+        transform: scale(0.98);
     }
 
+    /* Secondary Buttons: #232325 + Hairline + Primary Text */
     .lf-btn-emerald,
-    .install-btn {
-        background-color: rgba(255, 255, 255, 0.11);
-        color: #f4f4f6;
-        border: 1px solid rgba(255, 255, 255, 0.16);
-        border-radius: 999px;
-        padding: 9px 20px;
-        font-size: 13px;
-        font-weight: 600;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
-        transition: all 180ms cubic-bezier(0.22, 1, 0.36, 1);
+    .install-btn,
+    .lf-btn-glass,
+    .secondary-btn {
+        background-color: #232325;
+        background-image: none;
+        color: #ededed;
+        border: 1px solid rgba(237, 237, 237, 0.12);
+        border-radius: 8px;
+        padding: 8px 16px;
+        min-height: 36px;
+        font-size: 14px;
+        font-weight: 500;
+        letter-spacing: 0px;
+        box-shadow: none;
+        transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    opacity 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
     }
 
     .lf-btn-emerald:hover,
-    .install-btn:hover {
-        background-color: rgba(255, 255, 255, 0.17);
-        border-color: rgba(255, 255, 255, 0.25);
-        transform: scale(1.015);
+    .install-btn:hover,
+    .lf-btn-glass:hover,
+    .secondary-btn:hover {
+        background-color: #2c2c2f;
+        background-image: none;
+        color: #ededed;
+        border-color: rgba(237, 237, 237, 0.18);
     }
 
     .lf-btn-emerald:active,
-    .install-btn:active {
-        transform: scale(0.965);
-    }
-
-    .lf-btn-glass,
-    .secondary-btn {
-        background-color: rgba(255, 255, 255, 0.065);
-        background-image: none;
-        color: #e4e4e7;
-        border: 1px solid rgba(255, 255, 255, 0.11);
-        border-radius: 999px;
-        padding: 8px 18px;
-        font-size: 12.8px;
-        font-weight: 600;
-        transition: all 180ms cubic-bezier(0.22, 1, 0.36, 1);
-    }
-
-    .lf-btn-glass:hover,
-    .secondary-btn:hover {
-        background-color: rgba(255, 255, 255, 0.125);
-        background-image: none;
-        color: #ffffff;
-        border-color: rgba(255, 255, 255, 0.20);
-        transform: scale(1.015);
-    }
-
+    .install-btn:active,
     .lf-btn-glass:active,
     .secondary-btn:active {
-        transform: scale(0.965);
+        transform: scale(0.98);
     }
 
+    /* Destructive Buttons: #e5484d Text on #232325 + Red Hairline */
     .lf-btn-danger,
     .danger-btn {
-        background: linear-gradient(180deg, #b91c1c 0%, #991b1b 100%);
-        color: #ffffff;
-        border: 1px solid rgba(255, 255, 255, 0.16);
-        border-radius: 999px;
-        padding: 9px 22px;
-        font-size: 13px;
-        font-weight: 700;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.36);
-        transition: all 180ms cubic-bezier(0.22, 1, 0.36, 1);
+        background-color: #232325;
+        background-image: none;
+        color: #e5484d;
+        border: 1px solid rgba(229, 72, 77, 0.35);
+        border-radius: 8px;
+        padding: 8px 16px;
+        min-height: 36px;
+        font-size: 14px;
+        font-weight: 500;
+        letter-spacing: 0px;
+        box-shadow: none;
+        transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    opacity 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
     }
 
     .lf-btn-danger:hover,
     .danger-btn:hover {
-        background: linear-gradient(180deg, #dc2626 0%, #b91c1c 100%);
-        transform: scale(1.015);
+        background-color: rgba(229, 72, 77, 0.12);
+        border-color: rgba(229, 72, 77, 0.50);
+        color: #e5484d;
     }
 
     .lf-btn-danger:active,
     .danger-btn:active {
-        transform: scale(0.965);
+        transform: scale(0.98);
     }
 
-    /* Two-Pane Control Center Sidebar & Squircle Navigation Rows */
+    /* Sidebar & Navigation Rows */
     .lf-sidebar {
-        background-color: rgba(18, 19, 23, 0.72);
-        border-right: 1px solid rgba(255, 255, 255, 0.065);
-        padding: 12px 10px;
+        background-color: #0f0f10;
+        border-right: 1px solid rgba(237, 237, 237, 0.08);
+        padding: 12px 8px;
     }
 
     .lf-nav-pill {
         background-color: transparent;
         background-image: none;
-        color: #a1a1aa;
+        color: #a1a1a6;
         border: 1px solid transparent;
-        border-radius: 13px;
-        padding: 8px 11px;
-        margin-bottom: 3px;
-        font-size: 12.8px;
-        font-weight: 600;
-        transition: all 180ms cubic-bezier(0.22, 1, 0.36, 1);
+        border-radius: 8px;
+        min-height: 36px;
+        padding: 6px 12px;
+        margin-bottom: 4px;
+        font-size: 14px;
+        font-weight: 400;
+        letter-spacing: 0px;
+        box-shadow: none;
+        transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    color 150ms cubic-bezier(0.22, 1, 0.36, 1);
     }
 
     .lf-nav-pill:hover {
-        background-color: rgba(255, 255, 255, 0.055);
-        color: #f4f4f6;
+        background-color: #19191b;
+        color: #ededed;
     }
 
     .lf-nav-pill.active {
-        background-color: rgba(255, 255, 255, 0.105);
-        color: #ffffff;
-        border: 1px solid rgba(255, 255, 255, 0.13);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.26);
+        background-color: #232325;
+        color: #ededed;
+        font-weight: 500;
+        border: 1px solid rgba(237, 237, 237, 0.08);
+        border-left: 2px solid #c83b22;
+        box-shadow: none;
     }
 
     .lf-step-pill {
-        background-color: rgba(255, 255, 255, 0.045);
+        background-color: transparent;
         background-image: none;
-        color: #a1a1aa;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 999px;
-        padding: 8px 18px;
-        font-size: 12.8px;
-        font-weight: 600;
-        transition: all 190ms cubic-bezier(0.22, 1, 0.36, 1);
+        color: #85858b;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        padding: 8px 16px;
+        min-height: 36px;
+        font-size: 13px;
+        font-weight: 400;
+        letter-spacing: 0px;
+        font-feature-settings: "tnum";
+        box-shadow: none;
+        transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    color 150ms cubic-bezier(0.22, 1, 0.36, 1);
     }
 
     .lf-step-pill:hover {
-        background-color: rgba(255, 255, 255, 0.09);
-        color: #f4f4f6;
+        background-color: #19191b;
+        color: #ededed;
     }
 
     .lf-step-pill.active {
-        background-color: rgba(255, 255, 255, 0.12);
-        color: #ffffff;
-        border-color: rgba(255, 255, 255, 0.22);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.32);
+        background-color: #232325;
+        color: #ededed;
+        font-weight: 500;
+        border: 1px solid rgba(237, 237, 237, 0.12);
+        border-bottom: 2px solid #c83b22;
+        box-shadow: none;
     }
 
-    /* Status Badges */
+    /* Quiet Status Badges */
     .status-badge-ok,
     .disk-badge-ok {
-        color: #86efac;
-        background-color: rgba(34, 197, 94, 0.12);
-        border: 1px solid rgba(74, 222, 128, 0.25);
-        border-radius: 999px;
-        padding: 4px 12px;
-        font-size: 11.5px;
-        font-weight: 600;
+        color: #4cc38a;
+        background-color: rgba(76, 195, 138, 0.10);
+        border: 1px solid rgba(76, 195, 138, 0.24);
+        border-radius: 6px;
+        padding: 6px 12px;
+        font-size: 12px;
+        font-weight: 500;
+        letter-spacing: 0px;
+        font-feature-settings: "tnum";
     }
 
     .status-badge-info {
-        color: #e4e4e7;
-        background-color: rgba(255, 255, 255, 0.08);
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        border-radius: 999px;
-        padding: 4px 12px;
-        font-size: 11.5px;
-        font-weight: 600;
+        color: #a1a1a6;
+        background-color: #232325;
+        border: 1px solid rgba(237, 237, 237, 0.08);
+        border-radius: 6px;
+        padding: 4px 8px;
+        font-size: 12px;
+        font-weight: 400;
+        letter-spacing: 0px;
+        font-feature-settings: "tnum";
     }
 
     .disk-badge-warn {
-        color: #fde68a;
-        background-color: rgba(245, 158, 11, 0.11);
-        border: 1px solid rgba(245, 158, 11, 0.26);
-        border-radius: 14px;
-        padding: 9px 14px;
-        font-size: 12px;
-        font-weight: 500;
+        color: #d9a03f;
+        background-color: rgba(217, 160, 63, 0.10);
+        border: 1px solid rgba(217, 160, 63, 0.28);
+        border-radius: 6px;
+        padding: 8px 12px;
+        font-size: 13px;
+        font-weight: 400;
+        letter-spacing: 0px;
+        font-feature-settings: "tnum";
     }
 
-    /* Smoked-Titanium Form Widgets (DropDown, ComboBox, Entry, Popover, CheckButton) */
+    /* Form Controls */
     entry,
     passwordentry,
-    passwordentry > text,
     spinbutton {
-        background-color: rgba(39, 41, 48, 0.94);
+        background-color: #232325;
         background-image: none;
-        color: #f4f4f6;
-        border: 1px solid rgba(255, 255, 255, 0.10);
-        border-radius: 13px;
-        padding: 8px 14px;
-        min-height: 22px;
-        caret-color: #f4f4f6;
-        transition: all 160ms ease;
+        color: #ededed;
+        border: 1px solid rgba(237, 237, 237, 0.12);
+        border-radius: 8px;
+        padding: 8px 12px;
+        min-height: 20px;
+        caret-color: #ededed;
+        font-size: 14px;
+        font-weight: 400;
+        font-feature-settings: "tnum";
+        transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    color 150ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    passwordentry > text {
+        background-color: transparent;
+        background-image: none;
+        border: none;
+        padding: 0px;
+        color: #ededed;
+        caret-color: #ededed;
     }
 
     entry:focus,
-    passwordentry:focus-within {
-        border-color: rgba(255, 255, 255, 0.28);
-        background-color: rgba(45, 48, 56, 0.98);
+    passwordentry:focus-within,
+    spinbutton:focus-within {
+        border-color: rgba(224, 87, 60, 0.65);
+        background-color: #232325;
         box-shadow: none;
     }
 
     dropdown > button,
     combobox > box > button {
-        background-color: rgba(39, 41, 48, 0.94);
+        background-color: #232325;
         background-image: none;
-        color: #f4f4f6;
-        border: 1px solid rgba(255, 255, 255, 0.10);
-        border-radius: 13px;
-        padding: 8px 14px;
-        font-weight: 600;
-        transition: all 160ms ease;
+        color: #ededed;
+        border: 1px solid rgba(237, 237, 237, 0.12);
+        border-radius: 8px;
+        padding: 8px 12px;
+        min-height: 36px;
+        font-size: 14px;
+        font-weight: 400;
+        font-feature-settings: "tnum";
+        transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    color 150ms cubic-bezier(0.22, 1, 0.36, 1);
     }
 
     dropdown > button:hover,
     combobox > box > button:hover {
-        background-color: rgba(48, 51, 59, 0.98);
-        border-color: rgba(255, 255, 255, 0.20);
+        background-color: #2c2c2f;
+        border-color: rgba(237, 237, 237, 0.18);
     }
 
     popover,
     popover > contents {
-        background-color: #1c1e24;
-        color: #f4f4f6;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 16px;
-        padding: 6px;
-        box-shadow: 0 16px 38px rgba(0, 0, 0, 0.65);
+        background-color: #19191b;
+        color: #ededed;
+        border: 1px solid rgba(237, 237, 237, 0.12);
+        border-radius: 12px;
+        padding: 4px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
     }
 
     popover listview,
     popover box {
         background-color: transparent;
-        color: #f4f4f6;
+        color: #ededed;
     }
 
     popover row,
     popover modelbutton {
-        border-radius: 10px;
-        padding: 7px 12px;
-        color: #e4e4e7;
+        border-radius: 8px;
+        padding: 8px 12px;
+        color: #ededed;
+        font-size: 14px;
+        font-weight: 400;
     }
 
     popover row:selected,
     popover row:hover,
     popover modelbutton:hover {
-        background-color: rgba(255, 255, 255, 0.11);
-        color: #ffffff;
+        background-color: #232325;
+        color: #ededed;
     }
 
     checkbutton {
-        color: #e4e4e7;
-        font-size: 13px;
-        font-weight: 500;
+        color: #ededed;
+        font-size: 14px;
+        font-weight: 400;
     }
 
     checkbutton > label {
-        color: #e4e4e7;
+        color: #ededed;
     }
 
     checkbutton > check {
-        background-color: rgba(39, 41, 48, 0.92);
+        background-color: #232325;
         background-image: none;
-        border: 1.5px solid rgba(255, 255, 255, 0.24);
-        border-radius: 6px;
-        min-width: 18px;
-        min-height: 18px;
+        border: 1px solid rgba(237, 237, 237, 0.24);
+        border-radius: 4px;
+        min-width: 16px;
+        min-height: 16px;
         margin-right: 8px;
-        color: #ffffff;
+        color: #ededed;
+        transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    border-color 150ms cubic-bezier(0.22, 1, 0.36, 1);
     }
 
     checkbutton:checked > check {
-        background: #c83b22;
-        border-color: #e05338;
-        color: #ffffff;
+        background-color: #c83b22;
+        border-color: #c83b22;
+        color: #ededed;
+    }
+
+    switch {
+        background-color: #232325;
+        background-image: none;
+        border: 1px solid rgba(237, 237, 237, 0.12);
+        border-radius: 999px;
+        min-width: 40px;
+        min-height: 24px;
+        transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                    border-color 150ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    switch:checked {
+        background-color: #c83b22;
+        border-color: #c83b22;
+    }
+
+    switch > slider {
+        background-color: #ededed;
+        background-image: none;
+        border-radius: 999px;
+        min-width: 18px;
+        min-height: 18px;
+        margin: 2px;
     }
 
     progressbar > text {
-        color: #d4d4d8;
+        color: #a1a1a6;
         font-size: 12px;
-        font-weight: 600;
+        font-weight: 400;
+        font-feature-settings: "tnum";
         margin-bottom: 4px;
     }
 
     progressbar > trough {
-        background-color: rgba(39, 41, 48, 0.90);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 999px;
-        min-height: 10px;
+        background-color: #232325;
+        border: 1px solid rgba(237, 237, 237, 0.08);
+        border-radius: 4px;
+        min-height: 8px;
     }
 
     progressbar > trough > progress {
-        background: linear-gradient(90deg, #c83b22 0%, #e05338 100%);
-        border-radius: 999px;
-        min-height: 10px;
+        background-color: #c83b22;
+        background-image: none;
+        border-radius: 4px;
+        min-height: 8px;
     }
 
     notebook,
@@ -649,18 +756,19 @@ pub const LIVING_FLOW_CORE_CSS: &str = r#"
     }
 
     scrollbar slider {
-        background-color: rgba(255, 255, 255, 0.18);
-        border-radius: 999px;
+        background-color: rgba(237, 237, 237, 0.16);
+        border-radius: 4px;
         min-width: 6px;
-        min-height: 28px;
+        min-height: 32px;
+        transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1);
     }
 
     scrollbar slider:hover {
-        background-color: rgba(255, 255, 255, 0.32);
+        background-color: rgba(237, 237, 237, 0.28);
     }
 
     separator {
-        background-color: rgba(255, 255, 255, 0.08);
+        background-color: rgba(237, 237, 237, 0.08);
         min-height: 1px;
     }
 "#;
@@ -719,8 +827,8 @@ pub fn load_png_wide_logo(png_bytes: &[u8], width: i32, height: i32) -> gtk4::Pi
     pic
 }
 
-/// Builds a draggable ColorOS 17 Living Flow top bar with app emblem, title, subtitle,
-/// live Fluid Cloud dynamic capsule, and tactile minimize/close controls.
+/// Builds a draggable SolarUI top bar with optional emblem, title, subtitle,
+/// status indicator, and symbolic minimize/maximize/close controls.
 pub fn build_living_flow_topbar(
     window: &Window,
     emblem: Option<Image>,
@@ -730,7 +838,7 @@ pub fn build_living_flow_topbar(
     on_close: Option<Box<dyn Fn()>>,
 ) -> WindowHandle {
     let handle = WindowHandle::new();
-    let bar = GtkBox::new(Orientation::Horizontal, 14);
+    let bar = GtkBox::new(Orientation::Horizontal, 12);
     bar.add_css_class("lf-topbar");
 
     if let Some(img) = emblem {
@@ -738,7 +846,7 @@ pub fn build_living_flow_topbar(
         bar.append(&img);
     }
 
-    let titles = GtkBox::new(Orientation::Vertical, 1);
+    let titles = GtkBox::new(Orientation::Vertical, 2);
     titles.set_valign(gtk4::Align::Center);
     titles.set_hexpand(true);
 
@@ -748,23 +856,37 @@ pub fn build_living_flow_topbar(
     t_lbl.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     titles.append(&t_lbl);
 
-    let s_lbl = Label::new(Some(subtitle_text));
-    s_lbl.add_css_class("lf-topbar-subtitle");
-    s_lbl.set_halign(gtk4::Align::Start);
-    s_lbl.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-    titles.append(&s_lbl);
+    if !subtitle_text.trim().is_empty() {
+        let s_lbl = Label::new(Some(subtitle_text));
+        s_lbl.add_css_class("lf-topbar-subtitle");
+        s_lbl.set_halign(gtk4::Align::Start);
+        s_lbl.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        titles.append(&s_lbl);
+    }
 
     bar.append(&titles);
     if let Some(fc) = fluid_cloud {
         bar.append(fc.widget());
     }
 
-    let controls = GtkBox::new(Orientation::Horizontal, 6);
+    let controls = GtkBox::new(Orientation::Horizontal, 4);
     controls.set_valign(gtk4::Align::Center);
 
-    let min_btn = Button::with_label("—");
+    let icon_theme = gdk::Display::default().map(|d| IconTheme::for_display(&d));
+    let has_icon = |name: &str| {
+        icon_theme
+            .as_ref()
+            .map(|theme| theme.has_icon(name))
+            .unwrap_or(false)
+    };
+
+    let min_btn = if has_icon("window-minimize-symbolic") {
+        Button::from_icon_name("window-minimize-symbolic")
+    } else {
+        Button::with_label("—")
+    };
     min_btn.add_css_class("lf-win-btn");
-    min_btn.set_tooltip_text(Some("Arka Plana Küçült"));
+    min_btn.set_tooltip_text(Some("Küçült"));
     let win_min = window.downgrade();
     min_btn.connect_clicked(move |_| {
         if let Some(w) = win_min.upgrade() {
@@ -774,9 +896,13 @@ pub fn build_living_flow_topbar(
     });
     controls.append(&min_btn);
 
-    let max_btn = Button::with_label("□");
+    let max_btn = if has_icon("window-maximize-symbolic") {
+        Button::from_icon_name("window-maximize-symbolic")
+    } else {
+        Button::with_label("□")
+    };
     max_btn.add_css_class("lf-win-btn");
-    max_btn.set_tooltip_text(Some("Büyüt / Pencere Boyutuna Döndür"));
+    max_btn.set_tooltip_text(Some("Ekranı kapla"));
     let win_max = window.downgrade();
     max_btn.connect_clicked(move |_| {
         if let Some(w) = win_max.upgrade() {
@@ -789,10 +915,14 @@ pub fn build_living_flow_topbar(
     });
     controls.append(&max_btn);
 
-    let close_btn = Button::with_label("✕");
+    let close_btn = if has_icon("window-close-symbolic") {
+        Button::from_icon_name("window-close-symbolic")
+    } else {
+        Button::with_label("✕")
+    };
     close_btn.add_css_class("lf-win-btn");
     close_btn.add_css_class("lf-win-close");
-    close_btn.set_tooltip_text(Some("Pencereyi Kapat"));
+    close_btn.set_tooltip_text(Some("Kapat"));
     let win_close = window.downgrade();
     let on_close_rc = on_close.map(Rc::new);
     close_btn.connect_clicked(move |_| {
