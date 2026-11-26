@@ -1,261 +1,261 @@
-// BlazeOS BERP Recovery (OrangeFox GUI) Frontend Controller
+// BlazeOS BERE / BERP Recovery Frontend Controller
 // Strict zero emoji rule enforced.
 
 const TRANSLATIONS = {
     tr: {
-        status_active: "Kurtarma Modu Aktif",
-        nav_install: "Yükle (ISO)",
+        status_active: "Kurtarma modu etkin",
+        nav_install: "ISO yükle",
         nav_backup: "Yedekle",
-        nav_restore: "Geri Yükle",
+        nav_restore: "Geri yükle",
         nav_wipe: "Sıfırla",
         nav_partitions: "Diskler",
         nav_boot: "Önyükleme",
         nav_terminal: "Terminal",
-        nav_reboot: "Yeniden Başlat",
+        nav_reboot: "Yeniden başlat",
 
-        install_title: "USB Olmadan ISO ile Yeniden Kurulum / Güncelleme",
-        install_desc: "Sisteminizdeki veya takılı disklerdeki BlazeOS ISO dosyalarını doğrudan belleğe bağlayarak USB belleğe ihtiyaç duymadan kurulumu başlatabilirsiniz.",
-        detected_isos: "Tespit Edilen ISO Kalıpları",
-        btn_rescan: "Yeniden Tara",
+        install_title: "ISO kurulum ve kurtarma",
+        install_desc: "USB belleklerdeki veya dahili diskteki ISO kalıplarını doğrudan başlatın ya da dahili kasaya kopyalayın",
+        detected_isos: "Algılanan ISO kalıpları",
+        btn_rescan: "Yeniden tara",
         scanning_isos: "ISO kalıpları taranıyor...",
-        no_isos_found: "Sistemde BlazeOS ISO kalıbı bulunamadı. Lütfen Downloads klasörünü veya harici diski kontrol edin.",
-        selected_iso_action: "Seçili Kalıp İşlemi",
-        slider_iso_desc: "Bu kalıbı bir sonraki açılışta doğrudan başlatmak için kaydırın:",
-        slider_iso_label: "Kaydırarak ISO ile Başlat",
-        iso_configured_msg: "ISO başlatma hazırlandı. Yeniden başlatılıyor...",
+        no_isos_found: "Sistemde ISO kalıbı bulunamadı. Downloads klasörünü veya harici diski kontrol edin",
+        selected_iso_action: "Başlatma ayarları",
+        slider_iso_desc: "Seçili kalıbı başlatmak için sürgüyü kaydırın",
+        slider_iso_label: "Kaydırarak ISO başlat",
+        iso_configured_msg: "ISO başlatma hazırlandı, yeniden başlatılıyor...",
 
-        backup_title: "Sistem ve Kullanıcı Durumu Yedekleme (Btrfs Snapshot)",
-        backup_desc: "Btrfs CoW teknolojisi ile diskinizde saniyeler içinde sıfır gecikmeli kurtarma noktası oluşturun.",
-        create_snapshot_title: "Yeni Anlık Görüntü (Snapshot) Oluştur",
-        backup_name_label: "Yedek Açıklaması / Adı:",
-        backup_name_placeholder: "Orn: guncelleme-oncesi-durum",
-        backup_root_label: "Sistem Kök Dizini (/)",
-        backup_home_label: "Kullanıcı Verileri (/home)",
-        btn_create_snapshot: "Anlık Görüntü Al",
+        backup_title: "Anlık görüntü yedekleme",
+        backup_desc: "Btrfs CoW ile diskinizde hızlı kurtarma noktası oluşturun",
+        create_snapshot_title: "Yeni anlık görüntü",
+        backup_name_label: "Yedek adı",
+        backup_name_placeholder: "guncelleme-oncesi",
+        backup_root_label: "Sistem kök dizini (/)",
+        backup_home_label: "Kullanıcı verileri (/home)",
+        btn_create_snapshot: "Anlık görüntü al",
         snapshot_creating: "Anlık görüntü alınıyor...",
-        snapshot_success: "Kurtarma noktası başarıyla kaydedildi.",
+        snapshot_success: "Kurtarma noktası kaydedildi",
 
-        restore_title: "Sistem Geri Yükleme (Rollback)",
-        restore_desc: "Daha önce oluşturulmuş kurtarma noktalarından birine anında geri dönün.",
-        restore_points_title: "Mevcut Kurtarma Noktaları",
-        btn_refresh_list: "Listeyi Yenile",
-        scanning_snapshots: "Yedek noktaları aranıyor...",
-        no_snapshots_found: "Henüz kayıtlı bir Btrfs anlık görüntüsü bulunamadı.",
-        slider_restore_desc: "Seçili yedeğe geri dönmek için kaydırın:",
-        slider_restore_label: "Kaydırarak Geri Yükle",
+        restore_title: "Sistem geri yükleme",
+        restore_desc: "Kayıtlı bir kurtarma noktasına geri dönün",
+        restore_points_title: "Kurtarma noktaları",
+        btn_refresh_list: "Yenile",
+        scanning_snapshots: "Kurtarma noktaları aranıyor...",
+        no_snapshots_found: "Kayıtlı Btrfs anlık görüntüsü bulunamadı",
+        slider_restore_desc: "Seçili yedeğe geri dönmek için kaydırın",
+        slider_restore_label: "Kaydırarak geri yükle",
         restoring_msg: "Geri yükleniyor...",
-        restore_success_msg: "Başarılı! Sistem yeniden başlatılıyor...",
+        restore_success_msg: "Geri yüklendi, sistem yeniden başlatılıyor...",
 
-        wipe_title: "Temizle ve Fabrika Ayarlarına Sıfırla (Wipe)",
-        wipe_desc: "OrangeFox güvenlik mimarisi: Yanlışlıkla silmeyi önleyen sürgü koruması ile önbellekleri temizleyin veya sistemi sıfırlayın.",
-        wipe_select_title: "Temizlenecek Alanları Seçin",
-        wipe_cache_title: "Sistem ve Paket Önbellekleri (/var/cache)",
-        wipe_cache_desc: "DNF, Flatpak ve geçici sistem artıklarını temizler. Kullanıcı dosyalarına dokunmaz.",
-        wipe_user_cache_title: "Kullanıcı Önbellekleri (~/.cache)",
-        wipe_user_cache_desc: "Tarayıcı ve masaüstü önbelleklerini sıfırlar. Belgeleri ve şifreleri korur.",
-        wipe_home_title: "Kullanıcı Hesaplarını ve Verilerini Sıfırla (/home)",
-        wipe_home_desc: "Tüm kullanıcı belgeleri ve hesapları silinir. Sistem ilk kurulum sihirbazına (OOBE) döner.",
-        wipe_factory_title: "Tam Fabrika Sıfırlaması (Format Data / Root Subvolumes)",
-        wipe_factory_desc: "Tüm kullanıcı hesaplarını ve sistem önbelleklerini temizleyip OOBE ilk kurulum sihirbazını geri yükler.",
-        wipe_hard_reset_title: "Tam Sistem Temizliği (Hard Reset / Wipe System Data - sudo rm -rf /*)",
-        wipe_hard_reset_desc: "Tüm kök dosya sistemini (rootfs) siler; /boot/bere ve Btrfs snapshotları korunur, açılışta BlazeOS Acil Durum Ekranına düşer.",
-        wipe_slider_warn: "Dikkat: Seçilen alanlar kalıcı olarak temizlenecektir.",
-        wipe_slider_label: "Kaydırarak Temizlemeyi Başlat",
+        wipe_title: "Temizle ve sıfırla",
+        wipe_desc: "Önbellekleri temizleyin veya sistemi sıfırlayın. İşlem yalnızca sürgü kaydırıldığında başlar",
+        wipe_select_title: "Temizlenecek alanlar",
+        wipe_cache_title: "Sistem ve paket önbellekleri (/var/cache)",
+        wipe_cache_desc: "DNF, Flatpak ve geçici sistem dosyalarını temizler. Kullanıcı dosyalarına dokunmaz.",
+        wipe_user_cache_title: "Kullanıcı önbellekleri (~/.cache)",
+        wipe_user_cache_desc: "Tarayıcı ve masaüstü önbelleklerini temizler. Belgeleri ve parolaları korur.",
+        wipe_home_title: "Kullanıcı hesapları ve verileri (/home)",
+        wipe_home_desc: "Tüm kullanıcı belgeleri ve hesapları silinir. Sistem ilk kurulum ekranına (OOBE) döner.",
+        wipe_factory_title: "Fabrika sıfırlaması",
+        wipe_factory_desc: "Kullanıcı hesaplarını ve önbellekleri temizler, sistem kökünü başlangıç durumuna döndürür.",
+        wipe_hard_reset_title: "Tam sistem temizliği (rootfs sil)",
+        wipe_hard_reset_desc: "Kök dosya sistemini siler; /boot/bere ve Btrfs anlık görüntüleri korunur. Onay kodu ve parola gerekir.",
+        wipe_slider_warn: "Seçilen alanlar kalıcı olarak silinir",
+        wipe_slider_label: "Kaydırarak temizle",
         wipe_running: "Temizleniyor...",
-        wipe_running_hard: "Kök Dosya Sistemi Siliniyor (/boot/bere hariç)...",
-        wipe_complete: "Temizleme Tamamlandı",
-        wipe_success_msg: "Temizleme işlemi başarıyla tamamlandı.",
-        wipe_hard_reset_success: "Sistem temizlendi! Kurtarma ortamı yeniden başlatılıyor...",
-        wipe_select_warn: "Lütfen temizlenecek en az bir alan seçin.",
+        wipe_running_hard: "Kök dosya sistemi siliniyor (/boot/bere hariç)...",
+        wipe_complete: "Temizleme tamamlandı",
+        wipe_success_msg: "Temizleme tamamlandı",
+        wipe_hard_reset_success: "Sistem temizlendi, kurtarma ortamı yeniden başlatılıyor...",
+        wipe_select_warn: "En az bir alan seçin",
 
-        modal_hard_reset_title: "Kritik Güvenlik Doğrulaması",
-        modal_hard_reset_msg: "Bu işlem geri alınamaz emin misiniz?",
-        modal_hard_reset_submsg: "Sistem verileri kalıcı olarak sıfırlanacaktır. Devam etmek için aşağıdaki kutucuğa SIFIRLA (veya YES) yazın ve yetkili parolanızı girin:",
-        modal_confirm_label: 'Onaylamak için "SIFIRLA" veya "YES" yazın:',
-        modal_pass_label: "Yetkili Kullanıcı (wheel) / Root Şifresi (Zorunlu):",
+        modal_hard_reset_title: "Tam sistem temizliği onayı",
+        modal_hard_reset_msg: "Bu işlem geri alınamaz",
+        modal_hard_reset_submsg: "Sistem kök dizinindeki tüm dosyalar kalıcı olarak silinecektir. Devam etmek için SIFIRLA veya YES yazın ve yönetici parolanızı girin.",
+        modal_confirm_label: "Onay kodu (SIFIRLA veya YES)",
+        modal_pass_label: "Yönetici (wheel) veya root parolası",
         btn_cancel: "İptal",
-        btn_confirm_wipe: "Onayla ve Kilidi Aç",
-        modal_err_yes: "Onaylamak için kutucuğa 'SIFIRLA' veya 'YES' yazmalısınız.",
-        modal_err_pass: "Yetkili kullanıcı (wheel) / root şifresi zorunludur.",
+        btn_confirm_wipe: "Onayla ve kilidi aç",
+        modal_err_yes: "Onaylamak için SIFIRLA veya YES yazın",
+        modal_err_pass: "Yönetici (wheel) veya root parolası gerekir",
 
-        part_title: "Bölüm ve Disk Yönetimi",
-        part_desc: "Bağlama (Mount/Unmount), dosya sistemi onarımı (fsck/scrub) ve disk SMART sağlığı.",
-        mounted_parts_title: "Bağlı ve Algılanan Bölümler",
-        btn_refresh_parts: "Bölümleri Yenile",
+        part_title: "Disk ve bölüm yönetimi",
+        part_desc: "Bölüm tablosu (GPT/MBR), biçimlendirme, bağlama, dosya sistemi denetimi ve SMART sağlığı",
+        mounted_parts_title: "Algılanan bölümler",
+        btn_refresh_parts: "Yenile",
         th_device: "Aygıt",
-        th_fs: "Dosya Sistemi",
+        th_fs: "Dosya sistemi ve etiket",
         th_size: "Boyut",
-        th_mount: "Bağlama Noktası",
-        th_action: "İşlem",
+        th_mount: "Bağlama noktası",
+        th_action: "İşlemler",
         fetching_parts: "Disk bilgileri alınıyor...",
-        no_parts_found: "Bölüm bulunamadı.",
-        btn_mount: "Bağla (Mount)",
-        btn_unmount: "Ayır (Unmount)",
+        no_parts_found: "Bölüm bulunamadı",
+        btn_mount: "Bağla",
+        btn_unmount: "Ayır",
         not_mounted: "Bağlı değil",
-        smart_title: "Disk Sağlığı (SMART / NVMe Health)",
-        analyzing_smart: "Disk sağlık verileri analiz ediliyor...",
+        smart_title: "Disk sağlığı (SMART / NVMe)",
+        analyzing_smart: "Disk sağlık verileri okunuyor...",
 
-        boot_title: "Önyükleme Onarımı (Boot Repair)",
-        boot_desc: "GRUB/Limine yapılandırmasını yeniden oluşturun, EFI girişlerini düzeltin ve çekirdek initramfs kalıbını onarın.",
-        grub_card_title: "GRUB / Limine Yeniden Yapılandır",
-        grub_card_desc: "/etc/grub.d yapılandırmasını okur, BERP ve normal sistem girişlerini yeniden bağlar.",
-        btn_repair_grub: "GRUB Yapılandırmasını Onar",
-        efi_card_title: "EFI Girişlerini Sıfırla / Onar",
-        efi_card_desc: "Anakart UEFI NVRAM tablosuna BlazeOS ve Limine girişlerini yeniden yazar.",
-        btn_repair_efi: "EFI NVRAM Onarımı",
-        dracut_card_title: "Dracut Initramfs Yeniden Derle",
-        dracut_card_desc: "Tüm kurulu çekirdekler için donanım sürücülerini içeren initramfs imajlarını baştan üretir.",
-        btn_repair_dracut: "Tüm Initramfs Kalıplarını Yenile (dracut)",
-        repair_log_title: "Onarım Günlüğü",
+        boot_title: "Önyükleme onarımı",
+        boot_desc: "GRUB2 veya Limine yapılandırmasını yenileyin, EFI kayıtlarını düzeltin ve initramfs üretin",
+        grub_card_title: "GRUB2 onar",
+        grub_card_desc: "EFI/MBR ikililerini doğrular, /etc/grub.d menüsünü ve EFI yönlendiricisini yeniden üretir",
+        btn_repair_grub: "GRUB2 onar",
+        efi_card_title: "EFI NVRAM onar",
+        efi_card_desc: "UEFI NVRAM tablosundaki yinelenen kayıtları temizler ve BlazeOS girişini öne alır",
+        btn_repair_efi: "EFI onar",
+        dracut_card_title: "Initramfs yeniden derle",
+        dracut_card_desc: "Kurulu çekirdekler için donanım sürücülerini ve acil kurtarma modülünü içeren initramfs üretir",
+        btn_repair_dracut: "Initramfs yenile",
+        repair_log_title: "Onarım günlüğü",
         waiting_op: "İşlem bekleniyor...",
 
-        term_title: "Root Acil Durum Terminali",
-        term_desc: "Doğrudan root ayrıcalıklarıyla sistem komutlarını çalıştırın.",
-        term_placeholder: "komut girin...",
-        btn_send: "Gönder",
+        term_title: "Root terminali",
+        term_desc: "Bakım komutlarını doğrudan root yetkisiyle çalıştırın",
+        term_placeholder: "Komut girin",
+        btn_send: "Çalıştır",
 
-        reboot_title: "Yeniden Başlat ve Güç Seçenekleri",
-        reboot_desc: "Kurtarma ortamından güvenli çıkış yapın.",
-        btn_reboot_sys_title: "Sistemi Başlat",
-        btn_reboot_sys_desc: "BlazeOS normal masaüstüne dön",
-        btn_reboot_rec_title: "Kurtarmayı Yeniden Başlat",
-        btn_reboot_rec_desc: "BERP Recovery oturumunu tazele",
-        btn_reboot_uefi_title: "UEFI / BIOS Ayarlarına Git",
-        btn_reboot_uefi_desc: "Anakart donanım kurulum ekranına geç",
-        btn_poweroff_title: "Bilgisayarı Kapat",
-        btn_poweroff_desc: "Güvenli şekilde sistemi durdur",
+        reboot_title: "Güç ve yeniden başlatma",
+        reboot_desc: "Kurtarma ortamından güvenli çıkış yapın",
+        btn_reboot_sys_title: "Sistemi başlat",
+        btn_reboot_sys_desc: "BlazeOS masaüstüne dön",
+        btn_reboot_rec_title: "Kurtarmayı yeniden başlat",
+        btn_reboot_rec_desc: "BERE oturumunu yeniden aç",
+        btn_reboot_uefi_title: "UEFI / BIOS ayarları",
+        btn_reboot_uefi_desc: "Anakart donanım ekranına geç",
+        btn_poweroff_title: "Bilgisayarı kapat",
+        btn_poweroff_desc: "Sistemi güvenli şekilde kapat",
 
-        confirm_reboot_sys: "BlazeOS normal sistem modunda yeniden başlatılsın mı?",
+        confirm_reboot_sys: "BlazeOS normal masaüstüne yeniden başlatılsın mı?",
         confirm_reboot_rec: "Kurtarma ortamı yeniden başlatılsın mı?",
-        confirm_reboot_uefi: "UEFI BIOS ayarları ekranına yeniden başlatılsın mı?",
+        confirm_reboot_uefi: "UEFI / BIOS ayarlarına yeniden başlatılsın mı?",
         confirm_poweroff: "Bilgisayar kapatılsın mı?"
     },
     en: {
-        status_active: "Recovery Mode Active",
-        nav_install: "Install (ISO)",
+        status_active: "Recovery mode active",
+        nav_install: "Install ISO",
         nav_backup: "Backup",
         nav_restore: "Restore",
-        nav_wipe: "Wipe",
-        nav_partitions: "Partitions",
-        nav_boot: "Boot Repair",
+        nav_wipe: "Reset",
+        nav_partitions: "Disks",
+        nav_boot: "Boot repair",
         nav_terminal: "Terminal",
         nav_reboot: "Reboot",
 
-        install_title: "Reinstall / Upgrade via ISO without USB",
-        install_desc: "Directly mount BlazeOS ISO images stored on local or external storage into memory to boot the installer without a USB flash drive.",
-        detected_isos: "Detected ISO Images",
+        install_title: "ISO install and recovery",
+        install_desc: "Boot ISO images from USB or internal storage, or copy them to the local vault",
+        detected_isos: "Detected ISO images",
         btn_rescan: "Rescan",
-        scanning_isos: "Scanning for ISO images...",
-        no_isos_found: "No BlazeOS ISO image found on system. Please check Downloads folder or external drive.",
-        selected_iso_action: "Selected Image Action",
-        slider_iso_desc: "Slide to boot this image on next system startup:",
-        slider_iso_label: "Slide to Boot ISO",
-        iso_configured_msg: "ISO boot configured. Rebooting...",
+        scanning_isos: "Scanning ISO images...",
+        no_isos_found: "No ISO image found. Check the Downloads folder or an external drive",
+        selected_iso_action: "Launch settings",
+        slider_iso_desc: "Slide to boot the selected image",
+        slider_iso_label: "Slide to boot ISO",
+        iso_configured_msg: "ISO boot configured, rebooting...",
 
-        backup_title: "System & User State Backup (Btrfs Snapshot)",
-        backup_desc: "Create instantaneous zero-latency recovery restore points using Btrfs Copy-on-Write technology.",
-        create_snapshot_title: "Create New Snapshot",
-        backup_name_label: "Backup Label / Name:",
-        backup_name_placeholder: "e.g. pre-update-state",
-        backup_root_label: "System Root Volume (/)",
-        backup_home_label: "User Data Volume (/home)",
-        btn_create_snapshot: "Take Snapshot",
+        backup_title: "Snapshot backup",
+        backup_desc: "Create a Btrfs Copy-on-Write recovery point on disk",
+        create_snapshot_title: "New snapshot",
+        backup_name_label: "Snapshot name",
+        backup_name_placeholder: "pre-update",
+        backup_root_label: "System root (/)",
+        backup_home_label: "User data (/home)",
+        btn_create_snapshot: "Create snapshot",
         snapshot_creating: "Creating snapshot...",
-        snapshot_success: "Recovery snapshot saved successfully.",
+        snapshot_success: "Recovery point saved",
 
-        restore_title: "System Rollback",
-        restore_desc: "Instantly roll back to any previously captured system snapshot point.",
-        restore_points_title: "Available Restore Points",
-        btn_refresh_list: "Refresh List",
-        scanning_snapshots: "Searching for restore points...",
-        no_snapshots_found: "No recorded Btrfs snapshots found.",
-        slider_restore_desc: "Slide to revert to selected backup:",
-        slider_restore_label: "Slide to Restore",
+        restore_title: "System rollback",
+        restore_desc: "Revert to a previously saved recovery point",
+        restore_points_title: "Restore points",
+        btn_refresh_list: "Refresh",
+        scanning_snapshots: "Scanning restore points...",
+        no_snapshots_found: "No Btrfs snapshots found",
+        slider_restore_desc: "Slide to restore the selected snapshot",
+        slider_restore_label: "Slide to restore",
         restoring_msg: "Restoring...",
-        restore_success_msg: "Success! Rebooting system...",
+        restore_success_msg: "Restored, rebooting system...",
 
-        wipe_title: "Wipe & Factory Reset",
-        wipe_desc: "OrangeFox security architecture: Slider-guarded wipe controls preventing accidental data loss.",
-        wipe_select_title: "Select Partitions / Areas to Clean",
-        wipe_cache_title: "System & Package Caches (/var/cache)",
-        wipe_cache_desc: "Cleans DNF, Flatpak, and temporary leftovers. Leaves user data intact.",
-        wipe_user_cache_title: "User Caches (~/.cache)",
-        wipe_user_cache_desc: "Resets browser and desktop cache directories. Preserves personal documents and keys.",
-        wipe_home_title: "Reset User Accounts & Data (/home)",
-        wipe_home_desc: "Deletes all user documents and accounts. System restarts into first-boot wizard (OOBE).",
-        wipe_factory_title: "Full Factory Reset (Format Data / Root Subvolumes)",
-        wipe_factory_desc: "Wipes all user accounts and system caches and restores the first-boot OOBE setup wizard.",
-        wipe_hard_reset_title: "Complete System Wipe (Hard Reset / Wipe System Data - sudo rm -rf /*)",
-        wipe_hard_reset_desc: "Destroys the entire OS rootfs while preserving /boot/bere and Btrfs snapshots, booting into the BlazeOS Emergency Guard.",
-        wipe_slider_warn: "Warning: Selected target areas will be permanently erased.",
-        wipe_slider_label: "Slide to Start Wipe",
+        wipe_title: "Wipe and reset",
+        wipe_desc: "Clean caches or reset the system. Actions only start after sliding to confirm",
+        wipe_select_title: "Areas to clean",
+        wipe_cache_title: "System and package caches (/var/cache)",
+        wipe_cache_desc: "Cleans DNF, Flatpak, and temporary files. Leaves user data intact.",
+        wipe_user_cache_title: "User caches (~/.cache)",
+        wipe_user_cache_desc: "Clears browser and desktop caches. Preserves personal documents and keys.",
+        wipe_home_title: "User accounts and data (/home)",
+        wipe_home_desc: "Deletes all user documents and accounts. System returns to first-boot setup (OOBE).",
+        wipe_factory_title: "Factory reset",
+        wipe_factory_desc: "Clears user accounts and caches, and returns the system root to initial state.",
+        wipe_hard_reset_title: "Complete system wipe (erase rootfs)",
+        wipe_hard_reset_desc: "Erases the root filesystem while preserving /boot/bere and Btrfs snapshots. Confirmation code and password required.",
+        wipe_slider_warn: "Selected areas will be permanently erased",
+        wipe_slider_label: "Slide to wipe",
         wipe_running: "Wiping...",
-        wipe_running_hard: "Erasing rootfs (preserving /boot/bere)...",
-        wipe_complete: "Wipe Complete",
-        wipe_success_msg: "Wipe operation finished successfully.",
-        wipe_hard_reset_success: "System wiped! Rebooting into recovery environment...",
-        wipe_select_warn: "Please select at least one partition or area to clean.",
+        wipe_running_hard: "Erasing rootfs (keeping /boot/bere)...",
+        wipe_complete: "Wipe complete",
+        wipe_success_msg: "Wipe completed",
+        wipe_hard_reset_success: "System wiped, rebooting into recovery...",
+        wipe_select_warn: "Select at least one area to clean",
 
-        modal_hard_reset_title: "Critical Safety Verification",
-        modal_hard_reset_msg: "This action cannot be undone. Are you sure?",
-        modal_hard_reset_submsg: "All operating system files across the root directory (rootfs) will be permanently destroyed. To proceed, type YES exactly into the box below and enter your administrative password:",
-        modal_confirm_label: 'Type "YES" to confirm:',
-        modal_pass_label: "Administrator (wheel) / Root Password (Required):",
+        modal_hard_reset_title: "Confirm complete wipe",
+        modal_hard_reset_msg: "This action cannot be undone",
+        modal_hard_reset_submsg: "All operating system files in the root filesystem will be permanently erased. Type YES and enter your administrator password to continue.",
+        modal_confirm_label: "Confirmation code (YES)",
+        modal_pass_label: "Administrator (wheel) or root password",
         btn_cancel: "Cancel",
-        btn_confirm_wipe: "Authorize and Unlock",
-        modal_err_yes: "You must type exactly 'YES' to authorize this action.",
-        modal_err_pass: "Administrator (wheel) / root password is required.",
+        btn_confirm_wipe: "Confirm and unlock",
+        modal_err_yes: "Type YES to confirm",
+        modal_err_pass: "Administrator (wheel) or root password is required",
 
-        part_title: "Partition & Disk Management",
-        part_desc: "Mount/Unmount controls, filesystem repair (fsck/scrub), and SMART health analysis.",
-        mounted_parts_title: "Mounted & Detected Partitions",
-        btn_refresh_parts: "Refresh Partitions",
+        part_title: "Disk and partition management",
+        part_desc: "Partition tables (GPT/MBR), formatting, mount controls, filesystem checks and SMART health",
+        mounted_parts_title: "Detected partitions",
+        btn_refresh_parts: "Refresh",
         th_device: "Device",
-        th_fs: "Filesystem",
+        th_fs: "Filesystem and label",
         th_size: "Size",
-        th_mount: "Mount Point",
-        th_action: "Action",
+        th_mount: "Mount point",
+        th_action: "Actions",
         fetching_parts: "Querying partition tables...",
-        no_parts_found: "No partitions detected.",
+        no_parts_found: "No partitions detected",
         btn_mount: "Mount",
         btn_unmount: "Unmount",
         not_mounted: "Not mounted",
-        smart_title: "Drive Health (SMART / NVMe Health)",
-        analyzing_smart: "Analyzing drive telemetry...",
+        smart_title: "Drive health (SMART / NVMe)",
+        analyzing_smart: "Reading drive health...",
 
-        boot_title: "Boot Repair",
-        boot_desc: "Rebuild GRUB/Limine configurations, restore EFI NVRAM boot records, and regenerate initramfs.",
-        grub_card_title: "Rebuild GRUB / Limine",
-        grub_card_desc: "Inspects /etc/grub.d, relinks BERP recovery and standard BlazeOS boot entries.",
-        btn_repair_grub: "Repair GRUB Configuration",
-        efi_card_title: "Reset / Restore EFI NVRAM",
-        efi_card_desc: "Re-registers BlazeOS and recovery entries into motherboard UEFI NVRAM tables.",
-        btn_repair_efi: "Repair EFI NVRAM",
-        dracut_card_title: "Regenerate Dracut Initramfs",
-        dracut_card_desc: "Rebuilds boot initramfs driver images for all installed kernel versions.",
-        btn_repair_dracut: "Regenerate All Initramfs (dracut)",
-        repair_log_title: "Repair Execution Log",
+        boot_title: "Boot repair",
+        boot_desc: "Rebuild GRUB2 or Limine, restore EFI entries and regenerate initramfs",
+        grub_card_title: "Repair GRUB2",
+        grub_card_desc: "Verifies EFI/MBR binaries and regenerates /etc/grub.d entries and EFI stubs",
+        btn_repair_grub: "Repair GRUB2",
+        efi_card_title: "Repair EFI NVRAM",
+        efi_card_desc: "Cleans duplicate UEFI NVRAM records and sets BlazeOS first in boot order",
+        btn_repair_efi: "Repair EFI",
+        dracut_card_title: "Rebuild initramfs",
+        dracut_card_desc: "Regenerates initramfs images with hardware drivers and emergency recovery module",
+        btn_repair_dracut: "Rebuild initramfs",
+        repair_log_title: "Repair log",
         waiting_op: "Awaiting operation...",
 
-        term_title: "Root Emergency Terminal",
-        term_desc: "Direct root console execution for maintenance commands.",
-        term_placeholder: "enter command...",
-        btn_send: "Send",
+        term_title: "Root terminal",
+        term_desc: "Run maintenance commands directly with root privileges",
+        term_placeholder: "Enter command",
+        btn_send: "Run",
 
-        reboot_title: "Reboot & Power Options",
-        reboot_desc: "Safely exit or power cycle the recovery environment.",
-        btn_reboot_sys_title: "Boot System",
-        btn_reboot_sys_desc: "Return to BlazeOS standard desktop",
-        btn_reboot_rec_title: "Reboot Recovery",
-        btn_reboot_rec_desc: "Restart active BERP recovery session",
-        btn_reboot_uefi_title: "Reboot to UEFI / BIOS",
-        btn_reboot_uefi_desc: "Access motherboard setup firmware",
-        btn_poweroff_title: "Power Off",
+        reboot_title: "Power and reboot",
+        reboot_desc: "Exit the recovery environment",
+        btn_reboot_sys_title: "Boot system",
+        btn_reboot_sys_desc: "Return to BlazeOS desktop",
+        btn_reboot_rec_title: "Reboot recovery",
+        btn_reboot_rec_desc: "Restart BERE recovery session",
+        btn_reboot_uefi_title: "UEFI / BIOS setup",
+        btn_reboot_uefi_desc: "Enter motherboard firmware settings",
+        btn_poweroff_title: "Power off",
         btn_poweroff_desc: "Safely shut down the computer",
 
-        confirm_reboot_sys: "Reboot computer into normal BlazeOS mode?",
+        confirm_reboot_sys: "Reboot into normal BlazeOS desktop?",
         confirm_reboot_rec: "Restart the recovery environment?",
-        confirm_reboot_uefi: "Reboot directly into UEFI BIOS setup?",
+        confirm_reboot_uefi: "Reboot into UEFI / BIOS setup?",
         confirm_poweroff: "Shut down the computer now?"
     }
 };
@@ -341,7 +341,7 @@ function showStartupLockOverlay(show, adminUsers = []) {
     if (show) {
         if (usersEl) {
             usersEl.textContent = adminUsers.length
-                ? `Yetkili Hesaplar: ${adminUsers.join(", ")}`
+                ? `Yetkili hesaplar: ${adminUsers.join(", ")}`
                 : "Yetkili yönetici hesabı doğrulanıyor...";
         }
         if (errEl) errEl.style.display = "none";
@@ -393,7 +393,7 @@ async function requestActionPassword(title, desc) {
             const pw = inp.value;
             if (!pw) {
                 if (errEl) {
-                    errEl.textContent = "Yetkili kullanıcı / root parolası zorunludur.";
+                    errEl.textContent = "Yönetici veya root parolası gerekir";
                     errEl.style.display = "block";
                 }
                 inp.focus();
@@ -404,7 +404,7 @@ async function requestActionPassword(title, desc) {
             btnOk.disabled = false;
             if (checkRes.status !== "ok") {
                 if (errEl) {
-                    errEl.textContent = checkRes.message || "Hatalı parola.";
+                    errEl.textContent = checkRes.message || "Hatalı parola";
                     errEl.style.display = "block";
                 }
                 inp.value = "";
@@ -559,7 +559,7 @@ function initTelemetry() {
     setInterval(pollTelemetry, 3000);
 }
 
-// 3. OrangeFox Touch/Mouse/Keyboard Slider Engine
+// 3. Touch/Mouse/Keyboard Confirmation Slider Engine
 function initSliders() {
     setupSlider("slider-iso-boot", onConfirmIsoBoot);
     setupSlider("slider-restore", onConfirmRestore);
@@ -582,15 +582,15 @@ function setupSlider(sliderId, onComplete) {
         if (e.key === "Enter" || e.key === " " || e.key === "ArrowRight") {
             e.preventDefault();
             const max = slider.offsetWidth - thumb.offsetWidth - 8;
-            thumb.style.transition = "transform 0.3s ease";
-            fill.style.transition = "width 0.3s ease";
+            thumb.style.transition = "transform 240ms cubic-bezier(0.22, 1, 0.36, 1)";
+            fill.style.transition = "width 240ms cubic-bezier(0.22, 1, 0.36, 1)";
             thumb.style.transform = `translateX(${max}px)`;
             fill.style.width = "100%";
             setTimeout(() => {
                 thumb.style.transition = "";
                 fill.style.transition = "";
                 onComplete(slider);
-            }, 350);
+            }, 280);
         }
     });
 
@@ -625,8 +625,8 @@ function setupSlider(sliderId, onComplete) {
     function onPointerUp() {
         if (!isDragging) return;
         isDragging = false;
-        thumb.style.transition = "transform 0.2s ease";
-        fill.style.transition = "width 0.2s ease";
+        thumb.style.transition = "transform 180ms cubic-bezier(0.22, 1, 0.36, 1)";
+        fill.style.transition = "width 180ms cubic-bezier(0.22, 1, 0.36, 1)";
         thumb.style.transform = "translateX(0px)";
         fill.style.width = "0%";
         setTimeout(() => {
@@ -648,14 +648,14 @@ function resetSlider(slider) {
     if (!slider) return;
     const thumb = slider.querySelector(".slider-thumb");
     const fill = slider.querySelector(".slider-fill");
-    thumb.style.transition = "transform 0.3s ease";
-    fill.style.transition = "width 0.3s ease";
+    thumb.style.transition = "transform 220ms cubic-bezier(0.22, 1, 0.36, 1)";
+    fill.style.transition = "width 220ms cubic-bezier(0.22, 1, 0.36, 1)";
     thumb.style.transform = "translateX(0px)";
     fill.style.width = "0%";
     setTimeout(() => {
         thumb.style.transition = "";
         fill.style.transition = "";
-    }, 300);
+    }, 240);
 }
 
 // 4. ISO Install, USB File Explorer & Pull-to-Vault
@@ -753,9 +753,9 @@ function initIsos() {
 
 async function triggerVaultBoot(profile) {
     const labelTxt = profile === "install"
-        ? "BLAZE_REC Zırhlı Kasasından USB olmadan Anaconda Kurulum Sihirbazı (kexec) başlatılsın mı?"
-        : "BLAZE_REC Zırhlı Kasasından Canlı Blaze SolarEvolution masaüstü (kexec) başlatılsın mı?";
-    const pw = await requestActionPassword("Zırhlı Kasa Başlatma Doğrulaması", labelTxt);
+        ? "BLAZE_REC kasasından USB olmadan Anaconda kurulumu (kexec) başlatılsın mı?"
+        : "BLAZE_REC kasasından canlı Blaze SolarEvolution masaüstü (kexec) başlatılsın mı?";
+    const pw = await requestActionPassword("Dahili kasa doğrulaması", labelTxt);
     if (pw === null) return;
     const ramChk = document.getElementById("iso-copy-to-ram");
     const copyToRam = ramChk ? ramChk.checked : false;
@@ -765,7 +765,7 @@ async function triggerVaultBoot(profile) {
         password: pw,
     });
     if (res.status !== "ok") {
-        alert("Hata: " + (res.message || "BLAZE_REC başlatılamadı."));
+        alert("Hata: " + (res.message || "BLAZE_REC başlatılamadı"));
     }
 }
 
@@ -779,7 +779,7 @@ async function loadIsoTargets() {
         const opt = document.createElement("option");
         opt.value = "";
         opt.textContent = currentLang === "tr"
-            ? "Yazılabilir dahili bölüm bulunamadı (Önce Diskler sekmesinden bölüm oluşturun)"
+            ? "Yazılabilir dahili bölüm bulunamadı (önce Diskler sekmesinden bölüm oluşturun)"
             : "No writable internal partition found";
         sel.appendChild(opt);
         return;
@@ -801,7 +801,7 @@ async function loadUsbDevices() {
     container.innerHTML = `<div class='empty-hint'>${currentLang === "tr" ? "USB ve harici diskler taranıyor..." : "Scanning USB and external drives..."}</div>`;
     const res = await apiCall("usb_devices");
     if (!res.devices || res.devices.length === 0) {
-        container.innerHTML = `<div class='empty-hint'>${currentLang === "tr" ? "Takılı bir USB bellek veya harici bölüm algılanmadı. USB takıp 'USB'leri Tara' tuşuna basın." : "No USB flash drive or external partition detected."}</div>`;
+        container.innerHTML = `<div class='empty-hint'>${currentLang === "tr" ? "Takılı USB veya harici bölüm bulunamadı. Aygıtı bağlayıp 'USB tara' düğmesine basın" : "No USB flash drive or external partition detected"}</div>`;
         return;
     }
 
@@ -814,7 +814,7 @@ async function loadUsbDevices() {
                 <span class="item-title">${escapeHtml(dev.label)} <span class="tag-badge">${escapeHtml(dev.badge)}</span></span>
                 <span class="item-meta">${escapeHtml(dev.device)} | ${escapeHtml(dev.fstype.toUpperCase())} | ${dev.size_gb} GB | ${escapeHtml(dev.model)}</span>
             </div>
-            <button class="fox-btn outline-btn fox-btn-sm" type="button">${currentLang === "tr" ? "İçine Gir" : "Browse"}</button>
+            <button class="fox-btn outline-btn fox-btn-sm" type="button">${currentLang === "tr" ? "Aç" : "Browse"}</button>
         `;
         row.addEventListener("click", () => {
             selectedUsbDevice = dev.device;
@@ -852,7 +852,7 @@ async function browseUsbDevice(device, subpath) {
     listEl.innerHTML = `<div class='empty-hint'>${currentLang === "tr" ? "Klasör okunuyor..." : "Reading directory..."}</div>`;
     const res = await apiCall("usb_browse", { device, subpath });
     if (res.status !== "ok") {
-        listEl.innerHTML = `<div class='empty-hint'>[HATA] ${escapeHtml(res.message || "Okunamadı")}</div>`;
+        listEl.innerHTML = `<div class='empty-hint'>Hata: ${escapeHtml(res.message || "Okunamadı")}</div>`;
         return;
     }
 
@@ -862,7 +862,7 @@ async function browseUsbDevice(device, subpath) {
     if (upBtn) upBtn.disabled = !currentUsbSubpath;
 
     if (!res.entries || res.entries.length === 0) {
-        listEl.innerHTML = `<div class='empty-hint'>${currentLang === "tr" ? "Bu klasörde alt dizin veya .iso dosyası yok." : "No folders or .iso files in this directory."}</div>`;
+        listEl.innerHTML = `<div class='empty-hint'>${currentLang === "tr" ? "Bu klasörde alt dizin veya .iso dosyası yok" : "No folders or .iso files in this directory"}</div>`;
         return;
     }
 
@@ -873,7 +873,7 @@ async function browseUsbDevice(device, subpath) {
         if (entry.type === "dir") {
             row.innerHTML = `
                 <div class="item-left">
-                    <span class="item-title">[KLASÖR] ${escapeHtml(entry.name)}</span>
+                    <span class="item-title">${escapeHtml(entry.name)} <span class="tag-badge">${currentLang === "tr" ? "Klasör" : "Folder"}</span></span>
                     <span class="item-meta">/${escapeHtml(entry.subpath)}</span>
                 </div>
                 <button class="fox-btn outline-btn fox-btn-sm" type="button">${currentLang === "tr" ? "Aç" : "Open"}</button>
@@ -909,7 +909,7 @@ async function startIsoPull() {
     const targetSel = document.getElementById("iso-pull-target");
     const destDir = targetSel ? targetSel.value : "";
     if (!destDir) {
-        alert(currentLang === "tr" ? "Lütfen hedef dahili bölümü seçin." : "Please select a destination partition.");
+        alert(currentLang === "tr" ? "Hedef dahili bölümü seçin" : "Select a destination partition");
         return;
     }
 
@@ -923,7 +923,7 @@ async function startIsoPull() {
     const res = await apiCall("iso_pull", { src_path: selectedUsbIso.full_path, dest_dir: destDir });
     if (res.status !== "ok") {
         if (btnPull) btnPull.disabled = false;
-        alert("Hata: " + (res.message || "Aktarım başlatılamadı."));
+        alert("Hata: " + (res.message || "Aktarım başlatılamadı"));
         return;
     }
 
@@ -942,7 +942,7 @@ async function startIsoPull() {
         if (progFill) progFill.style.width = `${pct}%`;
         if (progTxt) {
             progTxt.textContent = st.active
-                ? `%${pct} (${doneMb} / ${totalMb} MB — ${st.speed_mbps || 0} MB/sn) | ${st.message || ""}`
+                ? `%${pct} (${doneMb} / ${totalMb} MB, ${st.speed_mbps || 0} MB/sn) | ${st.message || ""}`
                 : (st.message || "");
         }
         if (!st.active) {
@@ -980,7 +980,7 @@ async function selectIsoForLaunch(iso) {
     const probe = await apiCall("iso_inspect", { path: iso.path });
     if (probe.status === "ok" && probe.info && metaEl && selectedIsoPath === iso.path) {
         const inf = probe.info;
-        const badgeTxt = inf.supported ? inf.distro_label : "Desteklenmeyen Yapı";
+        const badgeTxt = inf.supported ? inf.distro_label : "Desteklenmeyen yapı";
         const lblExtra = inf.cd_label ? ` | CDLABEL: ${escapeHtml(inf.cd_label)}` : "";
         metaEl.innerHTML = `<strong>${escapeHtml(iso.display_name || iso.name)}</strong> <span class="tag-badge">${escapeHtml(badgeTxt)}</span><br><small>${inf.size_mb || iso.size_mb} MB${lblExtra} | ${escapeHtml(iso.path)}</small>`;
     }
@@ -1006,15 +1006,15 @@ async function loadIsos() {
         const badge = document.getElementById("bere-vault-badge");
         const szGb = ((res.vault.squashfs_mb || 0) / 1024).toFixed(2);
         if (res.vault.full_os_embedded) {
-            if (badge) badge.textContent = "TAM İMAJ · SHA-256";
+            if (badge) badge.textContent = "Tam imaj · SHA-256";
             if (desc) {
-                desc.textContent = `Aygıt: ${res.vault.device} (${szGb} GiB) — Tam Blaze SolarEvolution LiveOS imajı gömülü. Format USB'si olmadan doğrudan kexec ile kurulum veya kurtarma başlatabilirsiniz.`;
+                desc.textContent = `Aygıt: ${res.vault.device} (${szGb} GiB). Blaze SolarEvolution kurulum imajı gömülü; USB olmadan kexec ile kurulum veya canlı masaüstü başlatılabilir`;
             }
             if (actions) actions.style.display = "flex";
         } else {
-            if (badge) badge.textContent = "MİNİMAL BERE";
+            if (badge) badge.textContent = "Minimal BERE";
             if (desc) {
-                desc.textContent = `Aygıt: ${res.vault.device} (${res.vault.squashfs_mb || 0} MB) — Minimal BERE kurtarma kasası aktif (Tam LiveOS kurulum imajı gömülü değil).`;
+                desc.textContent = `Aygıt: ${res.vault.device} (${res.vault.squashfs_mb || 0} MB). Minimal BERE kurtarma ortamı etkin; tam kurulum imajı gömülü değil`;
             }
             if (actions) actions.style.display = "none";
         }
@@ -1033,15 +1033,15 @@ async function loadIsos() {
         item.className = "list-row-item" + (selectedIsoPath === iso.path ? " selected" : "");
         let srcBadge = "";
         if (iso.source === "armored_vault") {
-            srcBadge = `<span class="tag-badge">ZIRHLI KASA (USB YOK)</span>`;
+            srcBadge = `<span class="tag-badge">Dahili kasa</span>`;
         } else if (iso.source === "vault") {
-            srcBadge = `<span class="tag-badge">KASA</span>`;
+            srcBadge = `<span class="tag-badge">Kasa</span>`;
         } else if (iso.source === "optical") {
             srcBadge = `<span class="tag-badge">DVD/ISO</span>`;
         } else if (iso.source === "usb") {
             srcBadge = `<span class="tag-badge">USB</span>`;
         } else {
-            srcBadge = `<span class="tag-badge">DİSK</span>`;
+            srcBadge = `<span class="tag-badge">Disk</span>`;
         }
         const delBtnHtml = iso.managed
             ? `<button class="fox-btn danger-btn fox-btn-sm btn-iso-del" type="button">${currentLang === "tr" ? "Sil" : "Delete"}</button>`
@@ -1066,8 +1066,8 @@ async function loadIsos() {
             delBtn.addEventListener("click", async (ev) => {
                 ev.stopPropagation();
                 const pw = await requestActionPassword(
-                    "ISO Kalıbını Sil",
-                    `${iso.name} kalıbını .blaze-isos kasasından kalıcı olarak silmek için parolanızı girin:`
+                    "ISO kalıbını sil",
+                    `${iso.name} kalıbını .blaze-isos kasasından kalıcı olarak silmek için parolanızı girin`
                 );
                 if (pw === null) return;
                 delBtn.disabled = true;
@@ -1093,7 +1093,7 @@ async function loadIsos() {
 
 async function onConfirmIsoBoot(slider) {
     if (!selectedIsoPath) {
-        alert(currentLang === "tr" ? "Lütfen bir ISO dosyası seçin." : "Please select an ISO file.");
+        alert(currentLang === "tr" ? "Bir ISO dosyası seçin" : "Select an ISO file");
         resetSlider(slider);
         return;
     }
@@ -1195,7 +1195,7 @@ async function loadSnapshots() {
             selectedSnapshot = s;
             const targetLabel = document.getElementById("restore-target-label");
             if (targetLabel) {
-                targetLabel.textContent = `"${s.name}" ${currentLang === "tr" ? "yedeğine geri dönmek için kaydırın:" : "snapshot restore slide:"}`;
+                targetLabel.textContent = `"${s.name}" ${currentLang === "tr" ? "yedeğine geri dönmek için kaydırın" : "snapshot restore"}`;
             }
             const sliderBox = document.getElementById("restore-slider-box");
             if (sliderBox) sliderBox.style.display = "block";
@@ -1206,8 +1206,8 @@ async function loadSnapshots() {
             delBtn.addEventListener("click", async (ev) => {
                 ev.stopPropagation();
                 const pw = await requestActionPassword(
-                    "Snapshot Silme Onayı",
-                    `${s.name} yedeğini kalıcı olarak silmek için parolanızı girin:`
+                    "Anlık görüntü silme onayı",
+                    `${s.name} yedeğini kalıcı olarak silmek için parolanızı girin`
                 );
                 if (pw === null) return;
                 delBtn.disabled = true;
@@ -1231,14 +1231,14 @@ async function loadSnapshots() {
 
 async function onConfirmRestore(slider) {
     if (!selectedSnapshot) {
-        alert(currentLang === "tr" ? "Lütfen geri yüklenecek bir yedek seçin." : "Please select a backup to restore.");
+        alert(currentLang === "tr" ? "Geri yüklenecek bir yedek seçin" : "Select a backup to restore");
         resetSlider(slider);
         return;
     }
 
     const pw = await requestActionPassword(
-        "Sistem Geri Yükleme Onayı",
-        `${selectedSnapshot.name} yedeğine geri dönmek için Yetkili Kullanıcı (wheel) veya Root parolanızı girin:`
+        "Sistem geri yükleme onayı",
+        `${selectedSnapshot.name} yedeğine geri dönmek için yönetici (wheel) veya root parolanızı girin`
     );
     if (pw === null) {
         resetSlider(slider);
@@ -1335,7 +1335,7 @@ function initHardResetModal() {
                 const authRes = await apiCall("auth_unlock", { password: pw });
                 btnConfirm.disabled = false;
                 if (authRes.status !== "ok") {
-                    errorEl.textContent = authRes.message || "Hatalı yetkili kullanıcı / root parolası.";
+                    errorEl.textContent = authRes.message || "Yönetici veya root parolası hatalı";
                     errorEl.style.display = "block";
                     inputPass.value = "";
                     inputPass.focus();
@@ -1370,8 +1370,8 @@ async function onConfirmWipe(slider) {
     let actionPassword = wipeHardReset ? hardResetPassword : "";
     if (cachedAuthRequired && !actionPassword) {
         actionPassword = await requestActionPassword(
-            "Temizleme / Sıfırlama Güvenlik Onayı",
-            "Seçili sistem alanlarını silmek veya sıfırlamak için Yetkili Kullanıcı (wheel) / Root parolanızı girin:"
+            "Temizleme ve sıfırlama onayı",
+            "Seçili sistem alanlarını silmek veya sıfırlamak için yönetici (wheel) veya root parolanızı girin"
         );
         if (actionPassword === null) {
             resetSlider(slider);
@@ -1438,15 +1438,15 @@ function initPartitions() {
             const labelType = tblSel ? tblSel.value : "gpt";
             if (!disk) return;
             const pw = await requestActionPassword(
-                "Disk Bölüm Tablosu Sıfırlama",
-                `${disk} üzerinde ${labelType.toUpperCase()} bölüm tablosu oluşturmak için Yetkili Kullanıcı / Root parolasını girin:`
+                "Bölüm tablosu sıfırlama",
+                `${disk} üzerinde ${labelType.toUpperCase()} bölüm tablosu oluşturmak için yönetici veya root parolanızı girin`
             );
             if (pw === null) return;
             btnMklabel.disabled = true;
             setPartLog(`${disk} üzerinde ${labelType.toUpperCase()} bölüm tablosu oluşturuluyor...`);
             const res = await apiCall("disk_mklabel", { disk, label_type: labelType, password: pw });
             btnMklabel.disabled = false;
-            setPartLog(res.status === "ok" ? res.output : `[HATA] ${res.message || res.output || ""}`);
+            setPartLog(res.status === "ok" ? res.output : `Hata: ${res.message || res.output || ""}`);
             loadPartitions();
         });
     }
@@ -1464,8 +1464,8 @@ function initPartitions() {
             const label = lblInp ? lblInp.value.trim() : "";
             if (!disk) return;
             const pw = await requestActionPassword(
-                "Yeni Disk Bölümü Oluşturma",
-                `${disk} diskinde yeni ${fstype.toUpperCase()} bölümü oluşturmak için Yetkili Kullanıcı / Root parolasını girin:`
+                "Yeni disk bölümü oluşturma",
+                `${disk} diskinde yeni ${fstype.toUpperCase()} bölümü oluşturmak için yönetici veya root parolanızı girin`
             );
             if (pw === null) return;
             btnCreate.disabled = true;
@@ -1481,9 +1481,9 @@ function initPartitions() {
             if (res.status === "ok") {
                 if (sizeInp) sizeInp.value = "";
                 if (lblInp) lblInp.value = "";
-                setPartLog(res.output || "Bölüm başarıyla oluşturuldu.");
+                setPartLog(res.output || "Bölüm oluşturuldu");
             } else {
-                setPartLog(`[HATA] ${res.message || res.output || ""}`);
+                setPartLog(`Hata: ${res.message || res.output || ""}`);
             }
             loadPartitions();
         });
@@ -1507,7 +1507,7 @@ async function loadPartitions() {
         res.disks.forEach(dk => {
             const opt = document.createElement("option");
             opt.value = dk.name;
-            opt.textContent = `${dk.name} (${dk.size} — ${dk.model || "Disk"}, ${String(dk.pttype || "none").toUpperCase()}${dk.busy ? ", BAĞLI" : ""})`;
+            opt.textContent = `${dk.name} (${dk.size}, ${dk.model || "Disk"}, ${String(dk.pttype || "none").toUpperCase()}${dk.busy ? ", bağlı" : ""})`;
             diskSel.appendChild(opt);
         });
         if (prev && Array.from(diskSel.options).some(o => o.value === prev)) {
@@ -1553,7 +1553,7 @@ async function loadPartitions() {
                 `;
             }
         } else if (p.vault_protected) {
-            actionsHtml = `<span class="vault-lock-badge">ZIRHLI KASA (KORUMALI)</span>`;
+            actionsHtml = `<span class="vault-lock-badge">Korumalı kasa</span>`;
         } else {
             actionsHtml = `<span class="item-meta">${p.type === "disk" ? "Disk" : "Sistem"}</span>`;
         }
@@ -1570,13 +1570,13 @@ async function loadPartitions() {
         if (mountBtn) {
             mountBtn.addEventListener("click", async () => {
                 const pw = await requestActionPassword(
-                    isMounted ? "Bölüm Ayırma Onayı" : "Bölüm Bağlama Onayı",
-                    `${p.name} bölümünü ${isMounted ? "ayırmak" : "bağlamak"} için Yetkili Kullanıcı / Root parolasını girin:`
+                    isMounted ? "Bölüm ayırma onayı" : "Bölüm bağlama onayı",
+                    `${p.name} bölümünü ${isMounted ? "ayırmak" : "bağlamak"} için yönetici veya root parolanızı girin`
                 );
                 if (pw === null) return;
                 mountBtn.disabled = true;
                 const r = await apiCall("mount_toggle", { device: p.name, action: isMounted ? "unmount" : "mount", password: pw });
-                if (logEl) logEl.textContent = r.status === "ok" ? (r.output || "Tamam") : `[HATA] ${r.message}`;
+                if (logEl) logEl.textContent = r.status === "ok" ? (r.output || "Tamam") : `Hata: ${r.message}`;
                 loadPartitions();
             });
         }
@@ -1585,8 +1585,8 @@ async function loadPartitions() {
         if (fsckBtn) {
             fsckBtn.addEventListener("click", async () => {
                 const pw = await requestActionPassword(
-                    "Dosya Sistemi Denetimi",
-                    `${p.name} bölümünde dosya sistemi denetimi / onarımı için Yetkili Kullanıcı / Root parolasını girin:`
+                    "Dosya sistemi denetimi",
+                    `${p.name} bölümünde dosya sistemi denetimi için yönetici veya root parolanızı girin`
                 );
                 if (pw === null) return;
                 fsckBtn.disabled = true;
@@ -1605,15 +1605,15 @@ async function loadPartitions() {
                 const chosenFs = fsSel ? fsSel.value : "ext4";
                 const chosenLbl = lblInp ? lblInp.value.trim() : "";
                 const pw = await requestActionPassword(
-                    "Bölüm Biçimlendirme Onayı",
-                    `${p.name} bölümünü ${chosenFs.toUpperCase()} olarak biçimlendirmek için Yetkili Kullanıcı / Root parolasını girin:`
+                    "Bölüm biçimlendirme onayı",
+                    `${p.name} bölümünü ${chosenFs.toUpperCase()} olarak biçimlendirmek için yönetici veya root parolanızı girin`
                 );
                 if (pw === null) return;
                 fmtBtn.disabled = true;
                 if (logEl) logEl.textContent = `${p.name} -> ${chosenFs} olarak biçimlendiriliyor...`;
                 const r = await apiCall("part_format", { device: p.name, fstype: chosenFs, label: chosenLbl, password: pw });
                 fmtBtn.disabled = false;
-                if (logEl) logEl.textContent = r.status === "ok" ? r.output : `[HATA] ${r.message}`;
+                if (logEl) logEl.textContent = r.status === "ok" ? r.output : `Hata: ${r.message}`;
                 loadPartitions();
             });
         }
@@ -1622,14 +1622,14 @@ async function loadPartitions() {
         if (delBtn) {
             delBtn.addEventListener("click", async () => {
                 const pw = await requestActionPassword(
-                    "Bölüm Silme Onayı",
-                    `${p.name} bölümünü kalıcı olarak silmek için Yetkili Kullanıcı / Root parolasını girin:`
+                    "Bölüm silme onayı",
+                    `${p.name} bölümünü kalıcı olarak silmek için yönetici veya root parolanızı girin`
                 );
                 if (pw === null) return;
                 delBtn.disabled = true;
                 if (logEl) logEl.textContent = `${p.name} bölümü siliniyor...`;
                 const r = await apiCall("part_delete", { device: p.name, password: pw });
-                if (logEl) logEl.textContent = r.status === "ok" ? r.output : `[HATA] ${r.message}`;
+                if (logEl) logEl.textContent = r.status === "ok" ? r.output : `Hata: ${r.message}`;
                 loadPartitions();
             });
         }
@@ -1639,7 +1639,7 @@ async function loadPartitions() {
 
     const smartBox = document.getElementById("smart-summary");
     if (smartBox) {
-        smartBox.textContent = res.smart_info || (currentLang === "tr" ? "SMART sağlık verisi alınamadı." : "No SMART data available.");
+        smartBox.textContent = res.smart_info || (currentLang === "tr" ? "SMART sağlık verisi alınamadı" : "No SMART data available");
     }
 }
 
@@ -1651,16 +1651,16 @@ function initBootRepair() {
         let pw = "";
         if (target !== "status") {
             pw = await requestActionPassword(
-                "Önyükleme Onarım Onayı",
-                "Önyükleyici / initramfs yapılandırmasını değiştirmek için Yetkili Kullanıcı / Root parolanızı girin:"
+                "Önyükleme onarım onayı",
+                "Önyükleyici veya initramfs yapılandırmasını değiştirmek için yönetici veya root parolanızı girin"
             );
             if (pw === null) return;
         }
         if (consoleEl) consoleEl.textContent = (currentLang === "tr" ? bannerTr : bannerEn) + "\n";
         const res = await apiCall("boot_repair", { target, password: pw });
         if (consoleEl) {
-            const prefix = res.status === "ok" ? "" : "[HATA] ";
-            consoleEl.textContent += prefix + (res.output || res.message || "") + "\n" + (currentLang === "tr" ? "İşlem tamamlandı." : "Operation complete.");
+            const prefix = res.status === "ok" ? "" : "Hata: ";
+            consoleEl.textContent += prefix + (res.output || res.message || "") + "\n" + (currentLang === "tr" ? "İşlem tamamlandı" : "Operation complete");
         }
     }
 
@@ -1710,7 +1710,7 @@ function initTerminal() {
             if (res.output) {
                 screen.textContent += res.output + "\n# ";
             } else if (res.error) {
-                screen.textContent += "[HATA] " + res.error + "\n# ";
+                screen.textContent += "Hata: " + res.error + "\n# ";
             } else {
                 screen.textContent += "# ";
             }
@@ -1790,7 +1790,7 @@ async function initStartupSecurityLock() {
             const pw = pwInp ? pwInp.value : "";
             if (!pw) {
                 if (errEl) {
-                    errEl.textContent = "Yetkili kullanıcı / root parolası boş bırakılamaz.";
+                    errEl.textContent = "Yönetici veya root parolası boş bırakılamaz";
                     errEl.style.display = "block";
                 }
                 pwInp && pwInp.focus();
@@ -1806,7 +1806,7 @@ async function initStartupSecurityLock() {
                 bootstrapRecoveryWorkspace();
             } else {
                 if (errEl) {
-                    errEl.textContent = res.message || "Parola doğrulanamadı.";
+                    errEl.textContent = res.message || "Parola doğrulanamadı";
                     errEl.style.display = "block";
                 }
                 if (pwInp) {

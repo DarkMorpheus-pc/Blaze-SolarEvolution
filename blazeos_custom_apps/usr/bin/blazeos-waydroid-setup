@@ -8,11 +8,11 @@ LOGO=/usr/share/blazeos/icons/blazeos-logo.png
 HELPER=/usr/libexec/blazeos-welcome-helper
 
 YAD=(yad --window-icon="$LOGO" --image="$LOGO" --image-on-top
-     --width=620 --center --borders=18 --title="BlazeOS Waydroid")
+     --width=620 --center --borders=20 --title="BlazeOS Waydroid")
 
 # Zaten kurulu mu?
 if [ -f /var/lib/waydroid/images/system.img ]; then
-    "${YAD[@]}" --text="<b>Waydroid zaten kurulu görünüyor</b>\n\nUygulama menüsünden <b>Waydroid</b> ile açabilirsin.\n\nYeniden kurmak istersen önce: <tt>sudo waydroid init -f ...</tt>" \
+    "${YAD[@]}" --text="<b>Waydroid zaten kurulu</b>\n\nUygulama menüsünden <b>Waydroid</b> ile açabilirsiniz.\n\nYeniden kurmak için önce şunu çalıştırın:\n<tt>sudo waydroid init -f ...</tt>" \
         --button="Tamam:0"
     exit 0
 fi
@@ -20,13 +20,13 @@ fi
 # 1) İnternet kontrolü (OTA sunucusuna erişim)
 if ! curl -sI --max-time 6 https://ota.waydro.id/system >/dev/null 2>&1 \
    && ! ping -c1 -W3 ota.waydro.id >/dev/null 2>&1; then
-    "${YAD[@]}" --text="<b>İnternet bağlantısı gerekli</b>\n\nWaydroid, Android sistem imajlarını (~1 GB) <tt>ota.waydro.id</tt> üzerinden indirir. Şu an sunucuya ulaşılamıyor.\n\n• Wi-Fi / Ethernet bağlı mı kontrol et\n• Bağlandıktan sonra bu aracı tekrar çalıştır\n\n(Senin yaşadığın indirme hatası genelde tam olarak budur — bağlantı kopukluğu.)" \
+    "${YAD[@]}" --text="<b>İnternet bağlantısı gerekli</b>\n\nWaydroid, Android sistem imajlarını (~1 GB) <tt>ota.waydro.id</tt> üzerinden indirir. Sunucuya şu an ulaşılamıyor.\n\n- Wi-Fi veya Ethernet bağlantısını kontrol edin\n- Bağlandıktan sonra bu aracı yeniden çalıştırın" \
         --button="Tamam:0"
     exit 1
 fi
 
 # 2) Açıklama + onay
-"${YAD[@]}" --text="<b>Waydroid Kurulumu</b>\n\nAndroid uygulamaları BlazeOS üzerinde çalıştırmak için Waydroid kurulacak:\n\n• <b>~700 MB – 1.5 GB</b> Android imajı indirilecek (GAPPS / Google'lı)\n• Çekirdek modülleri (binder) yüklenecek\n• Konteyner servisi başlatılacak\n• İnternet hızına göre birkaç dakika sürebilir\n\nÇalıştırılacak komut:\n<tt>waydroid init -s GAPPS -c …/system -v …/vendor</tt>\n\nDevam edilsin mi?" \
+"${YAD[@]}" --text="<b>Waydroid kurulumu</b>\n\nAndroid uygulamalarını BlazeOS üzerinde çalıştırmak için Waydroid kurulacak:\n\n- <b>~700 MB - 1.5 GB</b> Android imajı indirilecek (GAPPS)\n- Çekirdek modülleri (binder) yüklenecek\n- Konteyner servisi başlatılacak\n- İnternet hızına göre birkaç dakika sürebilir\n\nÇalıştırılacak komut:\n<tt>waydroid init -s GAPPS -c .../system -v .../vendor</tt>\n\nDevam edilsin mi?" \
     --button="İptal:1" --button="Kur:0" || exit 0
 
 # 3) Helper ile init (TEK pkexec; doğru sözdizimi helper içinde)
@@ -40,13 +40,13 @@ fi
     done
     echo "100"
 ) | "${YAD[@]}" --progress --pulsate --auto-close --no-buttons \
-    --text="<b>Waydroid kuruluyor…</b>\n\nAndroid imajları indiriliyor — lütfen bekle, pencereyi kapatma."
+    --text="<b>Waydroid kuruluyor</b>\n\nAndroid imajları indiriliyor. İşlem bitene kadar pencereyi kapatmayın."
 
 # 4) Sonuç
 if [ -f /var/lib/waydroid/images/system.img ]; then
-    "${YAD[@]}" --text="<b>✓ Waydroid hazır!</b>\n\nUygulama menüsünden <b>Waydroid</b> ile başlatabilirsin.\nİlk açılış biraz yavaş olabilir (Android ön-yükleme).\n\nUygulama yüklemek için Waydroid içindeki mağazayı ya da:\n<tt>waydroid app install dosya.apk</tt>" \
-        --button="Bitti:0"
+    "${YAD[@]}" --text="<b>Waydroid hazır</b>\n\nUygulama menüsünden <b>Waydroid</b> ile başlatabilirsiniz. İlk açılış Android önyüklemesi nedeniyle biraz uzun sürebilir.\n\nUygulama yüklemek için Waydroid içindeki mağazayı veya şu komutu kullanın:\n<tt>waydroid app install dosya.apk</tt>" \
+        --button="Kapat:0"
 else
-    "${YAD[@]}" --text="<b>Kurulum tamamlanamadı</b>\n\nEn yaygın sebepler:\n• İnternet yavaş/koptu (imaj yarım indi)\n• OTA sunucusu yoğun\n\n<b>Tekrar dene:</b> bu aracı yeniden çalıştır.\n\nSorun sürerse terminalden elle:\n<tt>sudo waydroid init -s GAPPS \\\n  -c https://ota.waydro.id/system \\\n  -v https://ota.waydro.id/vendor</tt>\nsonra:\n<tt>sudo systemctl enable --now waydroid-container</tt>" \
+    "${YAD[@]}" --text="<b>Kurulum tamamlanamadı</b>\n\nOlası nedenler:\n- İnternet bağlantısı kesildi veya imaj eksik indi\n- OTA sunucusu geçici olarak yanıt vermiyor\n\nYeniden denemek için bu aracı tekrar çalıştırın.\n\nElle kurulum için terminalde şu komutları çalıştırın:\n<tt>sudo waydroid init -s GAPPS \\\n  -c https://ota.waydro.id/system \\\n  -v https://ota.waydro.id/vendor</tt>\n<tt>sudo systemctl enable --now waydroid-container</tt>" \
         --button="Tamam:0"
 fi

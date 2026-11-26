@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 BlazeOS Recovery Environment (BERE / BERP Recovery)
-OrangeFox-inspired GUI Recovery Environment powered by BERP.
-Zero emojis, maximum reliability, offline capable.
+Local GUI and REST recovery service powered by BERP.
+Zero emojis, offline capable.
 """
 
 import atexit
@@ -400,7 +400,7 @@ def inspect_blaze_rec_vault(verify_hashes=False):
                     if exp_hex:
                         actual_hex = _sha256_file(fpath).lower()
                         if actual_hex != exp_hex:
-                            tamper_error = f"Güvenlik İhlali: BLAZE_REC '{key}' SHA-256 imzası uyuşmuyor!"
+                            tamper_error = f"Güvenlik ihlali: BLAZE_REC '{key}' SHA-256 özeti uyuşmuyor"
                             break
                 if tamper_error is None:
                     hash_verified = bool(expected)
@@ -432,7 +432,7 @@ def _boot_blaze_rec_vault_kexec(target_root, is_live_ram_only, profile="install"
     did_mount = bool(info.get("did_mount"))
     try:
         if not info.get("present"):
-            return {"status": "error", "message": "Dahili BLAZE_REC zırhlı kurtarma kasası bulunamadı."}
+            return {"status": "error", "message": "Dahili BLAZE_REC kurtarma kasası bulunamadı."}
         if info.get("tamper_error"):
             return {"status": "error", "message": info["tamper_error"]}
         if not info.get("kernel_ready"):
@@ -1536,7 +1536,7 @@ def _inspect_mounted_tree(mount_dir, cd_label="", base_name="", size_mb=0):
     info = {
         "supported": False,
         "distro_family": "unknown",
-        "distro_label": "Bilinmeyen Kalıp",
+        "distro_label": "Bilinmeyen kalıp",
         "kernel_path": "",
         "initrd_path": "",
         "cd_label": cd_label,
@@ -1619,7 +1619,7 @@ def inspect_iso_image(iso_path):
     info = {
         "supported": False,
         "distro_family": "unknown",
-        "distro_label": "Bilinmeyen Kalıp",
+        "distro_label": "Bilinmeyen kalıp",
         "kernel_path": "",
         "initrd_path": "",
         "cd_label": "",
@@ -1841,13 +1841,13 @@ def _require_action_password(data):
     if not isinstance(pw, str) or not pw:
         return False, {
             "status": "error",
-            "message": "Güvenlik doğrulaması: Bu işlem için Yetkili Kullanıcı (wheel) veya Root parolası zorunludur.",
+            "message": "Bu işlem için yönetici (wheel) veya root parolası gerekir.",
         }
     if not verify_target_admin_password(pw, entries):
         time.sleep(0.35)
         return False, {
             "status": "error",
-            "message": "Hatalı yetkili kullanıcı / root parolası.",
+            "message": "Yönetici veya root parolası hatalı.",
         }
     return True, None
 
@@ -2161,7 +2161,7 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
                     "status": "error",
                     "auth_required": True,
                     "unlocked": False,
-                    "message": "Hatalı yetkili kullanıcı (wheel) veya root parolası.",
+                    "message": "Yönetici (wheel) veya root parolası hatalı.",
                     "_http_status": 403,
                 }
             with _AUTH_LOCK:
@@ -2184,7 +2184,7 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
                 "status": "locked",
                 "auth_required": True,
                 "unlocked": False,
-                "message": "BERE kilitli: Devam etmek için Yetkili Kullanıcı (wheel) veya Root parolası girin.",
+                "message": "BERE kilitli. Devam etmek için yönetici (wheel) veya root parolasını girin.",
                 "_http_status": 401,
             }
 
@@ -2341,10 +2341,10 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
                             m_info = inspect_iso_image(f"media://{npath}")
                             if m_info["supported"]:
                                 is_opt = (ntype == "rom")
-                                kind_lbl = "Kurulum Medyası (DVD/ISO)" if is_opt else "Canlı USB Medya"
+                                kind_lbl = "Kurulum Medyası (DVD/ISO)" if is_opt else "Canlı USB medyası"
                                 isos.append({
                                     "name": f"{nlbl or os.path.basename(npath)}.iso",
-                                    "display_name": f"{m_info['distro_label']} — {nlbl or os.path.basename(npath)} ({kind_lbl})",
+                                    "display_name": f"{m_info['distro_label']}: {nlbl or os.path.basename(npath)} ({kind_lbl})",
                                     "path": f"media://{npath}",
                                     "dev_path": npath,
                                     "size_mb": m_info["size_mb"] or int(int(n.get("size") or 0) / (1024 * 1024)),
@@ -2364,7 +2364,7 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
             if vault_info.get("present") and vault_info.get("full_os_embedded"):
                 isos.append({
                     "name": "BLAZE_REC-Armored-Vault.img",
-                    "display_name": "Blaze SolarEvolution — Dahili Zırhlı Kasa (BLAZE_REC · USB Yok)",
+                    "display_name": "Blaze SolarEvolution: dahili kasa (BLAZE_REC, USB gerekmez)",
                     "path": "vault://BLAZE_REC",
                     "dev_path": vault_info.get("device") or "",
                     "size_mb": vault_info.get("squashfs_mb") or 3100,
@@ -2448,13 +2448,13 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
                             if ntype == "rom":
                                 badge = "Kurulum Medyası (DVD/ISO)"
                             elif tran == "usb" and is_live_media:
-                                badge = "Canlı USB Medyası (ISO)"
+                                badge = "Canlı USB medyası (ISO)"
                             elif tran == "usb" or rm or hot:
-                                badge = "USB Bellek"
+                                badge = "USB bellek"
                             elif is_removable_or_secondary:
-                                badge = "Harici / İkincil Disk"
+                                badge = "Harici veya ikincil disk"
                             else:
-                                badge = "Dahili Veri Bölümü"
+                                badge = "Dahili veri bölümü"
                             devices.append({
                                 "device": npath,
                                 "label": nlabel or os.path.basename(npath),
@@ -2564,7 +2564,7 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
                     free_mb = int((st.f_bavail * st.f_frsize) / (1024 * 1024))
                     targets.append({
                         "dest_dir": dir_path,
-                        "label": f"{title} ({fstype}, Boş: {round(free_mb / 1024, 1)} GB)",
+                        "label": f"{title} ({fstype}, boş: {round(free_mb / 1024, 1)} GB)",
                         "free_mb": free_mb,
                         "device": src,
                         "fstype": fstype,
@@ -2575,8 +2575,8 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
             if not is_live_ram_only:
                 home_base = target_join(target_root, "/home")
                 if os.path.isdir(home_base):
-                    add_target(os.path.join(home_base, ".blaze-isos"), "Kullanıcı Veri Bölümü (/home/.blaze-isos — Önerilen)")
-                add_target(target_join(target_root, "/.blaze-isos"), "Sistem Kök Bölümü (/.blaze-isos)")
+                    add_target(os.path.join(home_base, ".blaze-isos"), "Kullanıcı veri bölümü (/home/.blaze-isos, önerilen)")
+                add_target(target_join(target_root, "/.blaze-isos"), "Sistem kök bölümü (/.blaze-isos)")
 
             # Also discover any other internal ext4/btrfs/xfs partition (useful if OS root was wiped or unpartitioned)
             for b in _parse_blkid_export():
@@ -2597,7 +2597,7 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
                             mps = [auto_mp]
                     if mps and mps[0] not in ("/boot", f"{target_root}/boot", "/run/initramfs/live"):
                         cand_dir = os.path.join(mps[0], "home/.blaze-isos") if os.path.isdir(os.path.join(mps[0], "home")) else os.path.join(mps[0], ".blaze-isos")
-                        add_target(cand_dir, f"Disk Bölümü {bdev} ({blbl or bfs})")
+                        add_target(cand_dir, f"Disk bölümü {bdev} ({blbl or bfs})")
                 except Exception:
                     pass
 
@@ -2712,14 +2712,14 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
                             ISO_PULL_STATE["message"] = "Kopyalanan ISO bütünlüğü ve önyükleme yapısı doğrulanıyor..."
 
                         if os.path.getsize(part_dest) != total_sz and not is_media_src:
-                            raise RuntimeError("Kopyalanan dosya boyutu kaynak ISO ile eşleşmiyor!")
+                            raise RuntimeError("Kopyalanan dosya boyutu kaynak ISO ile eşleşmiyor")
                         probe_info = inspect_iso_image(part_dest)
                         if not probe_info["supported"] and not probe_info["cd_label"]:
                             # Still check ISO9660 magic 'CD001' at 0x8001 for generic ISOs
                             with open(part_dest, "rb") as vf:
                                 vf.seek(0x8001)
                                 if vf.read(5) != b"CD001":
-                                    raise RuntimeError("Kopyalanan dosya geçerli bir ISO9660 kalıbı değil!")
+                                    raise RuntimeError("Kopyalanan dosya geçerli bir ISO9660 kalıbı değil")
 
                         os.replace(part_dest, final_dest)
                         os.chmod(final_dest, 0o644)
@@ -2730,7 +2730,7 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
                                 "status": "done",
                                 "bytes_done": total_sz,
                                 "percent": 100,
-                                "message": f"{safe_fn} başarıyla bilgisayara çekildi ve doğrulandı ({probe_info['distro_label']}).",
+                                "message": f"{safe_fn} bilgisayara çekildi ve doğrulandı ({probe_info['distro_label']}).",
                             })
                     except InterruptedError as ie:
                         try:
@@ -2816,7 +2816,7 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
                     "status": "ok",
                     "info": {
                         "supported": bool(vi.get("present") and vi.get("full_os_embedded")),
-                        "distro_label": "Blaze SolarEvolution (BLAZE_REC Zırhlı Kasa)",
+                        "distro_label": "Blaze SolarEvolution (BLAZE_REC kasası)",
                         "size_mb": vi.get("squashfs_mb") or 0,
                         "cd_label": "BLAZE_REC",
                     },
@@ -2834,7 +2834,7 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
         elif endpoint in ("iso_boot", "boot_iso"):
             iso_path = data.get("path") or data.get("iso_path") or ""
             if not iso_path or not isinstance(iso_path, str):
-                return {"status": "error", "message": "Gecerli bir ISO dosyasi bulunamadi."}
+                return {"status": "error", "message": "Geçerli bir ISO dosyası bulunamadı."}
 
             # Reject unsafe shell / GRUB metacharacters
             if any(ch in iso_path for ch in ('"', "'", "$", "`", "\n", "\r", "}", "{", ";", "|", "&")):
@@ -2855,7 +2855,7 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
                 if req_engine == "grub":
                     return {
                         "status": "error",
-                        "message": "Dahili zırhlı kasa imajı kexec motoruyla başlatılmalıdır.",
+                        "message": "Dahili kasa imajı kexec ile başlatılmalıdır.",
                     }
                 return _boot_blaze_rec_vault_kexec(
                     target_root,
@@ -2870,14 +2870,14 @@ class RecoveryAPIHandler(SimpleHTTPRequestHandler):
                 if not re.fullmatch(r"/dev/[A-Za-z0-9._-]+", media_dev) or not os.path.exists(media_dev):
                     return {"status": "error", "message": "Geçerli bir kurulum medyası bulunamadı."}
             elif not os.path.isfile(iso_path):
-                return {"status": "error", "message": "Gecerli bir ISO dosyasi bulunamadi."}
+                return {"status": "error", "message": "Geçerli bir ISO dosyası bulunamadı."}
 
             try:
                 if is_media_boot:
                     if req_engine == "grub":
                         return {
                             "status": "error",
-                            "message": "Doğrudan DVD/Canlı medya kexec motoruyla başlatılmalıdır (veya önce 'Bilgisayara Çek' ile diske kaydedin).",
+                            "message": "Doğrudan DVD veya canlı medya kexec ile başlatılmalıdır (veya önce 'Bilgisayara çek' ile diske kaydedin).",
                         }
                     media_mp, err_m = ensure_usb_mounted_readonly(media_dev)
                     if not media_mp:
@@ -3191,7 +3191,7 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                             "auto_transition": True,
                             "distro": iso_info["distro_label"],
                             "copy_to_ram": copy_to_ram,
-                            "message": f"kexec ile {iso_info['distro_label']} belleğe yüklendi; anında geçiş yapılıyor...",
+                            "message": f"kexec ile {iso_info['distro_label']} belleğe yüklendi; geçiş yapılıyor...",
                         }
                     elif req_engine == "kexec":
                         return {"status": "error", "message": f"kexec yüklemesi başarısız oldu: {kexec_err or 'çekirdek kilitli'}"}
@@ -3199,7 +3199,7 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                 if not grub_configured:
                     return {
                         "status": "error",
-                        "message": grub_err or "Kurulu bir önyükleme bölümü (/boot/grub2) bulunamadı; bu ortamda 'kexec Hızlı Geçiş' motorunu kullanın.",
+                        "message": grub_err or "Kurulu bir önyükleme bölümü (/boot/grub2) bulunamadı; bu ortamda 'Doğrudan kexec' seçeneğini kullanın.",
                     }
 
                 clear_boot_triggers(target_root)
@@ -3304,9 +3304,9 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                     os.makedirs(hdir, exist_ok=True)
                     target_h = os.path.join(hdir, f"{name}_home")
                     subprocess.run(["btrfs", "subvolume", "snapshot", "-r", home_dir, target_h], check=True)
-                return {"status": "ok", "message": "Anlik goruntu basariyla olusturuldu.", "name": name}
+                return {"status": "ok", "message": "Anlık görüntü oluşturuldu.", "name": name}
             except Exception as e:
-                return {"status": "error", "message": f"Snapshot alinamadi: {e}"}
+                return {"status": "error", "message": f"Anlık görüntü alınamadı: {e}"}
 
         elif endpoint == "restore_snapshot":
             ok_pw, err_pw = _require_action_password(data)
@@ -3316,12 +3316,12 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
             target_root, is_btrfs, root_dev, active_fsroot, _, _ = resolve_target_context(auto_mount=True)
             disk_snap = target_join(target_root, snap_path) if snap_path else ""
             if not snap_path or (not os.path.exists(disk_snap) and not is_btrfs):
-                return {"status": "error", "message": "Yedek yolu bulunamadi."}
+                return {"status": "error", "message": "Yedek yolu bulunamadı."}
 
             if "/home/.snapshots" in snap_path or snap_path.endswith("_home"):
                 return {
                     "status": "error",
-                    "message": "Kullanıcı (/home) anlık görüntüsü kök dosya sistemine (/) geri yüklenemez!",
+                    "message": "Kullanıcı (/home) anlık görüntüsü kök dosya sistemine (/) geri yüklenemez.",
                 }
 
             remount_filesystems_rw()
@@ -3364,7 +3364,7 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                 clear_boot_triggers(target_root)
                 return {
                     "status": "ok",
-                    "message": f"{os.path.basename(snap_path)} başarıyla geri yüklendi. Sistem yeniden başlatılıyor...",
+                    "message": f"{os.path.basename(snap_path)} geri yüklendi. Sistem yeniden başlatılıyor...",
                 }
             except Exception as e:
                 return {"status": "error", "message": f"Geri yükleme hatası: {e}"}
@@ -3459,7 +3459,7 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                             "fstype": d.get("fstype") or "",
                             "label": d.get("label") or "",
                             "size": d.get("size") or "",
-                            "mountpoint": "[ZIRHLI KURTARMA KASASI — SALT OKUNUR]" if is_vault else mp_str,
+                            "mountpoint": "[BLAZE_REC kurtarma kasası, salt okunur]" if is_vault else mp_str,
                             "protected": protected,
                             "vault_protected": is_vault,
                         })
@@ -3493,9 +3493,9 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                             if any(k in ln for k in ("Model", "Device", "Serial", "User Capacity", "SMART overall-health", "SMART Health Status", "SMART support"))
                         ]
                         if kept:
-                            smart_lines.append(f"[{dk['name']} — {dk['size']} | Tablo: {dk['pttype'].upper()}]\n  " + "\n  ".join(kept))
+                            smart_lines.append(f"[{dk['name']} | {dk['size']} | Tablo: {dk['pttype'].upper()}]\n  " + "\n  ".join(kept))
                         else:
-                            smart_lines.append(f"[{dk['name']} — {dk['model']} ({dk['size']}) | Tablo: {dk['pttype'].upper()}] Sanal/KVM blok aygıtı (fiziksel SMART passthrough yok, G/Ç erişilebilir).")
+                            smart_lines.append(f"[{dk['name']} | {dk['model']} ({dk['size']}) | Tablo: {dk['pttype'].upper()}] Sanal/KVM blok aygıtı (fiziksel SMART passthrough yok, G/Ç erişilebilir).")
                     except Exception:
                         pass
 
@@ -3511,7 +3511,7 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
             if not dev or not re.fullmatch(r"/dev/[A-Za-z0-9._-]+", dev):
                 return {"status": "error", "message": "Geçerli bir aygıt seçilmedi."}
             if is_protected_recovery_device(dev):
-                return {"status": "error", "message": "Güvenlik Kilidi: Zırhlı BLAZE_REC kurtarma kasası yazılamaz veya ayrılamaz."}
+                return {"status": "error", "message": "Güvenlik kilidi: BLAZE_REC kurtarma kasası yazılamaz veya ayrılamaz."}
             try:
                 if action == "mount":
                     mp = f"/mnt/{os.path.basename(dev)}"
@@ -3537,7 +3537,7 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
             if not re.fullmatch(r"/dev/(sd[a-z]+|vd[a-z]+|nvme[0-9]+n[0-9]+)", disk) or not os.path.exists(disk):
                 return {"status": "error", "message": f"Geçersiz hedef disk: {disk}"}
             if is_protected_recovery_device(disk):
-                return {"status": "error", "message": f"Güvenlik Kilidi: {disk} diski zırhlı BLAZE_REC kurtarma bölümünü barındırıyor; bölüm tablosu sıfırlanamaz!"}
+                return {"status": "error", "message": f"Güvenlik kilidi: {disk} diskinde BLAZE_REC kurtarma bölümü var; bölüm tablosu sıfırlanamaz."}
             if label_type not in ("gpt", "msdos"):
                 return {"status": "error", "message": "Bölüm tablosu türü yalnızca 'gpt' veya 'msdos' olabilir."}
             mps = subprocess.check_output(["lsblk", "-n", "-o", "MOUNTPOINTS", disk], text=True, stderr=subprocess.DEVNULL).strip()
@@ -3563,7 +3563,7 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
             raw_size = str(data.get("size_mb") or "").strip()
             label = re.sub(r"[^A-Za-z0-9_-]", "", str(data.get("label") or "").strip())[:16]
             if label.upper() == "BLAZE_REC":
-                return {"status": "error", "message": "BLAZE_REC etiketi zırhlı sistem kurtarma kasası için ayrılmıştır."}
+                return {"status": "error", "message": "BLAZE_REC etiketi sistem kurtarma kasasına ayrılmıştır."}
             if not re.fullmatch(r"/dev/(sd[a-z]+|vd[a-z]+|nvme[0-9]+n[0-9]+)", disk) or not os.path.exists(disk):
                 return {"status": "error", "message": f"Geçersiz hedef disk: {disk}"}
             if fstype not in ("btrfs", "ext4", "xfs", "vfat", "swap", "raw"):
@@ -3656,11 +3656,11 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
             fstype = (data.get("fstype") or "ext4").strip().lower()
             label = re.sub(r"[^A-Za-z0-9_-]", "", str(data.get("label") or "").strip())[:16]
             if label.upper() == "BLAZE_REC":
-                return {"status": "error", "message": "BLAZE_REC etiketi zırhlı sistem kurtarma kasası için ayrılmıştır."}
+                return {"status": "error", "message": "BLAZE_REC etiketi sistem kurtarma kasasına ayrılmıştır."}
             if not re.fullmatch(r"/dev/(sd[a-z]+[0-9]+|vd[a-z]+[0-9]+|nvme[0-9]+n[0-9]+p[0-9]+)", dev) or not os.path.exists(dev):
                 return {"status": "error", "message": f"Geçersiz bölüm aygıtı: {dev}"}
             if is_protected_recovery_device(dev):
-                return {"status": "error", "message": f"Güvenlik Kilidi: {dev} zırhlı BLAZE_REC kurtarma bölümüdür; biçimlendirilemez!"}
+                return {"status": "error", "message": f"Güvenlik kilidi: {dev} BLAZE_REC kurtarma bölümüdür; biçimlendirilemez."}
             if fstype not in ("btrfs", "ext4", "xfs", "vfat", "swap"):
                 return {"status": "error", "message": f"Desteklenmeyen dosya sistemi: {fstype}"}
             mps = subprocess.check_output(["lsblk", "-n", "-o", "MOUNTPOINTS", dev], text=True, stderr=subprocess.DEVNULL).strip()
@@ -3682,7 +3682,7 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                 if fp.returncode != 0:
                     return {"status": "error", "message": fp.stdout.strip() or "Biçimlendirme başarısız."}
                 subprocess.run(["udevadm", "settle"], stderr=subprocess.DEVNULL)
-                return {"status": "ok", "output": f"{dev} başarıyla {fstype} olarak biçimlendirildi.\n{fp.stdout.strip()}"}
+                return {"status": "ok", "output": f"{dev} {fstype} olarak biçimlendirildi.\n{fp.stdout.strip()}"}
             except Exception as e:
                 return {"status": "error", "message": str(e)}
 
@@ -3694,7 +3694,7 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
             if not re.fullmatch(r"/dev/(sd[a-z]+[0-9]+|vd[a-z]+[0-9]+|nvme[0-9]+n[0-9]+p[0-9]+)", dev) or not os.path.exists(dev):
                 return {"status": "error", "message": f"Geçersiz bölüm aygıtı: {dev}"}
             if is_protected_recovery_device(dev):
-                return {"status": "error", "message": f"Güvenlik Kilidi: {dev} zırhlı BLAZE_REC kurtarma bölümüdür; silinemez!"}
+                return {"status": "error", "message": f"Güvenlik kilidi: {dev} BLAZE_REC kurtarma bölümüdür; silinemez."}
             mps = subprocess.check_output(["lsblk", "-n", "-o", "MOUNTPOINTS", dev], text=True, stderr=subprocess.DEVNULL).strip()
             if mps:
                 return {"status": "error", "message": f"{dev} şu anda bağlı ({mps}). Silmeden önce ayırın."}
@@ -3743,7 +3743,7 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                     if mps:
                         p1 = subprocess.run(["e2fsck", "-fn", dev], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=60)
                         ok = p1.returncode in (0, 1)
-                        out = "[Bağlı bölüm — salt okunur denetim (-fn)]\n" + p1.stdout.strip()
+                        out = "[Bağlı bölüm, salt okunur denetim (-fn)]\n" + p1.stdout.strip()
                     else:
                         p1 = subprocess.run(["e2fsck", "-fy", dev], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=60)
                         ok = p1.returncode in (0, 1, 2)
@@ -3758,7 +3758,7 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                     if mps:
                         p1 = subprocess.run(["xfs_repair", "-n", dev], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=60)
                         ok = p1.returncode == 0
-                        out = "[Bağlı XFS — salt okunur denetim (-n)]\n" + p1.stdout.strip()
+                        out = "[Bağlı XFS, salt okunur denetim (-n)]\n" + p1.stdout.strip()
                     else:
                         p1 = subprocess.run(["xfs_repair", dev], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=60)
                         ok = p1.returncode == 0
@@ -3768,7 +3768,7 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
 
                 if not ok:
                     return {"status": "error", "output": out, "message": f"{dev} dosya sistemi denetimi hata bildirdi."}
-                return {"status": "ok", "output": f"[{dev} ({fstype}) Denetim/Onarım Tamamlandı]\n{out}"}
+                return {"status": "ok", "output": f"[{dev} ({fstype}) denetim ve onarım tamamlandı]\n{out}"}
             except Exception as e:
                 return {"status": "error", "message": str(e)}
 
@@ -3885,9 +3885,9 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                                 extra_mp = None
 
                         cleared.append(
-                            "Tam Sistem Temizliği (Hard Reset) tamamlandı; acil durum protokolüne geçiliyor"
+                            "Tam sistem temizliği tamamlandı; acil kurtarma ekranına geçiliyor"
                             if lang == "tr"
-                            else "Complete System Wipe (Hard Reset) finished; entering emergency guard"
+                            else "Complete system wipe finished; entering emergency recovery"
                         )
 
                         def trigger_recovery_reboot():
@@ -3922,9 +3922,9 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                         clean_path_contents("/home")
                         clean_path_contents("/tmp")
                         cleared.append(
-                            "Canlı oturum verileri temizlendi; BlazeOS Acil Durum Ekranına geçiliyor"
+                            "Canlı oturum verileri temizlendi; acil kurtarma ekranına geçiliyor"
                             if lang == "tr"
-                            else "Live session wiped; entering BlazeOS Emergency Guard"
+                            else "Live session wiped; entering emergency recovery"
                         )
 
                         def trigger_live_death_screen():
@@ -3947,7 +3947,7 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
             if is_live_ram_only:
                 return {
                     "status": "error",
-                    "message": "Kurulu bir BlazeOS diski bulunamadı; Canlı (Live) ISO RAM ortamında önyükleyici onarımı yapılamaz.",
+                    "message": "Kurulu bir BlazeOS diski bulunamadı; canlı RAM oturumunda önyükleyici onarımı yapılamaz.",
                 }
             remount_filesystems_rw()
             ansi_re = re.compile(r"\x1b\[[0-9;]*m")
@@ -4096,7 +4096,7 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
 
                 if p is None or p.returncode != 0:
                     code = p.returncode if p is not None else -1
-                    return {"status": "error", "output": out_msg, "message": f"Komut basarisiz (kod: {code})"}
+                    return {"status": "error", "output": out_msg, "message": f"Komut başarısız (kod: {code})"}
 
                 clear_boot_triggers(target_root)
                 return {"status": "ok", "output": out_msg}
@@ -4109,7 +4109,7 @@ menuentry "BlazeOS Direct ISO Boot ({safe_name})" --id=blaze_iso_boot {{
                 p = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
                 return {"status": "ok", "output": p.stdout, "error": p.stderr}
             except subprocess.TimeoutExpired:
-                return {"status": "error", "error": "Komut zaman asimina ugradi (30s)"}
+                return {"status": "error", "error": "Komut zaman aşımına uğradı (30 sn)"}
             except Exception as e:
                 return {"status": "error", "error": str(e)}
 
@@ -4273,7 +4273,7 @@ def launch_gui(url):
                     f_u.write('user_pref("browser.newtabpage.enabled", false);\n')
                     f_u.write('user_pref("browser.shell.checkDefaultBrowser", false);\n')
                     f_u.write('user_pref("toolkit.telemetry.enabled", false);\n')
-                    f_u.write('user_pref("browser.display.background_color", "#141518");\n')
+                    f_u.write('user_pref("browser.display.background_color", "#141415");\n')
                 subprocess.run(["firefox", "--no-remote", "--profile", profile_dir, "--kiosk", "--new-window", url])
                 return
 

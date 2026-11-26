@@ -15,7 +15,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, GLib, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 APP_ID = "org.blazeos.StyleCenter"
 STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "blaze-style-center"
@@ -35,7 +35,7 @@ def tr(text: str) -> str:
 
 
 PRESET_NAMES = {
-    "en": {"gnome": "Pure GNOME", "mac": "Bottom Dock", "ubuntu": "Left Dock", "windows": "Classic Panel", "focus": "Focus", "blaze": "Blaze", "org.fedoraproject.fedora.desktop": "Fedora", "org.fedoraproject.fedoradark.desktop": "Fedora Dark", "org.kde.breeze.desktop": "Breeze", "org.kde.breezedark.desktop": "Breeze Dark", "org.kde.breezetwilight.desktop": "Breeze Twilight", "com.github.varlesh.arc": "Arc", "com.github.varlesh.arc-dark": "Arc Dark", "com.github.varlesh.materia": "Materia", "com.github.varlesh.materia-dark": "Materia Dark"},
+    "en": {"gnome": "Pure GNOME", "mac": "Bottom dock", "ubuntu": "Left dock", "windows": "Classic panel", "focus": "Focus", "blaze": "Blaze", "org.fedoraproject.fedora.desktop": "Fedora", "org.fedoraproject.fedoradark.desktop": "Fedora Dark", "org.kde.breeze.desktop": "Breeze", "org.kde.breezedark.desktop": "Breeze Dark", "org.kde.breezetwilight.desktop": "Breeze Twilight", "com.github.varlesh.arc": "Arc", "com.github.varlesh.arc-dark": "Arc Dark", "com.github.varlesh.materia": "Materia", "com.github.varlesh.materia-dark": "Materia Dark"},
     "de": {"gnome": "Reines GNOME", "mac": "Dock unten", "ubuntu": "Dock links", "windows": "Klassische Leiste", "focus": "Fokus", "blaze": "Blaze"},
     "es": {"gnome": "GNOME puro", "mac": "Dock inferior", "ubuntu": "Dock izquierdo", "windows": "Panel clásico", "focus": "Enfoque", "blaze": "Blaze"},
     "ru": {"gnome": "Чистый GNOME", "mac": "Нижняя панель", "ubuntu": "Левая панель", "windows": "Классическая панель", "focus": "Фокус", "blaze": "Blaze"},
@@ -43,6 +43,8 @@ PRESET_NAMES = {
 
 
 def preset_name(preset: dict) -> str:
+    if LANG == "tr":
+        return preset["name"]
     return PRESET_NAMES.get(LANG, {}).get(preset["id"], PRESET_NAMES.get("en", {}).get(preset["id"], preset["name"]))
 
 
@@ -74,24 +76,24 @@ def desktop() -> str:
 
 
 GNOME_PRESETS = [
-    {"id": "gnome", "name": "Saf GNOME", "desc": "GNOME'un sade ve güvenilir varsayılan düzeni", "layout": "top", "dark": False},
-    {"id": "mac", "name": "Alt Dock", "desc": "Ortalanmış alt dock ve otomatik gizleme", "layout": "dock", "dark": False},
-    {"id": "ubuntu", "name": "Sol Dock", "desc": "Geniş, sabit sol uygulama çubuğu", "layout": "left", "dark": True},
-    {"id": "windows", "name": "Klasik Panel", "desc": "Alt görev çubuğu ve uygulamalar menüsü", "layout": "bottom", "dark": False},
-    {"id": "focus", "name": "Odak", "desc": "Koyu, küçük ve gerektiğinde görünen dock", "layout": "dock", "dark": True},
+    {"id": "gnome", "name": "Saf GNOME", "desc": "GNOME'un varsayılan düzeni", "layout": "top", "dark": False},
+    {"id": "mac", "name": "Alt dock", "desc": "Ortalanmış alt dock ve otomatik gizleme", "layout": "dock", "dark": False},
+    {"id": "ubuntu", "name": "Sol dock", "desc": "Geniş, sabit sol uygulama çubuğu", "layout": "left", "dark": True},
+    {"id": "windows", "name": "Klasik panel", "desc": "Alt görev çubuğu ve uygulamalar menüsü", "layout": "bottom", "dark": False},
+    {"id": "focus", "name": "Odak", "desc": "Koyu, küçük, gerektiğinde açılan dock", "layout": "dock", "dark": True},
     {"id": "blaze", "name": "Blaze", "desc": "Koyu panel, sıcak vurgu ve Papirus simgeler", "layout": "bottom", "dark": True},
 ]
 
 KDE_PRESETS = [
-    {"id": "org.fedoraproject.fedora.desktop", "name": "Fedora", "desc": "Fedora'nın dengeli Plasma görünümü", "layout": "bottom", "dark": False},
-    {"id": "org.fedoraproject.fedoradark.desktop", "name": "Fedora Koyu", "desc": "Fedora teması, koyu renk düzeni", "layout": "bottom", "dark": True},
-    {"id": "org.kde.breeze.desktop", "name": "Breeze", "desc": "KDE'nin en kararlı açık teması", "layout": "bottom", "dark": False},
-    {"id": "org.kde.breezedark.desktop", "name": "Breeze Koyu", "desc": "KDE'nin resmi koyu teması", "layout": "bottom", "dark": True},
-    {"id": "org.kde.breezetwilight.desktop", "name": "Breeze Alacakaranlık", "desc": "Açık uygulamalar ve koyu masaüstü", "layout": "bottom", "dark": True},
+    {"id": "org.fedoraproject.fedora.desktop", "name": "Fedora", "desc": "Fedora'nın Plasma görünümü", "layout": "bottom", "dark": False},
+    {"id": "org.fedoraproject.fedoradark.desktop", "name": "Fedora koyu", "desc": "Fedora teması, koyu renk düzeni", "layout": "bottom", "dark": True},
+    {"id": "org.kde.breeze.desktop", "name": "Breeze", "desc": "KDE'nin açık teması", "layout": "bottom", "dark": False},
+    {"id": "org.kde.breezedark.desktop", "name": "Breeze koyu", "desc": "KDE'nin resmi koyu teması", "layout": "bottom", "dark": True},
+    {"id": "org.kde.breezetwilight.desktop", "name": "Breeze alacakaranlık", "desc": "Açık uygulamalar ve koyu masaüstü", "layout": "bottom", "dark": True},
     {"id": "com.github.varlesh.arc", "name": "Arc", "desc": "Düz, şeffaf ve açık Plasma paketi", "layout": "dock", "dark": False},
-    {"id": "com.github.varlesh.arc-dark", "name": "Arc Koyu", "desc": "Arc ailesinin koyu görünümü", "layout": "dock", "dark": True},
+    {"id": "com.github.varlesh.arc-dark", "name": "Arc koyu", "desc": "Arc ailesinin koyu görünümü", "layout": "dock", "dark": True},
     {"id": "com.github.varlesh.materia", "name": "Materia", "desc": "Material tasarımlı Plasma görünümü", "layout": "dock", "dark": False},
-    {"id": "com.github.varlesh.materia-dark", "name": "Materia Koyu", "desc": "Material tasarımın koyu sürümü", "layout": "dock", "dark": True},
+    {"id": "com.github.varlesh.materia-dark", "name": "Materia koyu", "desc": "Material tasarımın koyu sürümü", "layout": "dock", "dark": True},
 ]
 
 
@@ -161,18 +163,18 @@ def apply_kde(preset: dict) -> None:
     backup_once("kde")
     command = shutil.which("plasma-apply-lookandfeel") or shutil.which("lookandfeeltool")
     if not command:
-        raise RuntimeError("Plasma görünüm aracı bulunamadı.")
+        raise RuntimeError("Plasma görünüm aracı bulunamadı")
     result = run([command, "--apply", preset["id"]], check=False)
     if result.returncode != 0:
         result = run([command, "-a", preset["id"]], check=False)
     if result.returncode != 0:
-        raise RuntimeError((result.stderr or result.stdout).strip() or "Tema uygulanamadı.")
+        raise RuntimeError((result.stderr or result.stdout).strip() or "Tema uygulanamadı")
 
 
 def restore(kind: str) -> None:
     target = STATE / kind
     if not target.exists():
-        raise RuntimeError("Geri yüklenecek bir ayar yedeği bulunamadı.")
+        raise RuntimeError("Geri yüklenecek yedek bulunamadı")
     if kind == "gnome":
         backup = target / "dconf.ini"
         run(["dconf", "load", "/org/gnome/"], input_text=backup.read_text())
@@ -207,7 +209,7 @@ def command_line(argv: list[str]) -> int | None:
         return None
     kind = args.desktop or desktop()
     if kind not in {"gnome", "kde"}:
-        print("Bu oturum için görünüm paketi yok.", file=sys.stderr)
+        print("Bu oturum için görünüm paketi yok", file=sys.stderr)
         return 2
     try:
         if args.restore:
@@ -220,40 +222,160 @@ def command_line(argv: list[str]) -> int | None:
         return 1
 
 
+CSS = b"""
+window.style-center-window {
+    background-color: #141415;
+    color: #ededed;
+}
+window.style-center-window headerbar {
+    background-color: #0f0f10;
+    border-bottom: 1px solid rgba(237, 237, 237, 0.08);
+    box-shadow: none;
+}
+.style-page-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: #ededed;
+}
+.style-page-desc {
+    font-size: 13px;
+    font-weight: 400;
+    color: #a1a1a6;
+}
+.style-preset {
+    background-color: #19191b;
+    background-image: none;
+    color: #ededed;
+    border-radius: 12px;
+    border: 1px solid rgba(237, 237, 237, 0.08);
+    box-shadow: none;
+    transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.style-preset:hover {
+    background-color: #232325;
+    border-color: rgba(237, 237, 237, 0.12);
+}
+.style-preset:active {
+    transform: scale(0.98);
+}
+.style-preset-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: #ededed;
+}
+.style-preset-desc {
+    font-size: 13px;
+    font-weight: 400;
+    color: #a1a1a6;
+}
+.style-primary-btn {
+    background-color: #ededed;
+    background-image: none;
+    color: #141415;
+    font-weight: 500;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    padding: 4px 16px;
+    transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.style-primary-btn:hover {
+    background-color: #dcdce0;
+}
+.style-primary-btn:active {
+    transform: scale(0.98);
+}
+.style-secondary-btn {
+    background-color: #232325;
+    background-image: none;
+    color: #ededed;
+    font-weight: 500;
+    border-radius: 8px;
+    border: 1px solid rgba(237, 237, 237, 0.08);
+    padding: 4px 16px;
+    transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.style-secondary-btn:hover {
+    background-color: #2b2b2e;
+    border-color: rgba(237, 237, 237, 0.12);
+}
+.style-secondary-btn:active {
+    transform: scale(0.98);
+}
+window.style-center-window button:focus-visible {
+    outline: 2px solid rgba(224, 87, 60, 0.65);
+    outline-offset: 2px;
+}
+"""
+
+
+def install_css() -> None:
+    display = Gdk.Display.get_default()
+    if display is None:
+        return
+    provider = Gtk.CssProvider()
+    if hasattr(provider, "load_from_string"):
+        provider.load_from_string(CSS.decode("utf-8"))
+    else:
+        provider.load_from_data(CSS)
+    Gtk.StyleContext.add_provider_for_display(display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+
 class Preview(Gtk.DrawingArea):
     def __init__(self, preset: dict):
         super().__init__()
         self.preset = preset
-        self.set_content_width(250)
-        self.set_content_height(135)
+        self.set_content_width(248)
+        self.set_content_height(136)
         self.set_draw_func(self.draw)
 
     def draw(self, _area, cr, width, height):
         dark = self.preset["dark"]
-        cr.set_source_rgb(*(0.08, 0.09, 0.12) if dark else (0.82, 0.86, 0.91))
+        cr.set_source_rgb(*(0.078, 0.078, 0.082) if dark else (0.89, 0.89, 0.90))
         cr.rectangle(0, 0, width, height)
         cr.fill()
-        cr.set_source_rgba(0.18, 0.22, 0.30, 0.96) if dark else cr.set_source_rgba(0.97, 0.98, 1.0, 0.96)
+        cr.set_source_rgba(0.137, 0.137, 0.145, 1.0) if dark else cr.set_source_rgba(0.98, 0.98, 0.98, 1.0)
         cr.rectangle(width * .18, height * .18, width * .64, height * .58)
         cr.fill()
-        cr.set_source_rgb(0.95, 0.22, 0.18)
+        cr.set_source_rgb(0.784, 0.231, 0.133)
         layout = self.preset["layout"]
-        if layout == "top": cr.rectangle(0, 0, width, 10)
-        elif layout == "left": cr.rectangle(0, 0, 16, height)
-        elif layout == "bottom": cr.rectangle(0, height - 14, width, 14)
-        else: cr.rectangle(width * .25, height - 18, width * .5, 12)
+        if layout == "top":
+            cr.rectangle(0, 0, width, 16)
+        elif layout == "left":
+            cr.rectangle(0, 0, 16, height)
+        elif layout == "bottom":
+            cr.rectangle(0, height - 16, width, 16)
+        else:
+            dock_w = 104
+            dock_x = (width - dock_w) / 2
+            cr.rectangle(dock_x, height - 20, dock_w, 16)
         cr.fill()
-        cr.set_source_rgba(1, 1, 1, .78)
+        cr.set_source_rgba(0.93, 0.93, 0.93, 0.85)
         for i in range(6):
-            x = (width * .34 + i * 18) if layout == "dock" else (12 + i * 18)
-            y = height - 15 if layout in {"dock", "bottom"} else (4 if layout == "top" else 12 + i * 18)
-            cr.rectangle(x, y, 7, 7)
+            if layout == "dock":
+                x = (width - 88) / 2 + i * 16
+                y = height - 16
+            elif layout == "left":
+                x = 4
+                y = 8 + i * 16
+            elif layout == "top":
+                x = 8 + i * 16
+                y = 4
+            else:
+                x = 8 + i * 16
+                y = height - 12
+            cr.rectangle(x, y, 8, 8)
             cr.fill()
 
 
 class StyleWindow(Adw.ApplicationWindow):
     def __init__(self, app: Adw.Application):
         super().__init__(application=app, title=tr("Blaze Görünüm Merkezi"))
+        self.add_css_class("style-center-window")
         self.kind = desktop()
         self.set_default_size(1040, 760)
         self.toast = Adw.ToastOverlay()
@@ -261,36 +383,39 @@ class StyleWindow(Adw.ApplicationWindow):
         header = Adw.HeaderBar()
         header.set_title_widget(Adw.WindowTitle(title=tr("Blaze Görünüm Merkezi"), subtitle=tr("İlk oturum görünümünü seçin")))
         restore_button = Gtk.Button(label=tr("Yedeği geri yükle"))
+        restore_button.add_css_class("style-secondary-btn")
         restore_button.connect("clicked", self.on_restore)
         header.pack_start(restore_button)
         finish = Gtk.Button(label=tr("Tamam"))
-        finish.add_css_class("suggested-action")
+        finish.add_css_class("style-primary-btn")
         finish.connect("clicked", self.on_finish)
         header.pack_end(finish)
         toolbar.add_top_bar(header)
 
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         content.set_margin_top(24); content.set_margin_bottom(24)
-        content.set_margin_start(28); content.set_margin_end(28)
+        content.set_margin_start(24); content.set_margin_end(24)
         title = Gtk.Label(xalign=0)
-        title.set_markup(f"<span size='xx-large' weight='bold'>{'GNOME' if self.kind == 'gnome' else 'KDE Plasma'} {tr('hazır görünümleri')}</span>")
+        title.add_css_class("style-page-title")
+        title.set_text(f"{'GNOME' if self.kind == 'gnome' else 'KDE Plasma'} {tr('hazır görünümleri')}")
         content.append(title)
         info = Gtk.Label(label=tr("Bir görünüm seçildiğinde önce mevcut ayarlarınız yedeklenir. İstediğiniz zaman geri dönebilirsiniz."), xalign=0, wrap=True)
-        info.add_css_class("dim-label")
+        info.add_css_class("style-page-desc")
         content.append(info)
         flow = Gtk.FlowBox(column_spacing=16, row_spacing=16, min_children_per_line=2, max_children_per_line=3, selection_mode=Gtk.SelectionMode.NONE)
         available = installed_kde_themes() if self.kind == "kde" else set()
         presets = KDE_PRESETS if self.kind == "kde" else GNOME_PRESETS
         for preset in presets:
             button = Gtk.Button()
-            button.add_css_class("card")
-            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-            box.set_margin_top(12); box.set_margin_bottom(14); box.set_margin_start(12); box.set_margin_end(12)
+            button.add_css_class("style-preset")
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            box.set_margin_top(16); box.set_margin_bottom(16); box.set_margin_start(16); box.set_margin_end(16)
             box.append(Preview(preset))
-            name = Gtk.Label(xalign=0); name.set_markup(f"<b>{GLib.markup_escape_text(preset_name(preset))}</b>")
+            name = Gtk.Label(label=preset_name(preset), xalign=0)
+            name.add_css_class("style-preset-name")
             box.append(name)
             desc = Gtk.Label(label=preset_desc(preset), xalign=0, wrap=True)
-            desc.add_css_class("dim-label"); box.append(desc)
+            desc.add_css_class("style-preset-desc"); box.append(desc)
             if self.kind == "kde" and available and preset["id"] not in available:
                 button.set_sensitive(False)
                 desc.set_label(preset_desc(preset) + " · " + tr("paket bulunamadı"))
@@ -331,6 +456,7 @@ class StyleApp(Adw.Application):
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
 
     def do_activate(self):
+        Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
         if desktop() == "unsupported":
             dialog = Adw.AlertDialog(heading=tr("Bu oturum için görünüm paketi yok"), body=tr("Blaze Görünüm Merkezi şu anda GNOME ve KDE Plasma oturumlarını destekliyor."))
             dialog.add_response("close", tr("Kapat"))
@@ -345,4 +471,5 @@ if __name__ == "__main__":
     if cli_result is not None:
         raise SystemExit(cli_result)
     Adw.init()
+    install_css()
     raise SystemExit(StyleApp().run(sys.argv))

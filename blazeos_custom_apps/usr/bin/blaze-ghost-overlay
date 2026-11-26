@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
-Blaze Continuum — Ghost Surface Overlay (BCDL: Kinetic Glass Edition)
-Renders the ephemeral Wayland Ghost Surface with 1px specular refraction,
-unblurred captured window buffer, and bottom-right Swiss telemetry pill HUD.
-Intercepts pointer/keyboard input into the BCTP Input Replay Queue.
+Blaze Continuum ghost surface overlay.
+Renders the captured window buffer with a subtle scrim and bottom-right
+telemetry badge, intercepting pointer/keyboard input into the BCTP queue.
 """
 
 import sys
@@ -17,50 +16,63 @@ import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, Gdk, GLib, Gio
 
-BCDL_CSS = """
+STATUS_LABELS = {
+    "syncing": "Eşitleniyor",
+    "stable": "Hazır",
+    "error": "Hata",
+}
+
+OVERLAY_CSS = """
 window.blz-ghost-window {
-    background-color: #0d0f12;
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+    background-color: #141415;
+    border-radius: 16px;
+    border: 1px solid rgba(237, 237, 237, 0.08);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
 .blz-scrim-layer {
-    background-color: rgba(8, 9, 11, 0.18);
+    background-color: rgba(15, 15, 16, 0.24);
 }
 
 .blz-telemetry-pill {
-    background-color: rgba(32, 37, 43, 0.88);
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    border-radius: 9999px;
-    padding: 4px 14px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    background-color: rgba(25, 25, 27, 0.94);
+    border: 1px solid rgba(237, 237, 237, 0.12);
+    border-radius: 8px;
+    padding: 4px 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
     margin: 16px;
 }
 
 .blz-status-dot {
-    font-size: 10px;
-    margin-right: 6px;
+    min-width: 8px;
+    min-height: 8px;
+    border-radius: 999px;
+    margin-right: 8px;
 }
 
 .blz-status-dot.syncing {
-    color: #e5be6b; /* Mineral Amber */
+    background-color: #d9a03f;
 }
 
 .blz-status-dot.stable {
-    color: #85d79e; /* Celadon Green */
+    background-color: #4cc38a;
+}
+
+.blz-status-dot.error {
+    background-color: #e5484d;
 }
 
 .blz-telemetry-text {
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    font-size: 11px;
-    font-weight: 500;
-    color: #e5e9f0;
+    font-size: 12px;
+    font-weight: 400;
+    font-feature-settings: "tnum";
+    color: #ededed;
 }
 
 .blz-telemetry-dim {
-    color: #9ba3af;
-    margin: 0 4px;
+    color: #85858b;
+    margin: 0 8px;
 }
 """
 
@@ -78,9 +90,9 @@ class GhostOverlayApp(Gtk.Application):
         self.window = None
 
     def do_activate(self):
-        # 1. Apply BCDL CSS
+        # 1. Apply overlay CSS
         css_provider = Gtk.CssProvider()
-        css_provider.load_from_data(BCDL_CSS.encode('utf-8'))
+        css_provider.load_from_data(OVERLAY_CSS.encode('utf-8'))
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
             css_provider,
@@ -108,18 +120,19 @@ class GhostOverlayApp(Gtk.Application):
         scrim.set_vexpand(True)
         overlay.add_overlay(scrim)
 
-        # HUD Layer: Floating Telemetry Pill in Bottom-Right
+        # HUD Layer: Floating Telemetry Badge in Bottom-Right
         pill_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         pill_box.add_css_class("blz-telemetry-pill")
         pill_box.set_halign(Gtk.Align.END)
         pill_box.set_valign(Gtk.Align.END)
 
-        dot_label = Gtk.Label(label="●")
-        dot_label.add_css_class("blz-status-dot")
-        dot_label.add_css_class(self.status.lower())
-        pill_box.append(dot_label)
+        dot_box = Gtk.Box()
+        dot_box.set_valign(Gtk.Align.CENTER)
+        dot_box.add_css_class("blz-status-dot")
+        dot_box.add_css_class(self.status.lower())
+        pill_box.append(dot_box)
 
-        status_text = Gtk.Label(label=self.status.upper())
+        status_text = Gtk.Label(label=STATUS_LABELS.get(self.status.lower(), self.status.capitalize()))
         status_text.add_css_class("blz-telemetry-text")
         pill_box.append(status_text)
 
@@ -127,7 +140,7 @@ class GhostOverlayApp(Gtk.Application):
         sep1.add_css_class("blz-telemetry-dim")
         pill_box.append(sep1)
 
-        epoch_text = Gtk.Label(label=f"EPOCH #{self.epoch:02d}")
+        epoch_text = Gtk.Label(label=f"Epoch {self.epoch:02d}")
         epoch_text.add_css_class("blz-telemetry-text")
         pill_box.append(epoch_text)
 
@@ -135,7 +148,7 @@ class GhostOverlayApp(Gtk.Application):
         sep2.add_css_class("blz-telemetry-dim")
         pill_box.append(sep2)
 
-        lat_text = Gtk.Label(label=f"{self.latency:.1f}ms")
+        lat_text = Gtk.Label(label=f"{self.latency:.1f} ms")
         lat_text.add_css_class("blz-telemetry-text")
         pill_box.append(lat_text)
 
@@ -143,7 +156,7 @@ class GhostOverlayApp(Gtk.Application):
         sep3.add_css_class("blz-telemetry-dim")
         pill_box.append(sep3)
 
-        self.queue_label = Gtk.Label(label=f"+{self.inputs_count} INP")
+        self.queue_label = Gtk.Label(label=f"+{self.inputs_count} girdi")
         self.queue_label.add_css_class("blz-telemetry-text")
         pill_box.append(self.queue_label)
 
@@ -171,11 +184,11 @@ class GhostOverlayApp(Gtk.Application):
             GLib.timeout_add(self.auto_dismiss_ms, self.dismiss_overlay)
 
         self.window.present()
-        print(f"[Ghost Surface]: BCDL Kinetic Glass Overlay ekranda! (Epoch: {self.epoch}, Gecikme: {self.latency}ms)")
+        print(f"[Ghost Surface] Overlay aktif (epoch: {self.epoch}, gecikme: {self.latency:.1f} ms)")
 
     def record_input(self, event_data):
         self.inputs_count += 1
-        self.queue_label.set_text(f"+{self.inputs_count} INP")
+        self.queue_label.set_text(f"+{self.inputs_count} girdi")
         entry = {
             "epoch": self.epoch,
             "timestamp_ms": int(time.time() * 1000),
@@ -207,7 +220,7 @@ class GhostOverlayApp(Gtk.Application):
         return True
 
     def dismiss_overlay(self):
-        print("[Ghost Surface]: Commit alındı, 120ms içinde gerçek sürece devrediliyor...")
+        print("[Ghost Surface] Commit alındı, gerçek sürece devrediliyor")
         if self.window:
             self.window.close()
         self.quit()

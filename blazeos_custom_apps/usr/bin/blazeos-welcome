@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # =============================================================================
-# BlazeOS Welcome — first-boot setup wizard (v2)
-# TR/EN/DE • YAD tabanlı • ayrıcalıklı işler /usr/libexec/blazeos-welcome-helper
-# üzerinden TEK pkexec ile • donanım-farkında masaüstü önerisi
+# BlazeOS İlk Kurulum — first-boot setup wizard (v2)
+# TR/EN/DE/RU | YAD tabanlı | ayrıcalıklı işler /usr/libexec/blazeos-welcome-helper
+# üzerinden TEK pkexec ile | donanım-farkında masaüstü önerisi
 # =============================================================================
 
 set -u
-SCRIPT_NAME="BlazeOS Welcome"
+SCRIPT_NAME="BlazeOS"
 WIZARD_VERSION="2.0.0"
 CONFIG_DIR="$HOME/.config/blazeos"
 MARKER_FILE="$CONFIG_DIR/.welcome-completed"
@@ -69,13 +69,13 @@ esac
 # Dil seçim ekranı — kullanıcı sistem dilini geçersiz kılabilir
 LANG_PICK=$(yad \
     --width=360 --height=220 --center --borders=20 \
-    --title="BlazeOS Welcome" \
-    --text="<b>Select Language / Dil Seç / Выберите язык</b>" \
+    --title="BlazeOS" \
+    --text="<b>Dil seçin / Select language / Выберите язык</b>" \
     --list --separator="" --no-headers \
     --column="Language" \
-    "🇹🇷  Türkçe" \
-    "🇬🇧  English" \
-    "🇷🇺  Русский" \
+    "Türkçe" \
+    "English" \
+    "Русский" \
     --button="OK!gtk-ok:0" 2>/dev/null) && true
 case "$LANG_PICK" in
     *Türkçe*)  LANGUAGE=tr ;;
@@ -87,116 +87,116 @@ esac
 MEM_KB=$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null || echo 0)
 MEM_GB=$(( (MEM_KB + 524288) / 1048576 ))
 [ "$MEM_GB" -lt 1 ] && MEM_GB=1
-# Hafif öneri eşiği: 4 GB ve altı → XFCE/Cinnamon öner
+# Hafif öneri eşiği: 4 GB ve altı için XFCE veya Cinnamon önerilir
 LOW_RAM=0
 [ "$MEM_GB" -le 4 ] && LOW_RAM=1
 
 # ---- i18n -------------------------------------------------------------------
 t() {
     case "$LANGUAGE:$1" in
-        tr:welcome_title)    echo "BlazeOS Hoş Geldin" ;;
-        tr:welcome_text)     echo "BlazeOS Galaxy SolarEvolution'a hoş geldin!\n\nBu sihirbaz sistemi senin için hazırlayacak — sadece birkaç dakika sürecek." ;;
-        tr:btn_continue)     echo "Devam Et" ;;
+        tr:welcome_title)    echo "BlazeOS ilk kurulum" ;;
+        tr:welcome_text)     echo "Bu araç Blaze SolarEvolution kurulumunu tamamlamak için güncelleme, masaüstü ortamı ve Waydroid seçeneklerini sunar." ;;
+        tr:btn_continue)     echo "Devam et" ;;
         tr:btn_ok)           echo "Tamam" ;;
         tr:btn_skip)         echo "Atla" ;;
-        tr:btn_back)         echo "← Geri" ;;
-        tr:step_update)          echo "Sistem Güncellemesi" ;;
-        tr:step_update_text)     echo "Hangi güncelleme türünü yapmak istersin?" ;;
-        tr:upd_all)              echo "Tam Güncelleme" ;;
-        tr:upd_all_info)         echo "Tüm sistem paketleri, çekirdek, donanım sürücüleri ve güvenlik yamaları güncellenir.\n\nSüre: 10-30 dk\nÖnerilir: Her yeni kurulumdan sonra" ;;
-        tr:upd_drivers)          echo "Yalnızca Sürücüler" ;;
-        tr:upd_drivers_info)     echo "Kernel, firmware, Mesa/Vulkan grafik sürücüleri ve donanım modülleri güncellenir.\n\nSüre: 5-15 dk\nÖnerilir: Yeni donanım veya ekran/ses sorunları varsa" ;;
-        tr:upd_security)         echo "Yalnızca Güvenlik" ;;
-        tr:upd_security_info)    echo "Yalnızca CVE güvenlik yamaları uygulanır. Sürümler değişmez.\n\nSüre: 1-10 dk\nÖnerilir: Hızlı ve güvenli yama" ;;
-        tr:upd_packages)         echo "Yalnızca Bileşenler" ;;
-        tr:upd_packages_info)    echo "Uygulamalar ve kütüphaneler güncellenir. Çekirdek/sürücüler hariç.\n\nSüre: 5-20 dk\nÖnerilir: Çekirdek değiştirmek istemiyorsan" ;;
-        tr:upd_info_btn)         echo "ℹ" ;;
-        tr:step_waydroid)    echo "Waydroid Kurulumu" ;;
-        tr:step_waydroid_text) echo "Android uygulamaları çalıştırmak için Waydroid'i şimdi kuralım mı?\n\nÖnce paket kurulacak (~30 MB), ardından Android imajları indirilecek (~700 MB-1.5 GB)." ;;
-        tr:step_de)          echo "Masaüstü Ortamı" ;;
-        tr:step_de_intro)    echo "İstersen sistemine ek masaüstü ortamları ekleyebilirsin." ;;
-        tr:ram_low)          echo "Algılanan RAM: ${MEM_GB} GB — düşük. <b>XFCE</b> veya <b>Cinnamon</b> öneririz." ;;
-        tr:ram_ok)           echo "Algılanan RAM: ${MEM_GB} GB — Tüm masaüstü ortamları rahatça çalışır." ;;
-        tr:step_done)        echo "Kurulum Tamamlandı" ;;
-        tr:step_done_text)   echo "BlazeOS Galaxy SolarEvolution kullanıma hazır!\n\nKeyfini çıkar — destek: blazeos.com.tr" ;;
-        tr:msg_running)      echo "Çalışıyor, lütfen bekle..." ;;
+        tr:btn_back)         echo "Geri" ;;
+        tr:step_update)          echo "Sistem güncellemesi" ;;
+        tr:step_update_text)     echo "Hangi güncelleme türünü yapmak istersiniz?" ;;
+        tr:upd_all)              echo "Tam güncelleme" ;;
+        tr:upd_all_info)         echo "Tüm sistem paketleri, çekirdek, donanım sürücüleri ve güvenlik yamaları güncellenir.\n\nSüre: 10-30 dk\nÖnerilen: her yeni kurulumdan sonra" ;;
+        tr:upd_drivers)          echo "Yalnızca sürücüler" ;;
+        tr:upd_drivers_info)     echo "Çekirdek, firmware, Mesa/Vulkan grafik sürücüleri ve donanım modülleri güncellenir.\n\nSüre: 5-15 dk\nÖnerilen: yeni donanım veya ekran/ses sorunları varsa" ;;
+        tr:upd_security)         echo "Yalnızca güvenlik" ;;
+        tr:upd_security_info)    echo "Yalnızca CVE güvenlik yamaları uygulanır. Paket sürümleri değişmez.\n\nSüre: 1-10 dk\nÖnerilen: hızlı güvenlik yaması" ;;
+        tr:upd_packages)         echo "Yalnızca bileşenler" ;;
+        tr:upd_packages_info)    echo "Uygulamalar ve kütüphaneler güncellenir. Çekirdek ve sürücüler hariç tutulur.\n\nSüre: 5-20 dk\nÖnerilen: çekirdek değiştirmek istemiyorsanız" ;;
+        tr:upd_info_btn)         echo "Bilgi" ;;
+        tr:step_waydroid)    echo "Waydroid kurulumu" ;;
+        tr:step_waydroid_text) echo "Android uygulamaları çalıştırmak için Waydroid kurulsun mu?\n\nÖnce paket kurulur (~30 MB), ardından Android imajları indirilir (~700 MB-1.5 GB)." ;;
+        tr:step_de)          echo "Masaüstü ortamı" ;;
+        tr:step_de_intro)    echo "İsterseniz sisteminize ek masaüstü ortamları ekleyebilirsiniz." ;;
+        tr:ram_low)          echo "Algılanan RAM: ${MEM_GB} GB (düşük). <b>XFCE</b> veya <b>Cinnamon</b> önerilir." ;;
+        tr:ram_ok)           echo "Algılanan RAM: ${MEM_GB} GB. Tüm masaüstü ortamları rahatça çalışır." ;;
+        tr:step_done)        echo "Kurulum tamamlandı" ;;
+        tr:step_done_text)   echo "Blaze SolarEvolution kullanıma hazır.\n\nDestek: blazeos.com.tr" ;;
+        tr:msg_running)      echo "Çalışıyor, lütfen bekleyin..." ;;
         tr:col_pick)         echo "Seç" ;;
         tr:col_de)           echo "Masaüstü" ;;
-        tr:de_hint)          echo "Bir masaüstü seç ve Devam Et'e bas. Eklemek istemiyorsan Atla." ;;
-        tr:de_rmgnome_t)     echo "GNOME Kaldır" ;;
-        tr:de_rmgnome)       echo "Yeni masaüstü kuruldu. GNOME kaldırılsın mı?\n\nGiriş yöneticisi otomatik olarak ayarlanır. GNOME'u kullanmıyorsan yer açmak için kaldırabilirsin." ;;
-        tr:de_done_t)        echo "Masaüstü Hazır" ;;
-        tr:de_switch)        echo "Yeni masaüstüne geçmek için:\n\n1) Oturumu kapat.\n2) Parola giriş ekranının SAĞ ALTINDAKİ dişli (⚙) simgesine tıkla.\n3) Listeden yeni masaüstünü seç ve giriş yap." ;;
+        tr:de_hint)          echo "Bir masaüstü seçip Devam et düğmesine basın. Eklemek istemiyorsanız Atla seçin." ;;
+        tr:de_rmgnome_t)     echo "GNOME kaldır" ;;
+        tr:de_rmgnome)       echo "Yeni masaüstü kuruldu. GNOME kaldırılsın mı?\n\nGiriş yöneticisi otomatik olarak ayarlanır. GNOME kullanmıyorsanız yer açmak için kaldırabilirsiniz." ;;
+        tr:de_done_t)        echo "Masaüstü hazır" ;;
+        tr:de_switch)        echo "Yeni masaüstüne geçmek için:\n\n1) Oturumu kapatın.\n2) Parola giriş ekranının sağ altındaki oturum simgesine tıklayın.\n3) Listeden yeni masaüstünü seçip giriş yapın." ;;
         tr:step_dock)        echo "Dock" ;;
-        tr:step_dock_intro)  echo "İstersen Dash to Dock'u etkinleştirebilirsin — ISO'ya gömülü, internet gerekmez." ;;
+        tr:step_dock_intro)  echo "Dash to Dock uzantısını etkinleştirebilirsiniz. Paket imaja dahildir, internet gerekmez." ;;
         tr:dock_none)        echo "Hiçbiri (varsayılan GNOME)" ;;
-        tr:dock_dtd)         echo "Dash to Dock — klasik kenar dock'u" ;;
-        tr:dock_hint)        echo "Bir seçenek seç ve Devam Et'e bas. Vazgeçmek istersen Atla." ;;
+        tr:dock_dtd)         echo "Dash to Dock (klasik kenar dock)" ;;
+        tr:dock_hint)        echo "Bir seçenek belirleyip Devam et düğmesine basın. Vazgeçmek için Atla seçin." ;;
 
-        ru:welcome_title)    echo "Добро пожаловать в BlazeOS" ;;
-        ru:welcome_text)     echo "Добро пожаловать в BlazeOS Galaxy SolarEvolution!\n\nЭтот мастер настроит вашу систему — займёт всего несколько минут." ;;
+        ru:welcome_title)    echo "Первичная настройка BlazeOS" ;;
+        ru:welcome_text)     echo "Этот помощник поможет обновить Blaze SolarEvolution, добавить рабочие среды и установить Waydroid." ;;
         ru:btn_continue)     echo "Продолжить" ;;
         ru:btn_ok)           echo "ОК" ;;
         ru:btn_skip)         echo "Пропустить" ;;
-        ru:btn_back)         echo "← Назад" ;;
+        ru:btn_back)         echo "Назад" ;;
         ru:step_update)          echo "Обновление системы" ;;
         ru:step_update_text)     echo "Какой тип обновления вы хотите выполнить?" ;;
         ru:upd_all)              echo "Полное обновление" ;;
-        ru:upd_all_info)         echo "Обновляются все пакеты: ядро, драйверы, патчи безопасности и приложения.\n\nВремя: 10-30 мин\nРекомендуется: После каждой новой установки" ;;
+        ru:upd_all_info)         echo "Обновляются все пакеты: ядро, драйверы, патчи безопасности и приложения.\n\nВремя: 10-30 мин\nРекомендуется: после новой установки" ;;
         ru:upd_drivers)          echo "Только драйверы" ;;
         ru:upd_drivers_info)     echo "Ядро, прошивки, Mesa/Vulkan и аппаратные модули. Приложения не затрагиваются.\n\nВремя: 5-15 мин" ;;
         ru:upd_security)         echo "Только безопасность" ;;
         ru:upd_security_info)    echo "Только критические CVE-патчи. Версии пакетов не меняются.\n\nВремя: 1-10 мин" ;;
         ru:upd_packages)         echo "Только компоненты" ;;
         ru:upd_packages_info)    echo "Приложения и библиотеки. Ядро и драйверы исключены.\n\nВремя: 5-20 мин" ;;
-        ru:upd_info_btn)         echo "ℹ" ;;
+        ru:upd_info_btn)         echo "Инфо" ;;
         ru:step_waydroid)    echo "Установка Waydroid" ;;
         ru:step_waydroid_text) echo "Установить Waydroid для запуска Android-приложений?\n\nСначала установится пакет (~30 МБ), затем загрузятся образы Android (~700 МБ-1.5 ГБ)." ;;
         ru:step_de)          echo "Рабочая среда" ;;
         ru:step_de_intro)    echo "Вы можете добавить дополнительные среды рабочего стола." ;;
-        ru:ram_low)          echo "Обнаружено RAM: ${MEM_GB} ГБ — мало. Рекомендуем <b>XFCE</b> или <b>Cinnamon</b>." ;;
-        ru:ram_ok)           echo "Обнаружено RAM: ${MEM_GB} ГБ — Все среды работают комфортно." ;;
-        ru:step_done)        echo "Установка завершена" ;;
-        ru:step_done_text)   echo "BlazeOS Galaxy SolarEvolution готов к работе!\n\nПриятного использования — поддержка: blazeos.com.tr" ;;
+        ru:ram_low)          echo "Обнаружено RAM: ${MEM_GB} ГБ (низкий объём). Рекомендуем <b>XFCE</b> или <b>Cinnamon</b>." ;;
+        ru:ram_ok)           echo "Обнаружено RAM: ${MEM_GB} ГБ. Все среды работают комфортно." ;;
+        ru:step_done)        echo "Настройка завершена" ;;
+        ru:step_done_text)   echo "Blaze SolarEvolution готов к работе.\n\nПоддержка: blazeos.com.tr" ;;
         ru:msg_running)      echo "Выполняется, пожалуйста подождите..." ;;
         ru:col_pick)         echo "Выбор" ;;
         ru:col_de)           echo "Среда" ;;
-        ru:de_hint)          echo "Выберите среду и нажмите Продолжить. Чтобы пропустить — Пропустить." ;;
+        ru:de_hint)          echo "Выберите среду и нажмите Продолжить. Чтобы пропустить, нажмите Пропустить." ;;
         ru:de_rmgnome_t)     echo "Удалить GNOME" ;;
         ru:de_rmgnome)       echo "Новая среда установлена. Удалить GNOME?\n\nМенеджер входа будет настроен автоматически." ;;
         ru:de_done_t)        echo "Среда готова" ;;
-        ru:de_switch)        echo "Для переключения на новую среду:\n\n1) Выйдите из системы.\n2) Нажмите на шестерёнку (⚙) В ПРАВОМ НИЖНЕМ УГЛУ экрана входа.\n3) Выберите среду и войдите в систему." ;;
+        ru:de_switch)        echo "Для переключения на новую среду:\n\n1) Выйдите из системы.\n2) Нажмите на значок шестерёнки в правом нижнем углу экрана входа.\n3) Выберите среду и войдите в систему." ;;
         ru:step_dock)        echo "Dock-панель" ;;
-        ru:step_dock_intro)  echo "Вы можете включить Dash to Dock — уже встроен в ISO, интернет не нужен." ;;
+        ru:step_dock_intro)  echo "Вы можете включить Dash to Dock. Расширение уже встроено в ISO, интернет не нужен." ;;
         ru:dock_none)        echo "Нет (стандартный GNOME)" ;;
-        ru:dock_dtd)         echo "Dash to Dock — классический боковой dock" ;;
-        ru:dock_hint)        echo "Выберите вариант и нажмите Продолжить. Чтобы пропустить — Пропустить." ;;
+        ru:dock_dtd)         echo "Dash to Dock (классический боковой dock)" ;;
+        ru:dock_hint)        echo "Выберите вариант и нажмите Продолжить. Чтобы пропустить, нажмите Пропустить." ;;
 
-        de:welcome_title)    echo "Willkommen bei BlazeOS" ;;
-        de:welcome_text)     echo "Willkommen bei BlazeOS Galaxy SolarEvolution!\n\nDieser Assistent richtet dein System ein — nur ein paar Minuten." ;;
+        de:welcome_title)    echo "BlazeOS Ersteinrichtung" ;;
+        de:welcome_text)     echo "Dieser Assistent führt durch Systemaktualisierungen, optionale Desktop-Umgebungen und die Waydroid-Einrichtung für Blaze SolarEvolution." ;;
         de:btn_continue)     echo "Weiter" ;;
         de:btn_ok)           echo "OK" ;;
         de:btn_skip)         echo "Überspringen" ;;
-        de:btn_back)         echo "← Zurück" ;;
+        de:btn_back)         echo "Zurück" ;;
         de:step_update)          echo "Systemaktualisierung" ;;
         de:step_update_text)     echo "Welche Art von Update möchtest du durchführen?" ;;
         de:upd_all)              echo "Vollständiges Update" ;;
-        de:upd_all_info)         echo "Alle Pakete: Kernel, Treiber, Sicherheit und Apps.\n\nDauer: 10-30 Min.\nEmpfohlen: Nach jeder Neuinstallation" ;;
+        de:upd_all_info)         echo "Alle Pakete: Kernel, Treiber, Sicherheit und Apps.\n\nDauer: 10-30 Min.\nEmpfohlen: nach jeder Neuinstallation" ;;
         de:upd_drivers)          echo "Nur Treiber" ;;
         de:upd_drivers_info)     echo "Kernel, Firmware, Mesa/Vulkan und Hardware-Module.\n\nDauer: 5-15 Min." ;;
         de:upd_security)         echo "Nur Sicherheit" ;;
         de:upd_security_info)    echo "Nur kritische CVE-Patches. Keine Versionsänderungen.\n\nDauer: 1-10 Min." ;;
         de:upd_packages)         echo "Nur Komponenten" ;;
         de:upd_packages_info)    echo "Apps und Bibliotheken. Kernel und Treiber ausgeschlossen.\n\nDauer: 5-20 Min." ;;
-        de:upd_info_btn)         echo "ℹ" ;;
+        de:upd_info_btn)         echo "Info" ;;
         de:step_waydroid)    echo "Waydroid einrichten" ;;
         de:step_waydroid_text) echo "Waydroid für Android-Apps einrichten?\n\nZuerst Paket (~30 MB), dann Android-Abbilder (~700 MB-1,5 GB)." ;;
         de:step_de)          echo "Desktop-Umgebung" ;;
         de:step_de_intro)    echo "Optional zusätzliche Desktop-Umgebungen hinzufügen." ;;
-        de:ram_low)          echo "Erkannter RAM: ${MEM_GB} GB — gering. Empfehlen <b>XFCE</b> oder <b>Cinnamon</b>." ;;
-        de:ram_ok)           echo "Erkannter RAM: ${MEM_GB} GB — Alle Desktops laufen problemlos." ;;
+        de:ram_low)          echo "Erkannter RAM: ${MEM_GB} GB (gering). Empfohlen: <b>XFCE</b> oder <b>Cinnamon</b>." ;;
+        de:ram_ok)           echo "Erkannter RAM: ${MEM_GB} GB. Alle Desktops laufen problemlos." ;;
         de:step_done)        echo "Einrichtung abgeschlossen" ;;
-        de:step_done_text)   echo "BlazeOS Galaxy SolarEvolution ist einsatzbereit!\n\nViel Spaß — Support: blazeos.com.tr" ;;
+        de:step_done_text)   echo "Blaze SolarEvolution ist bereit.\n\nSupport: blazeos.com.tr" ;;
         de:msg_running)      echo "Bitte warten..." ;;
         de:col_pick)         echo "Wahl" ;;
         de:col_de)           echo "Desktop" ;;
@@ -204,50 +204,50 @@ t() {
         de:de_rmgnome_t)     echo "GNOME entfernen" ;;
         de:de_rmgnome)       echo "Neuer Desktop installiert. GNOME entfernen?\n\nDer Anmeldemanager wird automatisch passend eingestellt." ;;
         de:de_done_t)        echo "Desktop bereit" ;;
-        de:de_switch)        echo "Zum neuen Desktop wechseln:\n\n1) Abmelden.\n2) Auf das Zahnrad (⚙) UNTEN RECHTS im Anmeldebildschirm klicken.\n3) Neuen Desktop wählen und anmelden." ;;
+        de:de_switch)        echo "Zum neuen Desktop wechseln:\n\n1) Abmelden.\n2) Unten rechts im Anmeldebildschirm auf das Zahnradsymbol klicken.\n3) Neuen Desktop wählen und anmelden." ;;
         de:step_dock)        echo "Dock" ;;
-        de:step_dock_intro)  echo "Optional Dash to Dock aktivieren — bereits im ISO enthalten." ;;
+        de:step_dock_intro)  echo "Optional Dash to Dock aktivieren. Das Paket ist bereits im ISO enthalten." ;;
         de:dock_none)        echo "Keine (Standard-GNOME)" ;;
-        de:dock_dtd)         echo "Dash to Dock — klassisches seitliches Dock" ;;
+        de:dock_dtd)         echo "Dash to Dock (klassisches seitliches Dock)" ;;
         de:dock_hint)        echo "Wähle eine Option und klicke Weiter. Zum Überspringen: Überspringen." ;;
 
-        *:welcome_title)     echo "Welcome to BlazeOS" ;;
-        *:welcome_text)      echo "Welcome to BlazeOS Galaxy SolarEvolution!\n\nThis wizard will set up your system — just a few minutes." ;;
+        *:welcome_title)     echo "BlazeOS first setup" ;;
+        *:welcome_text)      echo "This assistant covers system updates, optional desktop environments, and Waydroid setup for Blaze SolarEvolution." ;;
         *:btn_continue)      echo "Continue" ;;
         *:btn_ok)            echo "OK" ;;
         *:btn_skip)          echo "Skip" ;;
-        *:btn_back)          echo "← Back" ;;
-        *:step_update)           echo "System Update" ;;
+        *:btn_back)          echo "Back" ;;
+        *:step_update)           echo "System update" ;;
         *:step_update_text)      echo "Which type of update would you like to perform?" ;;
-        *:upd_all)               echo "Full Update" ;;
-        *:upd_all_info)          echo "All packages: kernel, drivers, security patches and apps.\n\nTime: 10-30 min\nRecommended: After every fresh install" ;;
-        *:upd_drivers)           echo "Drivers Only" ;;
+        *:upd_all)               echo "Full update" ;;
+        *:upd_all_info)          echo "All packages: kernel, drivers, security patches and apps.\n\nTime: 10-30 min\nRecommended: after a fresh install" ;;
+        *:upd_drivers)           echo "Drivers only" ;;
         *:upd_drivers_info)      echo "Kernel, firmware, Mesa/Vulkan and hardware modules.\n\nTime: 5-15 min" ;;
-        *:upd_security)          echo "Security Only" ;;
+        *:upd_security)          echo "Security only" ;;
         *:upd_security_info)     echo "Critical CVE patches only. No version changes.\n\nTime: 1-10 min" ;;
-        *:upd_packages)          echo "Components Only" ;;
+        *:upd_packages)          echo "Components only" ;;
         *:upd_packages_info)     echo "Apps and libraries. Kernel and drivers excluded.\n\nTime: 5-20 min" ;;
-        *:upd_info_btn)          echo "ℹ" ;;
-        *:step_waydroid)     echo "Waydroid Setup" ;;
+        *:upd_info_btn)          echo "Info" ;;
+        *:step_waydroid)     echo "Waydroid setup" ;;
         *:step_waydroid_text) echo "Set up Waydroid to run Android apps?\n\nFirst the package (~30 MB) will be installed, then Android images (~700 MB-1.5 GB) will be downloaded." ;;
-        *:step_de)           echo "Desktop Environment" ;;
+        *:step_de)           echo "Desktop environment" ;;
         *:step_de_intro)     echo "You can optionally add additional desktop environments." ;;
-        *:ram_low)           echo "Detected RAM: ${MEM_GB} GB — low. We recommend <b>XFCE</b> or <b>Cinnamon</b>." ;;
-        *:ram_ok)            echo "Detected RAM: ${MEM_GB} GB — All desktop environments run comfortably." ;;
-        *:step_done)         echo "Setup Complete" ;;
-        *:step_done_text)    echo "BlazeOS Galaxy SolarEvolution is ready!\n\nEnjoy — support: blazeos.com.tr" ;;
+        *:ram_low)           echo "Detected RAM: ${MEM_GB} GB (low). Recommended: <b>XFCE</b> or <b>Cinnamon</b>." ;;
+        *:ram_ok)            echo "Detected RAM: ${MEM_GB} GB. All desktop environments run comfortably." ;;
+        *:step_done)         echo "Setup complete" ;;
+        *:step_done_text)    echo "Blaze SolarEvolution is ready.\n\nSupport: blazeos.com.tr" ;;
         *:msg_running)       echo "Running, please wait..." ;;
         *:col_pick)          echo "Pick" ;;
         *:col_de)            echo "Desktop" ;;
         *:de_hint)           echo "Select a desktop and click Continue. To add none, click Skip." ;;
         *:de_rmgnome_t)      echo "Remove GNOME" ;;
         *:de_rmgnome)        echo "New desktop installed. Remove GNOME?\n\nThe login manager will be switched automatically." ;;
-        *:de_done_t)         echo "Desktop Ready" ;;
-        *:de_switch)         echo "To switch to your new desktop:\n\n1) Log out.\n2) Click the gear (⚙) at the BOTTOM-RIGHT of the password screen.\n3) Pick the new desktop and log in." ;;
+        *:de_done_t)         echo "Desktop ready" ;;
+        *:de_switch)         echo "To switch to your new desktop:\n\n1) Log out.\n2) Click the gear icon at the bottom-right of the login screen.\n3) Pick the new desktop and log in." ;;
         *:step_dock)         echo "Dock" ;;
-        *:step_dock_intro)   echo "Optionally enable Dash to Dock — already embedded in the ISO." ;;
+        *:step_dock_intro)   echo "Optionally enable Dash to Dock. Already included in the ISO." ;;
         *:dock_none)         echo "None (default GNOME)" ;;
-        *:dock_dtd)          echo "Dash to Dock — classic side dock" ;;
+        *:dock_dtd)          echo "Dash to Dock (classic side dock)" ;;
         *:dock_hint)         echo "Select an option and click Continue. To skip, click Skip." ;;
     esac
 }
@@ -275,21 +275,22 @@ yad_info() {
     yad "${YAD_BASE[@]}" --text="<b>$1</b>\n\n$2" --button="OK:0"
 }
 
-# ---- Mor progress bar teması -------------------------------------------------
+# ---- Progress bar teması (Blaze ember) --------------------------------------
 # Context Check: progress bar görünümü
-# GtkProgressBar'ın .trough > .progress düğümünü mor'a boyuyoruz. Hem
-# determinate (yüzdeli) hem activity/pulse modunda aynı renk kullanılır.
-# (blazeos-control da aynı dosyayı üretir/kullanır — içerik özdeş.)
+# GtkProgressBar'ın .trough > .progress düğümünü Blaze ember (#c83b22) ile
+# renklendiriyoruz. Hem determinate hem activity/pulse modunda aynı renk kullanılır.
 PROGRESS_CSS_FILE="$CONFIG_DIR/.progress.css"
 cat > "$PROGRESS_CSS_FILE" <<'CSS_EOF'
 progressbar trough progress, progressbar trough progress.pulse {
-    background-color: #9b30ff;
+    background-color: #c83b22;
     background-image: none;
-    border-radius: 6px;
+    border-radius: 4px;
 }
 progressbar trough {
-    border-radius: 6px;
-    min-height: 14px;
+    background-color: #232325;
+    border: 1px solid rgba(237, 237, 237, 0.08);
+    border-radius: 4px;
+    min-height: 8px;
 }
 CSS_EOF
 
@@ -354,7 +355,7 @@ yad_info "$(t welcome_title)" "$(t welcome_text)" || exit 0
 
 # ---- Step 1: Sistem Güncellemesi (dikey liste — 1366x768 uyumlu) -----------
 # Context Check: güncelleme adımı — yatay buton sırası 1366x768'de taşıyordu.
-# Çözüm: 2 sütunlu liste (seçenek adı + araç ipucu).  ℹ: seçenekte hover.
+# Çözüm: 2 sütunlu liste (seçenek adı + araç ipucu).
 UPD_RC=0
 while true; do
     UPD_SEL=$(yad "${YAD_BASE[@]}" \
@@ -362,7 +363,7 @@ while true; do
         --text="<b>$(t step_update)</b>\n\n$(t step_update_text)" \
         --list --separator="|" --no-headers --mid-search \
         --column="$(t col_pick)" \
-        --column="ℹ":TIP \
+        --column="$(t upd_info_btn)":TIP \
         "$(t upd_all)"      "$(t upd_all_info)" \
         "$(t upd_drivers)"  "$(t upd_drivers_info)" \
         "$(t upd_packages)" "$(t upd_packages_info)" \
@@ -392,10 +393,10 @@ else
     RAM_BANNER="$(t ram_ok)"
 fi
 
-# Düz liste (checklist DEĞİL): kullanıcı satıra tıklar, Devam Et'e basar.
-# --separator="" → çıktı sadece seçilen satırın metni (örn "XFCE").
+# Düz liste (checklist DEĞİL): kullanıcı satıra tıklar, Devam et'e basar.
+# --separator="" çıktısı yalnızca seçilen satırın metnini verir (örn "XFCE").
 DE_SEL=$(yad "${YAD_BASE[@]}" \
-    --text="<b>$(t step_de)</b>\n\n$(t step_de_intro)\n\n$RAM_BANNER\n\n<i>$(t de_hint)</i>" \
+    --text="<b>$(t step_de)</b>\n\n$(t step_de_intro)\n\n$RAM_BANNER\n\n$(t de_hint)" \
     --list --separator="" --no-headers \
     --column="$(t col_de)" \
     "XFCE" \
