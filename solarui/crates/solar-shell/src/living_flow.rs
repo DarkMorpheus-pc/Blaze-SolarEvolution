@@ -603,9 +603,12 @@ pub const LIVING_FLOW_CORE_CSS: &str = r#"
     }
 
     entry:focus,
+    entry:focus-within,
     passwordentry:focus-within,
     spinbutton:focus-within {
         border-color: rgba(224, 87, 60, 0.65);
+        outline: 2px solid rgba(224, 87, 60, 0.65);
+        outline-offset: 1px;
         background-color: #232325;
         box-shadow: none;
     }

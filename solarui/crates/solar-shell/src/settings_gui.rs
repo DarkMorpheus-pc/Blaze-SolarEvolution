@@ -440,7 +440,7 @@ fn build_settings_ui(main_loop: glib::MainLoop, initial_tab: Option<&str>) {
     let sidebar_scroll = ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Never)
         .vscrollbar_policy(gtk4::PolicyType::Automatic)
-        .min_content_width(240)
+        .min_content_width(256)
         .vexpand(true)
         .build();
     sidebar_scroll.add_css_class("lf-sidebar");
@@ -457,8 +457,8 @@ fn build_settings_ui(main_loop: glib::MainLoop, initial_tab: Option<&str>) {
     let stack = Stack::new();
     stack.set_hhomogeneous(false);
     stack.set_vhomogeneous(false);
-    stack.set_transition_type(StackTransitionType::Crossfade);
-    stack.set_transition_duration(150);
+    stack.set_transition_type(StackTransitionType::None);
+    stack.set_transition_duration(0);
     stack.add_css_class("settings-stage");
 
     // ── BUILD ALL PAGES ───────────────────────────────────────────────────────
@@ -702,6 +702,7 @@ fn build_settings_ui(main_loop: glib::MainLoop, initial_tab: Option<&str>) {
         let t_str = title_str.clone();
         let btns_ref = all_btns.clone();
         let stack_ref = stack.clone();
+        let stage_ref = stage_scroll.clone();
         let cloud_nav = fluid_cloud.clone();
         btn.connect_clicked(move |_| {
             for (other_id, _, other_btn) in btns_ref.iter() {
@@ -712,6 +713,7 @@ fn build_settings_ui(main_loop: glib::MainLoop, initial_tab: Option<&str>) {
                 }
             }
             stack_ref.set_visible_child_name(&pid);
+            stage_ref.vadjustment().set_value(0.0);
             cloud_nav.pulse(&t_str, FluidCloudTone::Info, false);
         });
     }

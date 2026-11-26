@@ -202,9 +202,12 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
                         color 150ms cubic-bezier(0.22, 1, 0.36, 1);
         }
 
-        .omnibar-entry:focus {
+        .omnibar-entry:focus,
+        .omnibar-entry:focus-within {
             background-color: #232325;
             border-color: rgba(224, 87, 60, 0.65);
+            outline: 2px solid rgba(224, 87, 60, 0.65);
+            outline-offset: 1px;
             box-shadow: none;
         }
 

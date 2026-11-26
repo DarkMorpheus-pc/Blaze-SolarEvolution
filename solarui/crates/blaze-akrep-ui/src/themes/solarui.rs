@@ -530,6 +530,8 @@ entry.akrep-entry {
 }
 entry.akrep-entry:focus-within {
     border-color: rgba(224, 87, 60, 0.65);
+    outline: 2px solid rgba(224, 87, 60, 0.65);
+    outline-offset: 1px;
 }
 checkbutton {
     color: #a1a1a6;
