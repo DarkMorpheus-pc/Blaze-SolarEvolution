@@ -38,6 +38,7 @@ pub struct CompositeMutationBackend {
     scanner: Arc<ScannerAdapter>,
     quarantine: Arc<QuarantineAdapter>,
     profiles: Arc<ProfileAdapter>,
+    overrides: Arc<OverrideAdapter>,
 }
 
 impl CompositeMutationBackend {
@@ -55,11 +56,15 @@ impl CompositeMutationBackend {
         flatpak: Arc<SystemFlatpakAdapter>,
     ) -> Self {
         let state_dir = PathBuf::from(DEFAULT_AKREP_STATE_DIR);
-        let profiles = Arc::new(ProfileAdapter::new_system(
-            state_dir.clone(),
-            Arc::clone(&selinux),
-            Arc::clone(&firewall),
-        ));
+        let overrides = Arc::new(OverrideAdapter::new_system(state_dir.clone()));
+        let profiles = Arc::new(
+            ProfileAdapter::new_system(
+                state_dir.clone(),
+                Arc::clone(&selinux),
+                Arc::clone(&firewall),
+            )
+            .with_overrides(Arc::clone(&overrides)),
+        );
         Self {
             selinux,
             firewall,
@@ -68,6 +73,7 @@ impl CompositeMutationBackend {
             scanner: Arc::new(ScannerAdapter::new_system(state_dir.clone())),
             quarantine: Arc::new(QuarantineAdapter::new_lazy(state_dir)),
             profiles,
+            overrides,
         }
     }
 
@@ -81,6 +87,32 @@ impl CompositeMutationBackend {
         quarantine: Arc<QuarantineAdapter>,
         profiles: Arc<ProfileAdapter>,
     ) -> Self {
+        let overrides = Arc::new(OverrideAdapter::new_system(
+            profiles.state_dir().to_path_buf(),
+        ));
+        Self::new_with_overrides(
+            selinux,
+            firewall,
+            flatpak,
+            device_security,
+            scanner,
+            quarantine,
+            profiles,
+            overrides,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_overrides(
+        selinux: Arc<SelinuxAdapter>,
+        firewall: Arc<FirewallAdapter>,
+        flatpak: Arc<SystemFlatpakAdapter>,
+        device_security: Arc<DeviceSecurityAdapter>,
+        scanner: Arc<ScannerAdapter>,
+        quarantine: Arc<QuarantineAdapter>,
+        profiles: Arc<ProfileAdapter>,
+        overrides: Arc<OverrideAdapter>,
+    ) -> Self {
         Self {
             selinux,
             firewall,
@@ -89,7 +121,13 @@ impl CompositeMutationBackend {
             scanner,
             quarantine,
             profiles,
+            overrides,
         }
+    }
+
+    pub fn with_overrides(mut self, overrides: Arc<OverrideAdapter>) -> Self {
+        self.overrides = overrides;
+        self
     }
 
     pub fn new_system(conn: Connection) -> Self {
@@ -103,12 +141,12 @@ impl CompositeMutationBackend {
         let device_security = Arc::new(DeviceSecurityAdapter::new_linux());
         let scanner = Arc::new(ScannerAdapter::new_system(state_dir.clone()));
         let quarantine = Arc::new(QuarantineAdapter::new_lazy(state_dir.clone()));
-        let profiles = Arc::new(ProfileAdapter::new_system(
-            state_dir,
-            Arc::clone(&selinux),
-            Arc::clone(&firewall),
-        ));
-        Self::new_full(
+        let overrides = Arc::new(OverrideAdapter::new_system(state_dir.clone()));
+        let profiles = Arc::new(
+            ProfileAdapter::new_system(state_dir, Arc::clone(&selinux), Arc::clone(&firewall))
+                .with_overrides(Arc::clone(&overrides)),
+        );
+        Self::new_with_overrides(
             selinux,
             firewall,
             flatpak,
@@ -116,6 +154,7 @@ impl CompositeMutationBackend {
             scanner,
             quarantine,
             profiles,
+            overrides,
         )
     }
 
@@ -146,6 +185,22 @@ impl CompositeMutationBackend {
     pub fn profiles(&self) -> &Arc<ProfileAdapter> {
         &self.profiles
     }
+
+    pub fn overrides(&self) -> &Arc<OverrideAdapter> {
+        &self.overrides
+    }
+}
+
+fn is_override_action(req: &ActionRequest) -> bool {
+    matches!(
+        req,
+        ActionRequest::SelinuxSetMode { .. }
+            | ActionRequest::FirewallSetState { .. }
+            | ActionRequest::OomdSetState { .. }
+            | ActionRequest::DevLimitsSetNofile { .. }
+            | ActionRequest::SelinuxLabelContainerDir { .. }
+            | ActionRequest::InstallCompatibilityPackage { .. }
+    )
 }
 
 fn is_selinux_action(req: &ActionRequest) -> bool {
@@ -201,6 +256,9 @@ impl MutationBackend for CompositeMutationBackend {
         if matches!(req, ActionRequest::ApplyProfile { .. }) {
             return self.profiles.preview(req).await;
         }
+        if is_override_action(req) {
+            return self.overrides.preview(req).await;
+        }
         Err(AkrepError::BackendUnavailable(
             "Unsupported ActionRequest on CompositeMutationBackend".to_string(),
         ))
@@ -233,6 +291,9 @@ impl MutationBackend for CompositeMutationBackend {
         }
         if matches!(req, ActionRequest::ApplyProfile { .. }) {
             return self.profiles.apply(req, snapshot_dir).await;
+        }
+        if is_override_action(req) {
+            return self.overrides.apply(req, snapshot_dir).await;
         }
         Err(AkrepError::BackendUnavailable(
             "Unsupported ActionRequest on CompositeMutationBackend".to_string(),
@@ -267,6 +328,9 @@ impl MutationBackend for CompositeMutationBackend {
         if matches!(req, ActionRequest::ApplyProfile { .. }) {
             return self.profiles.verify(req, expected).await;
         }
+        if is_override_action(req) {
+            return self.overrides.verify(req, expected).await;
+        }
         Err(AkrepError::BackendUnavailable(
             "Unsupported ActionRequest on CompositeMutationBackend".to_string(),
         ))
@@ -300,6 +364,9 @@ impl MutationBackend for CompositeMutationBackend {
         if matches!(req, ActionRequest::ApplyProfile { .. }) {
             return self.profiles.current_fingerprints(req, post_fps).await;
         }
+        if is_override_action(req) {
+            return self.overrides.current_fingerprints(req, post_fps).await;
+        }
         Err(AkrepError::BackendUnavailable(
             "Unsupported ActionRequest on CompositeMutationBackend".to_string(),
         ))
@@ -332,6 +399,9 @@ impl MutationBackend for CompositeMutationBackend {
         }
         if matches!(record.request, ActionRequest::ApplyProfile { .. }) {
             return self.profiles.rollback(record, snapshot_dir).await;
+        }
+        if is_override_action(&record.request) {
+            return self.overrides.rollback(record, snapshot_dir).await;
         }
         Err(AkrepError::BackendUnavailable(
             "Unsupported ActionRequest on CompositeMutationBackend".to_string(),

@@ -2006,6 +2006,10 @@ impl MockFirewallBackend {
         self.inner.lock().expect("mock firewall mutex").running = running;
     }
 
+    pub fn is_running_sync(&self) -> bool {
+        self.inner.lock().expect("mock firewall mutex").running
+    }
+
     pub fn advance_time(&self, seconds: u64) {
         let mut g = self.inner.lock().expect("mock firewall mutex");
         g.virtual_offset_secs += seconds;

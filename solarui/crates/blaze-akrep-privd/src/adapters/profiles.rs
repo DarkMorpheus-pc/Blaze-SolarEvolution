@@ -1,4 +1,7 @@
 use crate::adapters::firewalld::FirewallAdapter;
+use crate::adapters::overrides::{
+    parse_selinux_config_mode, OverrideAdapter, ProfileOverridePreState, SYSTEMD_FIREWALLD_UNIT,
+};
 use crate::adapters::selinux::{RawBooleanState, SelinuxAdapter};
 use crate::transaction_engine::{
     write_json_atomic_0600, ApplyOutcome, MutationBackend, PreviewOutcome,
@@ -7,9 +10,9 @@ use async_trait::async_trait;
 use blaze_akrep_common::{
     build_cidr_port_rich_rule, generate_uuid_v4, redact_secrets, ActionRequest, AkrepError,
     ManagedBooleanBaseline, ManagedInterfaceMove, ManagedProfileState, ManagedRemovedService,
-    ManagedRichRuleEntry, PlanDiffItem, ProfileCatalogResponse, RiskLevel, SecurityProfileSpec,
-    SecurityProfileSummary, SelinuxRuntimeMode, StateFingerprint, TransactionRecord,
-    TransactionState, OFFICIAL_PROFILE_IDS,
+    ManagedRichRuleEntry, OverrideSubsystem, PlanDiffItem, ProfileCatalogResponse, RiskLevel,
+    SecurityProfileSpec, SecurityProfileSummary, SelinuxRuntimeMode, StateFingerprint,
+    TransactionRecord, TransactionState, OFFICIAL_PROFILE_IDS,
 };
 use blaze_sentinel_core::sha256_hex;
 use chrono::Utc;
@@ -46,6 +49,16 @@ struct ProfileTxSnapshot {
     previous_managed_state: ManagedProfileState,
     target_profile_id: String,
     effective_zone: String,
+    #[serde(default)]
+    override_pre_state: Option<ProfileOverridePreState>,
+}
+
+struct ProfilePrereqs {
+    effective_zone: String,
+    firewalld_running: bool,
+    selinux_runtime: SelinuxRuntimeMode,
+    selinux_needs_restore: bool,
+    firewalld_needs_restore: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -170,6 +183,7 @@ pub struct ProfileAdapter {
     public_status_path: Option<PathBuf>,
     selinux: Arc<SelinuxAdapter>,
     firewall: Arc<FirewallAdapter>,
+    overrides: Option<Arc<OverrideAdapter>>,
 }
 
 impl ProfileAdapter {
@@ -185,11 +199,17 @@ impl ProfileAdapter {
             public_status_path: None,
             selinux,
             firewall,
+            overrides: None,
         }
     }
 
     pub fn with_public_status_path(mut self, path: PathBuf) -> Self {
         self.public_status_path = Some(path);
+        self
+    }
+
+    pub fn with_overrides(mut self, overrides: Arc<OverrideAdapter>) -> Self {
+        self.overrides = Some(overrides);
         self
     }
 
@@ -203,13 +223,19 @@ impl ProfileAdapter {
         } else {
             Some(state_dir.join("public_active_profile.json"))
         };
+        let overrides = Arc::new(OverrideAdapter::new_system(state_dir.clone()));
         Self {
             profiles_dir: PathBuf::from(DEFAULT_PROFILES_DIR),
             state_dir,
             public_status_path,
             selinux,
             firewall,
+            overrides: Some(overrides),
         }
+    }
+
+    pub fn state_dir(&self) -> &Path {
+        &self.state_dir
     }
 
     pub fn active_profile_state_path(&self) -> PathBuf {
@@ -316,6 +342,22 @@ impl ProfileAdapter {
         })
     }
 
+    async fn resolve_live_zone(&self, spec: &SecurityProfileSpec) -> Result<String, AkrepError> {
+        let zones = self.firewall.backend().list_zones().await?;
+        if zones.iter().any(|z| z == &spec.target_zone) {
+            return Ok(spec.target_zone.clone());
+        }
+        if let Some(fb) = &spec.fallback_zone {
+            if zones.iter().any(|z| z == fb) {
+                return Ok(fb.clone());
+            }
+        }
+        Err(AkrepError::InvalidInput(format!(
+            "Neither target_zone '{}' nor fallback_zone is available in firewalld",
+            spec.target_zone
+        )))
+    }
+
     async fn ensure_prerequisites_and_resolve_zone(
         &self,
         spec: &SecurityProfileSpec,
@@ -337,19 +379,127 @@ impl ProfileAdapter {
             )));
         }
 
-        let zones = self.firewall.backend().list_zones().await?;
-        if zones.iter().any(|z| z == &spec.target_zone) {
-            return Ok(spec.target_zone.clone());
-        }
-        if let Some(fb) = &spec.fallback_zone {
-            if zones.iter().any(|z| z == fb) {
-                return Ok(fb.clone());
+        self.resolve_live_zone(spec).await
+    }
+
+    async fn inspect_profile_prereqs(
+        &self,
+        spec: &SecurityProfileSpec,
+    ) -> Result<ProfilePrereqs, AkrepError> {
+        let se_mode = self.selinux.ops().read_runtime_mode()?;
+        if spec.selinux_required {
+            if se_mode == SelinuxRuntimeMode::Disabled {
+                return Err(AkrepError::BackendUnavailable(format!(
+                    "Profile '{}' requires SELinux in Enforcing mode (current=disabled)",
+                    spec.id
+                )));
+            }
+            if se_mode != SelinuxRuntimeMode::Enforcing && self.overrides.is_none() {
+                return Err(AkrepError::BackendUnavailable(format!(
+                    "Profile '{}' requires SELinux in Enforcing mode (current={})",
+                    spec.id,
+                    se_mode.as_str()
+                )));
             }
         }
-        Err(AkrepError::InvalidInput(format!(
-            "Neither target_zone '{}' nor fallback_zone is available in firewalld",
-            spec.target_zone
-        )))
+
+        let fw_running = self.firewall.backend().is_running().await?;
+        if spec.firewalld_required && !fw_running && self.overrides.is_none() {
+            return Err(AkrepError::BackendUnavailable(format!(
+                "Profile '{}' requires active firewalld service",
+                spec.id
+            )));
+        }
+
+        let (selinux_needs_restore, firewalld_needs_restore) =
+            if let Some(overrides) = &self.overrides {
+                let ov = Arc::clone(overrides);
+                let se_req = spec.selinux_required;
+                let fw_req = spec.firewalld_required;
+                tokio::task::spawn_blocking(move || -> Result<(bool, bool), AkrepError> {
+                    let se_restore = if se_req {
+                        let ov_mode = ov.ops().read_selinux_runtime_mode()?;
+                        if ov_mode == SelinuxRuntimeMode::Disabled {
+                            return Err(AkrepError::BackendUnavailable(
+                                "SELinux is disabled on this system; profile requires Enforcing"
+                                    .to_string(),
+                            ));
+                        }
+                        let cfg_permissive = ov
+                            .ops()
+                            .read_selinux_config_raw()?
+                            .as_deref()
+                            .and_then(parse_selinux_config_mode)
+                            .as_deref()
+                            == Some("permissive");
+                        se_mode == SelinuxRuntimeMode::Permissive
+                            || ov_mode == SelinuxRuntimeMode::Permissive
+                            || cfg_permissive
+                            || ov.active_override(OverrideSubsystem::Selinux)?.is_some()
+                    } else {
+                        false
+                    };
+
+                    let fw_restore = if fw_req {
+                        !fw_running
+                            || !ov.ops().is_unit_active(SYSTEMD_FIREWALLD_UNIT)?
+                            || !ov.ops().is_unit_enabled(SYSTEMD_FIREWALLD_UNIT)?
+                            || ov.active_override(OverrideSubsystem::Firewalld)?.is_some()
+                    } else {
+                        false
+                    };
+
+                    Ok((se_restore, fw_restore))
+                })
+                .await
+                .map_err(|e| AkrepError::Internal(format!("profile prereq join error: {}", e)))??
+            } else {
+                (false, false)
+            };
+
+        let effective_zone = if fw_running {
+            self.resolve_live_zone(spec).await?
+        } else {
+            spec.target_zone.clone()
+        };
+
+        Ok(ProfilePrereqs {
+            effective_zone,
+            firewalld_running: fw_running,
+            selinux_runtime: se_mode,
+            selinux_needs_restore,
+            firewalld_needs_restore,
+        })
+    }
+
+    async fn capture_override_fingerprints(&self) -> Result<Vec<StateFingerprint>, AkrepError> {
+        let Some(overrides) = &self.overrides else {
+            return Ok(Vec::new());
+        };
+        let ov = Arc::clone(overrides);
+        tokio::task::spawn_blocking(move || {
+            let mut fps = ov.current_selinux_mode_fingerprints()?;
+            fps.extend(ov.current_firewall_state_fingerprints()?);
+            Ok(fps)
+        })
+        .await
+        .map_err(|e| AkrepError::Internal(format!("override fingerprint join error: {}", e)))?
+    }
+
+    async fn rollback_override_restore_if_any(
+        overrides: Option<&Arc<OverrideAdapter>>,
+        pre: Option<&ProfileOverridePreState>,
+    ) -> Result<(), AkrepError> {
+        if let (Some(ov), Some(p)) = (overrides, pre) {
+            let ov_c = Arc::clone(ov);
+            let p_c = p.clone();
+            tokio::task::spawn_blocking(move || ov_c.rollback_profile_override_restore(&p_c))
+                .await
+                .map_err(|e| {
+                    AkrepError::Internal(format!("override rollback join error: {}", e))
+                })??;
+        }
+        Ok(())
     }
 
     async fn collect_touched_targets(
@@ -357,6 +507,7 @@ impl ProfileAdapter {
         prev_state: &ManagedProfileState,
         spec: &SecurityProfileSpec,
         effective_zone: &str,
+        firewalld_running: bool,
     ) -> Result<(BTreeSet<String>, BTreeSet<String>), AkrepError> {
         let mut bool_names = BTreeSet::new();
         for b in &prev_state.managed_booleans {
@@ -372,29 +523,31 @@ impl ProfileAdapter {
         }
 
         let mut zone_names = BTreeSet::new();
-        zone_names.insert(effective_zone.to_string());
-        if let Some(ez) = &prev_state.effective_zone {
-            let all = self.firewall.backend().list_zones().await?;
-            if all.iter().any(|z| z == ez) {
-                zone_names.insert(ez.clone());
+        if firewalld_running {
+            zone_names.insert(effective_zone.to_string());
+            if let Some(ez) = &prev_state.effective_zone {
+                let all = self.firewall.backend().list_zones().await?;
+                if all.iter().any(|z| z == ez) {
+                    zone_names.insert(ez.clone());
+                }
             }
-        }
-        for mr in &prev_state.managed_rich_rules {
-            zone_names.insert(mr.zone.clone());
-        }
-        for mv in &prev_state.moved_interfaces {
-            zone_names.insert(mv.prior_zone.clone());
-            zone_names.insert(mv.applied_zone.clone());
-        }
-        for rs in &prev_state.removed_runtime_services {
-            zone_names.insert(rs.zone.clone());
-        }
-        if spec.lock_interfaces_to_target_zone {
-            let all_zones = self.firewall.backend().list_zones().await?;
-            for z in all_zones {
-                let st = self.firewall.backend().get_zone_state(&z).await?;
-                if !st.runtime_interfaces.is_empty() {
-                    zone_names.insert(z);
+            for mr in &prev_state.managed_rich_rules {
+                zone_names.insert(mr.zone.clone());
+            }
+            for mv in &prev_state.moved_interfaces {
+                zone_names.insert(mv.prior_zone.clone());
+                zone_names.insert(mv.applied_zone.clone());
+            }
+            for rs in &prev_state.removed_runtime_services {
+                zone_names.insert(rs.zone.clone());
+            }
+            if spec.lock_interfaces_to_target_zone {
+                let all_zones = self.firewall.backend().list_zones().await?;
+                for z in all_zones {
+                    let st = self.firewall.backend().get_zone_state(&z).await?;
+                    if !st.runtime_interfaces.is_empty() {
+                        zone_names.insert(z);
+                    }
                 }
             }
         }
@@ -525,17 +678,87 @@ impl MutationBackend for ProfileAdapter {
         };
 
         let spec = self.load_profile_spec(profile_id)?;
-        let effective_zone = self.ensure_prerequisites_and_resolve_zone(&spec).await?;
+        let prereqs = self.inspect_profile_prereqs(&spec).await?;
+        let effective_zone = prereqs.effective_zone.clone();
         let prev_managed = self.load_managed_state()?;
 
         let (bool_names, zone_names) = self
-            .collect_touched_targets(&prev_managed, &spec, &effective_zone)
+            .collect_touched_targets(
+                &prev_managed,
+                &spec,
+                &effective_zone,
+                prereqs.firewalld_running,
+            )
             .await?;
-        let pre_fps = self
+        let mut pre_fps = self
             .capture_fingerprints_for_sets(&prev_managed, &bool_names, &zone_names)
             .await?;
+        pre_fps.extend(self.capture_override_fingerprints().await?);
 
         let mut diffs = Vec::new();
+        let mut warnings_tr = Vec::new();
+        let mut warnings_en = Vec::new();
+
+        if prereqs.selinux_needs_restore {
+            diffs.push(PlanDiffItem {
+                target: "selinux.mode".to_string(),
+                current_value: format!("runtime={} (override active)", prereqs.selinux_runtime.as_str()),
+                desired_value: "runtime=enforcing, config=enforcing (override cleared)".to_string(),
+                description_tr:
+                    "Profil uygulanmadan once SELinux Enforcing moduna geri dondurulecek ve etkin gevsetme temizlenecek."
+                        .to_string(),
+                description_en:
+                    "Restore SELinux to Enforcing mode and clear active SELinux override before applying profile."
+                        .to_string(),
+            });
+            warnings_tr.push(
+                "Etkin SELinux gevsetmesi profil uygulanirken otomatik olarak Enforcing moduna dondurulecek."
+                    .to_string(),
+            );
+            warnings_en.push(
+                "Active SELinux override will be automatically restored to Enforcing mode when applying this profile."
+                    .to_string(),
+            );
+        }
+
+        if prereqs.firewalld_needs_restore {
+            let current_fw = if prereqs.firewalld_running {
+                "active (override active)"
+            } else {
+                "stopped (paused)"
+            };
+            diffs.push(PlanDiffItem {
+                target: "firewall.service_state".to_string(),
+                current_value: current_fw.to_string(),
+                desired_value: "active, enabled (override cleared)".to_string(),
+                description_tr:
+                    "Profil uygulanmadan once firewalld guvenlik duvari servisi baslatilip etkinlestirilecek ve etkin gevsetme temizlenecek."
+                        .to_string(),
+                description_en:
+                    "Start and enable firewalld service and clear active firewall override before applying profile."
+                        .to_string(),
+            });
+            if prereqs.firewalld_running {
+                warnings_tr.push(
+                    "Etkin firewalld gecersiz kilmasi profil uygulanirken temizlenecek."
+                        .to_string(),
+                );
+                warnings_en.push(
+                    "Active firewalld override will be cleared when applying this profile."
+                        .to_string(),
+                );
+            } else {
+                warnings_tr.push(format!(
+                    "firewalld su anda durdurulmus durumda; profil uygulanirken once firewalld baslatilacak ve '{}' bolgesi canli olarak dogrulanacak.",
+                    effective_zone
+                ));
+                warnings_en.push(format!(
+                    "firewalld is currently stopped; firewalld will be started first and target zone '{}' will be resolved live during apply.",
+                    effective_zone
+                ));
+            }
+        }
+
         diffs.push(PlanDiffItem {
             target: "profile.active".to_string(),
             current_value: prev_managed
@@ -595,52 +818,89 @@ impl MutationBackend for ProfileAdapter {
         }
 
         if spec.lock_interfaces_to_target_zone {
-            let all_zones = self.firewall.backend().list_zones().await?;
-            for z in all_zones {
-                if z == effective_zone {
-                    continue;
+            if prereqs.firewalld_running {
+                let all_zones = self.firewall.backend().list_zones().await?;
+                for z in all_zones {
+                    if z == effective_zone {
+                        continue;
+                    }
+                    let st = self.firewall.backend().get_zone_state(&z).await?;
+                    for iface in st.runtime_interfaces {
+                        diffs.push(PlanDiffItem {
+                            target: format!("firewall.interface.{}", iface),
+                            current_value: z.clone(),
+                            desired_value: effective_zone.clone(),
+                            description_tr: format!(
+                                "'{}' ag arayuzu calisma zamaninda '{}' bolgesine tasinacak.",
+                                iface, effective_zone
+                            ),
+                            description_en: format!(
+                                "Move network interface '{}' to runtime zone '{}'.",
+                                iface, effective_zone
+                            ),
+                        });
+                    }
                 }
-                let st = self.firewall.backend().get_zone_state(&z).await?;
-                for iface in st.runtime_interfaces {
-                    diffs.push(PlanDiffItem {
-                        target: format!("firewall.interface.{}", iface),
-                        current_value: z.clone(),
-                        desired_value: effective_zone.clone(),
-                        description_tr: format!(
-                            "'{}' ag arayuzu calisma zamaninda '{}' bolgesine tasinacak.",
-                            iface, effective_zone
-                        ),
-                        description_en: format!(
-                            "Move network interface '{}' to runtime zone '{}'.",
-                            iface, effective_zone
-                        ),
-                    });
-                }
+            } else {
+                diffs.push(PlanDiffItem {
+                    target: "firewall.interfaces".to_string(),
+                    current_value: "uninspected (firewalld stopped)".to_string(),
+                    desired_value: format!("locked to {}", effective_zone),
+                    description_tr: format!(
+                        "firewalld baslatildiktan sonra etkin ag arayuzleri calisma zamaninda '{}' bolgesine tasinacak.",
+                        effective_zone
+                    ),
+                    description_en: format!(
+                        "After firewalld starts, active network interfaces will be moved to runtime zone '{}'.",
+                        effective_zone
+                    ),
+                });
             }
         }
 
         if !spec.remove_runtime_services_in_target_zone.is_empty() {
-            let zst = self
-                .firewall
-                .backend()
-                .get_zone_state(&effective_zone)
-                .await?;
-            for svc in &spec.remove_runtime_services_in_target_zone {
-                if zst.runtime_services.contains(svc) {
-                    diffs.push(PlanDiffItem {
-                        target: format!("firewall.zone.{}.service.{}", effective_zone, svc),
-                        current_value: "enabled (runtime)".to_string(),
-                        desired_value: "closed (runtime)".to_string(),
-                        description_tr: format!(
-                            "'{}' bolgesinde gelen '{}' servisi calisma zamaninda kapatilacak.",
-                            effective_zone, svc
-                        ),
-                        description_en: format!(
-                            "Close runtime service '{}' in zone '{}' while on untrusted network.",
-                            svc, effective_zone
-                        ),
-                    });
+            if prereqs.firewalld_running {
+                let zst = self
+                    .firewall
+                    .backend()
+                    .get_zone_state(&effective_zone)
+                    .await?;
+                for svc in &spec.remove_runtime_services_in_target_zone {
+                    if zst.runtime_services.contains(svc) {
+                        diffs.push(PlanDiffItem {
+                            target: format!("firewall.zone.{}.service.{}", effective_zone, svc),
+                            current_value: "enabled (runtime)".to_string(),
+                            desired_value: "closed (runtime)".to_string(),
+                            description_tr: format!(
+                                "'{}' bolgesinde gelen '{}' servisi calisma zamaninda kapatilacak.",
+                                effective_zone, svc
+                            ),
+                            description_en: format!(
+                                "Close runtime service '{}' in zone '{}' while on untrusted network.",
+                                svc, effective_zone
+                            ),
+                        });
+                    }
                 }
+            } else {
+                diffs.push(PlanDiffItem {
+                    target: format!("firewall.zone.{}.services", effective_zone),
+                    current_value: "uninspected (firewalld stopped)".to_string(),
+                    desired_value: format!(
+                        "close [{}]",
+                        spec.remove_runtime_services_in_target_zone.join(", ")
+                    ),
+                    description_tr: format!(
+                        "firewalld baslatildiktan sonra '{}' bolgesinde aciksa [{}] servisleri kapatilacak.",
+                        effective_zone,
+                        spec.remove_runtime_services_in_target_zone.join(", ")
+                    ),
+                    description_en: format!(
+                        "After firewalld starts, close runtime services [{}] in zone '{}' if active.",
+                        spec.remove_runtime_services_in_target_zone.join(", "),
+                        effective_zone
+                    ),
+                });
             }
         }
 
@@ -654,8 +914,8 @@ impl MutationBackend for ProfileAdapter {
             risk,
             diffs,
             pre_fingerprints: pre_fps,
-            warnings_tr: Vec::new(),
-            warnings_en: Vec::new(),
+            warnings_tr,
+            warnings_en,
         })
     }
 
@@ -672,22 +932,75 @@ impl MutationBackend for ProfileAdapter {
         };
 
         let spec = self.load_profile_spec(profile_id)?;
-        let effective_zone = self.ensure_prerequisites_and_resolve_zone(&spec).await?;
-        let prev_managed = self.load_managed_state()?;
-
-        let mut pre_forbidden_booleans: BTreeMap<String, bool> = BTreeMap::new();
-        for fb in &spec.forbidden_booleans {
-            if let Some(st) = self.selinux.ops().read_boolean(fb)? {
-                pre_forbidden_booleans.insert(fb.clone(), st.current);
-            }
+        if spec.selinux_required
+            && self.selinux.ops().read_runtime_mode()? == SelinuxRuntimeMode::Disabled
+        {
+            return Err(AkrepError::BackendUnavailable(format!(
+                "Profile '{}' requires SELinux in Enforcing mode (current=disabled)",
+                spec.id
+            )));
         }
 
-        let tx_snap = ProfileTxSnapshot {
-            previous_managed_state: prev_managed.clone(),
-            target_profile_id: spec.id.clone(),
-            effective_zone: effective_zone.clone(),
+        let override_pre_state = if let Some(overrides) = &self.overrides {
+            let ov = Arc::clone(overrides);
+            let restore_se = spec.selinux_required;
+            let restore_fw = spec.firewalld_required;
+            let pre = tokio::task::spawn_blocking(move || {
+                ov.force_restore_for_profile(restore_se, restore_fw)
+            })
+            .await
+            .map_err(|e| AkrepError::Internal(format!("override restore join error: {}", e)))??;
+            Some(pre)
+        } else {
+            None
         };
-        write_json_atomic_0600(&snapshot_dir.join("profile_tx.json"), &tx_snap)?;
+
+        let prep_res: Result<
+            (
+                String,
+                ManagedProfileState,
+                BTreeMap<String, bool>,
+                ProfileTxSnapshot,
+            ),
+            AkrepError,
+        > = async {
+            let effective_zone = self.ensure_prerequisites_and_resolve_zone(&spec).await?;
+            let prev_managed = self.load_managed_state()?;
+
+            let mut pre_forbidden_booleans: BTreeMap<String, bool> = BTreeMap::new();
+            for fb in &spec.forbidden_booleans {
+                if let Some(st) = self.selinux.ops().read_boolean(fb)? {
+                    pre_forbidden_booleans.insert(fb.clone(), st.current);
+                }
+            }
+
+            let tx_snap = ProfileTxSnapshot {
+                previous_managed_state: prev_managed.clone(),
+                target_profile_id: spec.id.clone(),
+                effective_zone: effective_zone.clone(),
+                override_pre_state: override_pre_state.clone(),
+            };
+            write_json_atomic_0600(&snapshot_dir.join("profile_tx.json"), &tx_snap)?;
+            Ok((
+                effective_zone,
+                prev_managed,
+                pre_forbidden_booleans,
+                tx_snap,
+            ))
+        }
+        .await;
+
+        let (effective_zone, prev_managed, pre_forbidden_booleans, tx_snap) = match prep_res {
+            Ok(v) => v,
+            Err(err) => {
+                let _ = Self::rollback_override_restore_if_any(
+                    self.overrides.as_ref(),
+                    override_pre_state.as_ref(),
+                )
+                .await;
+                return Err(err);
+            }
+        };
 
         // Preserve original boolean baselines across multi-hop profile switches
         let mut prior_bool_baselines: BTreeMap<String, (bool, Option<bool>)> = BTreeMap::new();
@@ -878,7 +1191,7 @@ impl MutationBackend for ProfileAdapter {
         self.save_managed_state(&new_managed)?;
 
         let (touched_bools, touched_zones) = self
-            .collect_touched_targets(&prev_managed, &spec, &effective_zone)
+            .collect_touched_targets(&prev_managed, &spec, &effective_zone, true)
             .await?;
         let touched_bools_vec: Vec<String> = touched_bools.into_iter().collect();
         let touched_zones_vec: Vec<String> = touched_zones.into_iter().collect();
@@ -1041,8 +1354,32 @@ impl MutationBackend for ProfileAdapter {
             .into_iter()
             .collect();
 
-        self.capture_fingerprints_for_sets(&live_managed, &touched_bools, &touched_zones)
+        if let Some(overrides) = &self.overrides {
+            let ov = Arc::clone(overrides);
+            let se_req = spec.selinux_required;
+            let fw_req = spec.firewalld_required;
+            tokio::task::spawn_blocking(move || -> Result<(), AkrepError> {
+                if se_req && ov.active_override(OverrideSubsystem::Selinux)?.is_some() {
+                    return Err(AkrepError::VerifyFailed(
+                        "SELinux override remained active after profile apply".to_string(),
+                    ));
+                }
+                if fw_req && ov.active_override(OverrideSubsystem::Firewalld)?.is_some() {
+                    return Err(AkrepError::VerifyFailed(
+                        "Firewalld override remained active after profile apply".to_string(),
+                    ));
+                }
+                Ok(())
+            })
             .await
+            .map_err(|e| AkrepError::Internal(format!("override verify join error: {}", e)))??;
+        }
+
+        let mut post_fps = self
+            .capture_fingerprints_for_sets(&live_managed, &touched_bools, &touched_zones)
+            .await?;
+        post_fps.extend(self.capture_override_fingerprints().await?);
+        Ok(post_fps)
     }
 
     async fn current_fingerprints(
@@ -1052,6 +1389,21 @@ impl MutationBackend for ProfileAdapter {
     ) -> Result<Vec<StateFingerprint>, AkrepError> {
         let live_managed = self.load_managed_state()?;
         let mut out = Vec::with_capacity(reference_fps.len());
+
+        let needs_ov = reference_fps
+            .iter()
+            .any(|fp| fp.target == "selinux.mode" || fp.target == "firewall.service_state");
+        let ov_fps: Vec<StateFingerprint> = if needs_ov {
+            if self.overrides.is_none() {
+                return Err(AkrepError::Internal(
+                    "Override fingerprint requested on ProfileAdapter without overrides"
+                        .to_string(),
+                ));
+            }
+            self.capture_override_fingerprints().await?
+        } else {
+            Vec::new()
+        };
 
         for fp in reference_fps {
             if fp.target == "profile.managed_state" {
@@ -1067,6 +1419,18 @@ impl MutationBackend for ProfileAdapter {
             } else if let Some(zname) = fp.target.strip_prefix("firewall.zone.") {
                 let zst = self.firewall.backend().get_zone_state(zname).await?;
                 out.push(FirewallAdapter::zone_fingerprint(&zst)?);
+            } else if fp.target == "selinux.mode" || fp.target == "firewall.service_state" {
+                let found = ov_fps
+                    .iter()
+                    .find(|ofp| ofp.target == fp.target)
+                    .cloned()
+                    .ok_or_else(|| {
+                        AkrepError::Internal(format!(
+                            "Missing override fingerprint for '{}'",
+                            fp.target
+                        ))
+                    })?;
+                out.push(found);
             } else {
                 return Err(AkrepError::Internal(format!(
                     "Unknown profile fingerprint target '{}'",
@@ -1130,6 +1494,13 @@ impl MutationBackend for ProfileAdapter {
 
         self.save_managed_state(&snap.previous_managed_state)
             .map_err(|e| AkrepError::RollbackFailed(e.message().to_string()))?;
+
+        Self::rollback_override_restore_if_any(
+            self.overrides.as_ref(),
+            snap.override_pre_state.as_ref(),
+        )
+        .await
+        .map_err(|e| AkrepError::RollbackFailed(e.message().to_string()))?;
 
         let prev_label = snap
             .previous_managed_state

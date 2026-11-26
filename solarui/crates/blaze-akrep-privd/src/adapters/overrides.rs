@@ -189,11 +189,11 @@ fn command_c_locale<S: AsRef<OsStr>>(program: S) -> Command {
     cmd
 }
 
-fn resolve_binary(candidates: &[&str]) -> Option<PathBuf> {
+pub(crate) fn resolve_binary(candidates: &[&str]) -> Option<PathBuf> {
     candidates.iter().map(PathBuf::from).find(|p| p.is_file())
 }
 
-fn run_command_with_timeout(
+pub(crate) fn run_command_with_timeout(
     mut cmd: Command,
     timeout: Duration,
     op_label: &str,

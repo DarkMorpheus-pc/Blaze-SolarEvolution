@@ -1,3 +1,4 @@
+use crate::adapters::overrides::{resolve_binary, run_command_with_timeout};
 use crate::adapters::selinux::command_c_locale;
 use blaze_akrep_common::{
     redact_secrets, AkrepError, DeviceSecurityStatus, KernelLockdownStatus, RpmIntegrityStatus,
@@ -5,14 +6,15 @@ use blaze_akrep_common::{
     UsbDeviceEntry,
 };
 use blaze_sentinel_core::{
-    evaluate_security_posture, is_canary_intact, AkrepSeverity, Availability, SentinelEngine,
-    ROOT_CANARY_PATH,
+    evaluate_security_posture, is_canary_intact, AkrepSeverity, Availability, DriverMokSummary,
+    SentinelEngine, ROOT_CANARY_PATH,
 };
 use chrono::Utc;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 pub const EFI_SECURE_BOOT_VAR_REL: &str =
     "firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c";
@@ -465,10 +467,150 @@ pub fn parse_rpm_verify_anomalies(pkg: &str, raw: &str) -> Vec<String> {
 }
 
 fn resolve_rpm_binary() -> Option<PathBuf> {
-    ["/bin/rpm", "/usr/bin/rpm"]
-        .iter()
-        .map(PathBuf::from)
-        .find(|p| p.is_file())
+    resolve_binary(&["/bin/rpm", "/usr/bin/rpm"])
+}
+
+fn resolve_mokutil_binary() -> Option<PathBuf> {
+    resolve_binary(&["/usr/bin/mokutil", "/bin/mokutil"])
+}
+
+pub fn parse_mokutil_sb_state(raw: &str) -> Option<bool> {
+    let lower = raw.to_ascii_lowercase();
+    if lower.contains("secureboot enabled") {
+        Some(true)
+    } else if lower.contains("secureboot disabled") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+pub fn parse_mokutil_enrolled_count(raw: &str) -> Option<usize> {
+    let lower = raw.to_ascii_lowercase();
+    if lower.contains("is empty") {
+        return Some(0);
+    }
+    let key_headers = raw
+        .lines()
+        .filter(|line| line.trim_start().to_ascii_lowercase().starts_with("[key "))
+        .count();
+    if key_headers > 0 {
+        return Some(key_headers);
+    }
+    let sha1_lines = raw
+        .lines()
+        .filter(|line| {
+            line.trim_start()
+                .to_ascii_lowercase()
+                .starts_with("sha1 fingerprint:")
+        })
+        .count();
+    if sha1_lines > 0 {
+        Some(sha1_lines)
+    } else {
+        None
+    }
+}
+
+pub fn inspect_driver_mok_at(
+    sys_root: &Path,
+    secure_boot: &SecureBootStatus,
+    mokutil_bin: Option<&Path>,
+    rpm_bin: Option<&Path>,
+) -> DriverMokSummary {
+    let nvidia_module_loaded = sys_root.join("module/nvidia").exists();
+
+    let mok_sb_state = mokutil_bin.and_then(|bin| {
+        let mut cmd = command_c_locale(bin);
+        cmd.arg("--sb-state");
+        let out =
+            run_command_with_timeout(cmd, Duration::from_secs(5), "mokutil --sb-state").ok()?;
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        parse_mokutil_sb_state(&stdout)
+    });
+    let secure_boot_enabled = mok_sb_state.or(secure_boot.secure_boot_enabled);
+
+    let mok_enrolled_count = mokutil_bin.and_then(|bin| {
+        let mut cmd = command_c_locale(bin);
+        cmd.arg("--list-enrolled");
+        let out = run_command_with_timeout(cmd, Duration::from_secs(5), "mokutil --list-enrolled")
+            .ok()?;
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        if stderr.to_ascii_lowercase().contains("is empty")
+            || stdout.to_ascii_lowercase().contains("is empty")
+        {
+            return Some(0);
+        }
+        if let Some(count) = parse_mokutil_enrolled_count(&stdout) {
+            return Some(count);
+        }
+        if out.status.success() && stdout.trim().is_empty() {
+            Some(0)
+        } else {
+            None
+        }
+    });
+
+    let akmod_nvidia_installed = rpm_bin.is_some_and(|bin| {
+        let mut cmd = command_c_locale(bin);
+        cmd.args(["-q", "--", "akmod-nvidia"]);
+        run_command_with_timeout(cmd, Duration::from_secs(5), "rpm -q akmod-nvidia")
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    });
+
+    let unsigned_risk = secure_boot_enabled == Some(true)
+        && akmod_nvidia_installed
+        && (!nvidia_module_loaded || mok_enrolled_count == Some(0));
+
+    let (guidance_tr, guidance_en) = if unsigned_risk {
+        (
+            "Secure Boot etkin ancak akmod-nvidia modulu imzasiz veya MOK kaydi eksik gorunuyor. 'mokutil --import /etc/pki/akmods/certs/public_key.der' ile anahtari ice aktarip yeniden baslatin.".to_string(),
+            "Secure Boot is enabled while akmod-nvidia appears unsigned or missing MOK enrollment. Run 'mokutil --import /etc/pki/akmods/certs/public_key.der' and reboot to enroll the MOK key.".to_string(),
+        )
+    } else if secure_boot_enabled == Some(true) {
+        let mok_note_tr = mok_enrolled_count
+            .map(|c| format!(" ({} kayitli MOK)", c))
+            .unwrap_or_default();
+        let mok_note_en = mok_enrolled_count
+            .map(|c| format!(" ({} enrolled MOK key(s))", c))
+            .unwrap_or_default();
+        let nv_tr = if nvidia_module_loaded {
+            "NVIDIA modulu yuklu"
+        } else {
+            "ucuncu parti NVIDIA modulu yuklu degil"
+        };
+        let nv_en = if nvidia_module_loaded {
+            "NVIDIA module loaded"
+        } else {
+            "no third-party NVIDIA module loaded"
+        };
+        (
+            format!("Secure Boot etkin{}; {}.", mok_note_tr, nv_tr),
+            format!("Secure Boot enabled{}; {}.", mok_note_en, nv_en),
+        )
+    } else if secure_boot_enabled == Some(false) {
+        (
+            "Secure Boot kapali; MOK imza zorlamasi devre disi.".to_string(),
+            "Secure Boot is disabled; kernel module MOK enforcement is inactive.".to_string(),
+        )
+    } else {
+        (
+            "UEFI Secure Boot/MOK bilgisi kullanilamiyor.".to_string(),
+            "UEFI Secure Boot/MOK state is unavailable.".to_string(),
+        )
+    };
+
+    DriverMokSummary {
+        secure_boot_enabled,
+        mok_enrolled_count,
+        nvidia_module_loaded,
+        akmod_nvidia_installed,
+        unsigned_risk,
+        guidance_tr,
+        guidance_en,
+    }
 }
 
 pub fn inspect_system_rpm_integrity() -> RpmIntegrityStatus {
@@ -613,6 +755,14 @@ impl DeviceSecurityOps for LinuxDeviceSecurityOps {
         let runtime_integrity = inspect_runtime_integrity_at(&self.etc_root, &self.canary_path);
         let usb_audit = inspect_usb_devices_at(&self.sys_root);
         let rpm_integrity = inspect_system_rpm_integrity();
+        let mokutil_bin = resolve_mokutil_binary();
+        let rpm_bin = resolve_rpm_binary();
+        let driver_mok = inspect_driver_mok_at(
+            &self.sys_root,
+            &secure_boot,
+            mokutil_bin.as_deref(),
+            rpm_bin.as_deref(),
+        );
 
         let overall_severity = secure_boot
             .severity
@@ -631,6 +781,7 @@ impl DeviceSecurityOps for LinuxDeviceSecurityOps {
             usb_audit,
             rpm_integrity,
             inspected_at: Utc::now().to_rfc3339(),
+            driver_mok: Some(driver_mok),
         })
     }
 }
@@ -708,6 +859,15 @@ impl MockDeviceSecurityOps {
                 availability: Availability::Available,
             },
             inspected_at: Utc::now().to_rfc3339(),
+            driver_mok: Some(DriverMokSummary {
+                secure_boot_enabled: Some(true),
+                mok_enrolled_count: Some(1),
+                nvidia_module_loaded: false,
+                akmod_nvidia_installed: false,
+                unsigned_risk: false,
+                guidance_tr: "Secure Boot etkin (1 kayitli MOK); ucuncu parti NVIDIA modulu yuklu degil.".to_string(),
+                guidance_en: "Secure Boot enabled (1 enrolled MOK key(s)); no third-party NVIDIA module loaded.".to_string(),
+            }),
         })
     }
 

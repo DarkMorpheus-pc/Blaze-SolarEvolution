@@ -586,6 +586,38 @@ impl TransactionEngine {
         Ok(recovered)
     }
 
+    fn scan_json_for_forbidden_selinux_directives(
+        raw_json: &str,
+        normalize_empty_object: bool,
+        payload_label: &str,
+    ) -> Result<(String, serde_json::Value), AkrepError> {
+        let lower_raw = raw_json.to_ascii_lowercase();
+        for forbidden in ["audit2allow", "semodule", "setenforce", "selinux=disabled"] {
+            if lower_raw.contains(forbidden) {
+                return Err(AkrepError::ForbiddenOperation(format!(
+                    "Forbidden SELinux directive '{}' in {}",
+                    forbidden, payload_label
+                )));
+            }
+        }
+
+        let normalized_json = if normalize_empty_object && raw_json.trim().is_empty() {
+            "{}".to_string()
+        } else {
+            raw_json.to_string()
+        };
+
+        let raw_val: serde_json::Value = serde_json::from_str(&normalized_json).map_err(|e| {
+            AkrepError::InvalidInput(format!(
+                "Malformed {} JSON: {}",
+                payload_label,
+                redact_secrets(&e.to_string())
+            ))
+        })?;
+        reject_forbidden_selinux_directives_in_json_value(&raw_val)?;
+        Ok((normalized_json, raw_val))
+    }
+
     pub async fn create_plan_from_json(
         &self,
         caller_bus_name: &str,
@@ -596,7 +628,29 @@ impl TransactionEngine {
                 "ActionRequest JSON payload is invalid or exceeds 64 KiB".to_string(),
             ));
         }
-        let req: ActionRequest = serde_json::from_str(request_json).map_err(|e| {
+        let (_normalized, raw_val) = match Self::scan_json_for_forbidden_selinux_directives(
+            request_json,
+            false,
+            "ActionRequest",
+        ) {
+            Ok(v) => v,
+            Err(err) => {
+                if matches!(err, AkrepError::ForbiddenOperation(_)) {
+                    self.audit_logged(
+                        "plan_rejected_redline",
+                        None,
+                        None,
+                        None,
+                        Some(caller_bus_name),
+                        None,
+                        "rejected",
+                        err.message(),
+                    );
+                }
+                return Err(err.redacted());
+            }
+        };
+        let req: ActionRequest = serde_json::from_value(raw_val).map_err(|e| {
             AkrepError::InvalidInput(format!(
                 "Malformed ActionRequest JSON: {}",
                 redact_secrets(&e.to_string())
@@ -1268,51 +1322,28 @@ impl TransactionEngine {
             }
         };
 
-        let lower_raw = query_json.to_ascii_lowercase();
-        for forbidden in ["audit2allow", "semodule", "setenforce", "selinux=disabled"] {
-            if lower_raw.contains(forbidden) {
-                let msg = format!(
-                    "Forbidden SELinux directive '{}' in diagnosis query",
-                    forbidden
-                );
-                self.audit_logged(
-                    "selinux_diagnose_rejected_redline",
-                    None,
-                    None,
-                    Some(caller.uid),
-                    Some(&caller.bus_name),
-                    Some(POLKIT_SELINUX_DIAGNOSE),
-                    "rejected",
-                    &msg,
-                );
-                return Err(AkrepError::ForbiddenOperation(msg));
+        let (normalized_json, raw_val) = match Self::scan_json_for_forbidden_selinux_directives(
+            query_json,
+            true,
+            "SELinux diagnosis query",
+        ) {
+            Ok(v) => v,
+            Err(err) => {
+                if matches!(err, AkrepError::ForbiddenOperation(_)) {
+                    self.audit_logged(
+                        "selinux_diagnose_rejected_redline",
+                        None,
+                        None,
+                        Some(caller.uid),
+                        Some(&caller.bus_name),
+                        Some(POLKIT_SELINUX_DIAGNOSE),
+                        "rejected",
+                        err.message(),
+                    );
+                }
+                return Err(err.redacted());
             }
-        }
-
-        let normalized_json = if query_json.trim().is_empty() {
-            "{}"
-        } else {
-            query_json
         };
-        let raw_val: serde_json::Value = serde_json::from_str(normalized_json).map_err(|e| {
-            AkrepError::InvalidInput(format!(
-                "Malformed SELinux diagnosis query JSON: {}",
-                redact_secrets(&e.to_string())
-            ))
-        })?;
-        if let Err(err) = reject_forbidden_selinux_directives_in_json_value(&raw_val) {
-            self.audit_logged(
-                "selinux_diagnose_rejected_redline",
-                None,
-                None,
-                Some(caller.uid),
-                Some(&caller.bus_name),
-                Some(POLKIT_SELINUX_DIAGNOSE),
-                "rejected",
-                err.message(),
-            );
-            return Err(err.redacted());
-        }
         let query: SelinuxDiagnoseQuery = serde_json::from_value(raw_val).map_err(|e| {
             AkrepError::InvalidInput(format!(
                 "Malformed SELinux diagnosis query JSON: {}",
@@ -1320,7 +1351,7 @@ impl TransactionEngine {
             ))
         })?;
 
-        if let Err(err) = query.validate_red_lines(normalized_json) {
+        if let Err(err) = query.validate_red_lines(&normalized_json) {
             self.audit_logged(
                 "selinux_diagnose_rejected_redline",
                 None,

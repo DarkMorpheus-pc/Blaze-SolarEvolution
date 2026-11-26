@@ -4,7 +4,7 @@ use crate::models::{
     RiskLevel,
 };
 use crate::rich_rule::{parse_and_validate_cidr, validate_port_spec, validate_service_name};
-use blaze_sentinel_core::{AkrepSeverity, Availability, PostureReport};
+use blaze_sentinel_core::{AkrepSeverity, Availability, DriverMokSummary, PostureReport};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -365,6 +365,8 @@ pub struct DeviceSecurityStatus {
     pub usb_audit: UsbAuditReport,
     pub rpm_integrity: RpmIntegrityStatus,
     pub inspected_at: String,
+    #[serde(default)]
+    pub driver_mok: Option<DriverMokSummary>,
 }
 
 // ============================================================================
