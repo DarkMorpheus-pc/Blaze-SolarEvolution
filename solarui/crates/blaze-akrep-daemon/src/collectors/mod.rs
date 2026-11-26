@@ -1,3 +1,4 @@
+pub mod compat;
 pub mod firewalld;
 pub mod flatpak;
 pub mod history;
@@ -29,33 +30,55 @@ pub fn default_polkit_actions() -> Vec<String> {
         "tr.com.blazeos.Akrep1.quarantine.manage".to_string(),
         "tr.com.blazeos.Akrep1.profile.apply".to_string(),
         "tr.com.blazeos.Akrep1.packages.install-optional".to_string(),
+        "tr.com.blazeos.Akrep1.system.compat-manage".to_string(),
     ]
 }
 
 pub async fn collect_snapshot(dbus_conn: Option<&Connection>) -> AkrepSnapshot {
     // Run CPU/blocking procfs & sysfs inspection off the tokio reactor cleanly
-    let (posture, selinux_sec, flatpak_sec, packages_sec, privacy_sec, profiles_sec, history_sec) =
-        tokio::task::spawn_blocking(|| {
-            let engine = SentinelEngine::new();
-            let posture = evaluate_security_posture(&engine, false);
-            let selinux_sec = selinux::collect_selinux();
-            let flatpak_sec = flatpak::collect_flatpak();
-            let packages_sec = packages::collect_packages();
-            let privacy_sec = privacy::collect_privacy();
-            let profiles_sec = profiles::collect_profiles();
-            let history_sec = history::collect_history();
-            (
-                posture,
-                selinux_sec,
-                flatpak_sec,
-                packages_sec,
-                privacy_sec,
-                profiles_sec,
-                history_sec,
-            )
-        })
-        .await
-        .expect("akrep collector blocking task should never panic");
+    let (
+        posture,
+        selinux_sec,
+        flatpak_sec,
+        packages_sec,
+        privacy_sec,
+        profiles_sec,
+        history_sec,
+        active_overrides,
+        system_compat,
+        driver_mok,
+    ) = tokio::task::spawn_blocking(|| {
+        let engine = SentinelEngine::new();
+        let posture = evaluate_security_posture(&engine, false);
+        let selinux_sec = selinux::collect_selinux();
+        let flatpak_sec = flatpak::collect_flatpak();
+        let packages_sec = packages::collect_packages();
+        let privacy_sec = privacy::collect_privacy();
+        let profiles_sec = profiles::collect_profiles();
+        let history_sec = history::collect_history();
+        let boot_id = compat::read_current_boot_id();
+        let active_overrides = compat::collect_active_overrides(
+            Path::new(compat::DEFAULT_PUBLIC_OVERRIDES_PATH),
+            &boot_id,
+            Utc::now(),
+        );
+        let system_compat = compat::collect_system_compat_cached();
+        let driver_mok = compat::collect_driver_mok_cached();
+        (
+            posture,
+            selinux_sec,
+            flatpak_sec,
+            packages_sec,
+            privacy_sec,
+            profiles_sec,
+            history_sec,
+            active_overrides,
+            system_compat,
+            driver_mok,
+        )
+    })
+    .await
+    .expect("akrep collector blocking task should never panic");
 
     let fw_sec = firewalld::collect_firewalld(dbus_conn).await;
     let dev_sec = kernel::collect_device_and_kernel(&posture, &packages_sec);
@@ -214,28 +237,7 @@ pub async fn collect_snapshot(dbus_conn: Option<&Connection>) -> AkrepSnapshot {
         .iter()
         .fold(AkrepSeverity::Protected, |acc, c| acc.combine(c.status));
 
-    let (headline_tr, headline_en) = match overall_status {
-        AkrepSeverity::Protected => (
-            "Sistem Güvenlik Duruşu Korunuyor".to_string(),
-            "System Security Posture Protected".to_string(),
-        ),
-        AkrepSeverity::Attention => (
-            "Bazı Güvenlik Kontrolleri İnceleme Gerektiriyor".to_string(),
-            "Some Security Controls Require Attention".to_string(),
-        ),
-        AkrepSeverity::Unavailable => (
-            "Temel Kontroller Aktif — Bazı İsteğe Bağlı Bileşenler Kullanılamıyor".to_string(),
-            "Core Protections Active — Some Optional Components Unavailable".to_string(),
-        ),
-        AkrepSeverity::Unknown => (
-            "Bazı Güvenlik Telemetri Alanları Doğrulanamadı".to_string(),
-            "Some Security Telemetry Domains Are Unknown".to_string(),
-        ),
-        AkrepSeverity::Critical => (
-            "Kritik Güvenlik Uyarısı Tespit Edildi".to_string(),
-            "Critical Security Alert Detected".to_string(),
-        ),
-    };
+    let (headline_tr, headline_en) = compat::headline_for_status(overall_status, false);
 
     let capabilities = AkrepCapabilities {
         version: AKREP_VERSION.to_string(),
@@ -249,7 +251,7 @@ pub async fn collect_snapshot(dbus_conn: Option<&Connection>) -> AkrepSnapshot {
         future_polkit_actions: default_polkit_actions(),
     };
 
-    AkrepSnapshot {
+    let mut snapshot = AkrepSnapshot {
         schema_version: AKREP_SCHEMA_VERSION,
         version: AKREP_VERSION.to_string(),
         sentinel_version: SENTINEL_VERSION.to_string(),
@@ -269,7 +271,9 @@ pub async fn collect_snapshot(dbus_conn: Option<&Connection>) -> AkrepSnapshot {
         sections,
         capabilities,
         active_overrides: Vec::new(),
-        system_compat: None,
-        driver_mok: None,
-    }
+        system_compat: Some(system_compat),
+        driver_mok: Some(driver_mok),
+    };
+    compat::reconcile_snapshot_with_overrides(&mut snapshot, &active_overrides);
+    snapshot
 }
