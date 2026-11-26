@@ -690,11 +690,11 @@ impl OverrideOps for LinuxOverrideOps {
     }
 
     fn read_selinux_runtime_mode(&self) -> Result<SelinuxRuntimeMode, AkrepError> {
-        let root = Path::new("/sys/fs/selinux");
-        if !root.exists() {
+        let enforce_path = Path::new(SELINUX_ENFORCE_SYSFS_PATH);
+        if !enforce_path.exists() {
             return Ok(SelinuxRuntimeMode::Disabled);
         }
-        let raw = fs::read_to_string(SELINUX_ENFORCE_SYSFS_PATH)?;
+        let raw = fs::read_to_string(enforce_path)?;
         match raw.trim() {
             "1" => Ok(SelinuxRuntimeMode::Enforcing),
             "0" => Ok(SelinuxRuntimeMode::Permissive),
@@ -865,6 +865,7 @@ impl OverrideOps for LinuxOverrideOps {
             on_active_arg.as_str(),
             "--timer-property=AccuracySec=1s",
             desc_arg.as_str(),
+            "--",
             AKREP_PRIVD_BIN_PATH,
             "--revert-override",
             subsystem.as_str(),
@@ -1298,13 +1299,18 @@ impl OverrideAdapter {
                 redact_secrets(&e.to_string())
             ))
         })?;
+        if doc.schema_version != 1 {
+            return Err(AkrepError::Internal(format!(
+                "Unsupported {} schema_version {}",
+                PRIVATE_OVERRIDES_FILENAME, doc.schema_version
+            )));
+        }
         if doc.boot_id != current_boot_id {
             // Timed and UntilReboot entries belong only to the boot that created them.
             doc.entries
                 .retain(|_, entry| matches!(entry.duration, OverrideDuration::UntilChanged));
             doc.boot_id = current_boot_id;
         }
-        doc.schema_version = 1;
         Ok(doc)
     }
 
@@ -4292,5 +4298,25 @@ SELINUXTYPE=targeted
                 .map(|e| e.generation_id),
             Some(fw_gen)
         );
+    }
+
+    #[test]
+    fn test_override_store_rejects_unsupported_schema_version() {
+        let dir = TempDir::new().unwrap();
+        let ops = Arc::new(FakeOverrideOps::new());
+        let adapter = OverrideAdapter::new_with_ops(
+            dir.path().to_path_buf(),
+            dir.path().join("active_overrides.json"),
+            ops,
+        );
+        fs::write(
+            dir.path().join(PRIVATE_OVERRIDES_FILENAME),
+            r#"{"schema_version":99,"boot_id":"boot-uuid-1","entries":{}}"#,
+        )
+        .unwrap();
+        let err = adapter
+            .active_override(OverrideSubsystem::Selinux)
+            .unwrap_err();
+        assert!(matches!(err, AkrepError::Internal(_)));
     }
 }

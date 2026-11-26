@@ -281,7 +281,7 @@ fn build_dev_compat_card(
                     c.nofile_soft,
                     c.nofile_hard
                 ),
-                false,
+                true,
             )
         }
     } else {
@@ -339,7 +339,7 @@ fn build_dev_compat_card(
     cdir_ent.add_css_class("akrep-entry");
     cdir_ent.set_width_chars(14);
     cdir_ent.set_hexpand(true);
-    cdir_ent.set_placeholder_text(Some("/home/kullanici/android"));
+    cdir_ent.set_placeholder_text(Some("~/android"));
     cdir_ent.set_text(&container_dir_path);
     let st_cd = Rc::clone(state);
     cdir_ent.connect_changed(move |ent| {
@@ -745,15 +745,22 @@ pub fn build_system_protection_page(
         dur_row.append(&upd_btn);
         mode_box.append(&dur_row);
     } else {
-        let (dot_cls, dot_txt) = if is_disabled {
-            ("akrep-sev-critical", lang.pick("Devre dışı", "Disabled"))
+        let (dot_cls, dot_txt, dot_muted) = if is_disabled {
+            ("akrep-sev-critical", lang.pick("Devre dışı", "Disabled"), false)
+        } else if m_sev_opt.is_none() {
+            (
+                "akrep-sev-unavailable",
+                lang.pick("Durum bekleniyor", "Loading status"),
+                true,
+            )
         } else {
             (
                 "akrep-sev-protected",
                 lang.pick("Enforcing etkin", "Enforcing active"),
+                false,
             )
         };
-        mode_box.append(&build_status_indicator(dot_cls, dot_txt, false));
+        mode_box.append(&build_status_indicator(dot_cls, dot_txt, dot_muted));
 
         let dur_row = GtkBox::new(Orientation::Horizontal, 8);
         dur_row.set_valign(Align::Center);

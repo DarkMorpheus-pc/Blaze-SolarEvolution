@@ -449,12 +449,27 @@ pub fn resolve_and_validate_restorecon_target(
     Ok(resolved)
 }
 
-pub fn build_restorecon_args(preview_only: bool, recursive: bool, target: &Path) -> Vec<OsString> {
+pub fn is_customizable_container_context(ctx: &str) -> bool {
+    let selinux_type = ctx.split(':').nth(2).unwrap_or("");
+    matches!(selinux_type, "container_file_t" | "svirt_sandbox_file_t")
+        || ctx.contains(":container_file_t:")
+        || ctx.contains(":svirt_sandbox_file_t:")
+}
+
+pub fn build_restorecon_args_with_force(
+    preview_only: bool,
+    recursive: bool,
+    force_customizable: bool,
+    target: &Path,
+) -> Vec<OsString> {
     let mut args = Vec::new();
     if preview_only {
         args.push(OsString::from("-n"));
     }
     args.push(OsString::from("-v"));
+    if force_customizable {
+        args.push(OsString::from("-F"));
+    }
     if recursive {
         args.push(OsString::from("-R"));
         args.push(OsString::from("-x"));
@@ -462,6 +477,10 @@ pub fn build_restorecon_args(preview_only: bool, recursive: bool, target: &Path)
     args.push(OsString::from("--"));
     args.push(target.as_os_str().to_os_string());
     args
+}
+
+pub fn build_restorecon_args(preview_only: bool, recursive: bool, target: &Path) -> Vec<OsString> {
+    build_restorecon_args_with_force(preview_only, recursive, false, target)
 }
 
 pub fn walk_restorecon_paths_bounded(
@@ -977,8 +996,16 @@ impl SelinuxSysOps for LinuxSelinuxOps {
             AkrepError::BackendUnavailable("restorecon binary is not installed".to_string())
         })?;
 
+        let force_customizable = Self::read_single_file_context(&resolved)
+            .map(|ctx| is_customizable_container_context(&ctx))
+            .unwrap_or(false);
         let mut cmd = command_c_locale(bin);
-        cmd.args(build_restorecon_args(true, recursive, &resolved));
+        cmd.args(build_restorecon_args_with_force(
+            true,
+            recursive,
+            force_customizable,
+            &resolved,
+        ));
         let out = cmd.output()?;
         if !out.status.success() {
             return Err(AkrepError::IoError(format!(
@@ -1027,8 +1054,16 @@ impl SelinuxSysOps for LinuxSelinuxOps {
             AkrepError::BackendUnavailable("restorecon binary is not installed".to_string())
         })?;
 
+        let force_customizable = Self::read_single_file_context(&resolved)
+            .map(|ctx| is_customizable_container_context(&ctx))
+            .unwrap_or(false);
         let mut cmd = command_c_locale(bin);
-        cmd.args(build_restorecon_args(false, recursive, &resolved));
+        cmd.args(build_restorecon_args_with_force(
+            false,
+            recursive,
+            force_customizable,
+            &resolved,
+        ));
         let out = cmd.output()?;
         if !out.status.success() {
             return Err(AkrepError::ApplyFailed(format!(
@@ -2557,11 +2592,20 @@ impl SelinuxSysOps for MockSelinuxOps {
                 validate_restorecon_path(p)?;
             }
         }
+        let force_customizable = g.files.iter().any(|(p, lbl)| {
+            (p == &target || (recursive && p.starts_with(&prefix)))
+                && is_customizable_container_context(&lbl.current_context)
+        });
         let mut argv = vec!["/sbin/restorecon".to_string()];
         argv.extend(
-            build_restorecon_args(false, recursive, Path::new(&target))
-                .into_iter()
-                .map(|a| a.to_string_lossy().into_owned()),
+            build_restorecon_args_with_force(
+                false,
+                recursive,
+                force_customizable,
+                Path::new(&target),
+            )
+            .into_iter()
+            .map(|a| a.to_string_lossy().into_owned()),
         );
         g.recorded_commands.push(argv);
 
@@ -2780,6 +2824,57 @@ container_manage_cgroup        (on   ,  off)  Allow container cgroups
             .read_file_contexts(Path::new("/etc"), true)
             .unwrap_err();
         assert!(matches!(mock_etc_err, AkrepError::ForbiddenOperation(_)));
+    }
+
+    #[test]
+    fn test_restorecon_uses_force_flag_for_customizable_container_types() {
+        assert!(is_customizable_container_context(
+            "unconfined_u:object_r:container_file_t:s0"
+        ));
+        assert!(is_customizable_container_context(
+            "system_u:object_r:svirt_sandbox_file_t:s0:c1,c2"
+        ));
+        assert!(!is_customizable_container_context(
+            "unconfined_u:object_r:user_home_t:s0"
+        ));
+
+        let forced_preview: Vec<String> = build_restorecon_args_with_force(
+            true,
+            true,
+            true,
+            Path::new("/home/alice/android"),
+        )
+        .into_iter()
+        .map(|s| s.to_string_lossy().into_owned())
+        .collect();
+        assert_eq!(
+            forced_preview,
+            vec!["-n", "-v", "-F", "-R", "-x", "--", "/home/alice/android"]
+        );
+
+        let mock = MockSelinuxOps::new_fedora_enforcing();
+        mock.insert_file_context(
+            "/home/alice/android",
+            "unconfined_u:object_r:container_file_t:s0",
+            "unconfined_u:object_r:user_home_t:s0",
+        );
+        let relabeled = mock
+            .apply_restorecon(Path::new("/home/alice/android"), true)
+            .unwrap();
+        assert_eq!(relabeled.len(), 1);
+        assert_eq!(relabeled[0].to_context, "unconfined_u:object_r:user_home_t:s0");
+        assert_eq!(
+            mock.recorded_commands(),
+            vec![vec![
+                "/sbin/restorecon".to_string(),
+                "-v".to_string(),
+                "-F".to_string(),
+                "-R".to_string(),
+                "-x".to_string(),
+                "--".to_string(),
+                "/home/alice/android".to_string(),
+            ]]
+        );
     }
 
     #[test]

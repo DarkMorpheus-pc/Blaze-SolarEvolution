@@ -566,20 +566,20 @@ pub fn inspect_driver_mok_at(
 
     let (guidance_tr, guidance_en) = if unsigned_risk {
         (
-            "Secure Boot etkin ancak akmod-nvidia modulu imzasiz veya MOK kaydi eksik gorunuyor. 'mokutil --import /etc/pki/akmods/certs/public_key.der' ile anahtari ice aktarip yeniden baslatin.".to_string(),
+            "Secure Boot etkin ancak akmod-nvidia modülü imzasız veya MOK kaydı eksik görünüyor. 'mokutil --import /etc/pki/akmods/certs/public_key.der' ile anahtarı içe aktarıp yeniden başlatın.".to_string(),
             "Secure Boot is enabled while akmod-nvidia appears unsigned or missing MOK enrollment. Run 'mokutil --import /etc/pki/akmods/certs/public_key.der' and reboot to enroll the MOK key.".to_string(),
         )
     } else if secure_boot_enabled == Some(true) {
         let mok_note_tr = mok_enrolled_count
-            .map(|c| format!(" ({} kayitli MOK)", c))
+            .map(|c| format!(" ({} kayıtlı MOK)", c))
             .unwrap_or_default();
         let mok_note_en = mok_enrolled_count
             .map(|c| format!(" ({} enrolled MOK key(s))", c))
             .unwrap_or_default();
         let nv_tr = if nvidia_module_loaded {
-            "NVIDIA modulu yuklu"
+            "NVIDIA modülü yüklü"
         } else {
-            "ucuncu parti NVIDIA modulu yuklu degil"
+            "üçüncü parti NVIDIA modülü yüklü değil"
         };
         let nv_en = if nvidia_module_loaded {
             "NVIDIA module loaded"
@@ -592,12 +592,12 @@ pub fn inspect_driver_mok_at(
         )
     } else if secure_boot_enabled == Some(false) {
         (
-            "Secure Boot kapali; MOK imza zorlamasi devre disi.".to_string(),
+            "Secure Boot kapalı; MOK imza zorlaması devre dışı.".to_string(),
             "Secure Boot is disabled; kernel module MOK enforcement is inactive.".to_string(),
         )
     } else {
         (
-            "UEFI Secure Boot/MOK bilgisi kullanilamiyor.".to_string(),
+            "UEFI Secure Boot/MOK bilgisi kullanılamıyor.".to_string(),
             "UEFI Secure Boot/MOK state is unavailable.".to_string(),
         )
     };
@@ -865,7 +865,7 @@ impl MockDeviceSecurityOps {
                 nvidia_module_loaded: false,
                 akmod_nvidia_installed: false,
                 unsigned_risk: false,
-                guidance_tr: "Secure Boot etkin (1 kayitli MOK); ucuncu parti NVIDIA modulu yuklu degil.".to_string(),
+                guidance_tr: "Secure Boot etkin (1 kayıtlı MOK); üçüncü parti NVIDIA modülü yüklü değil.".to_string(),
                 guidance_en: "Secure Boot enabled (1 enrolled MOK key(s)); no third-party NVIDIA module loaded.".to_string(),
             }),
         })
