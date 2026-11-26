@@ -1,6 +1,7 @@
 pub mod device_security;
 pub mod firewalld;
 pub mod flatpak;
+pub mod overrides;
 pub mod profiles;
 pub mod quarantine;
 pub mod scanner;
@@ -9,6 +10,7 @@ pub mod selinux;
 pub use device_security::*;
 pub use firewalld::*;
 pub use flatpak::*;
+pub use overrides::*;
 pub use profiles::*;
 pub use quarantine::*;
 pub use scanner::*;
