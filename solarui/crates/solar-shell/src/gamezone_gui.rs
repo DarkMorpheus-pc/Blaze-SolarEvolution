@@ -30,8 +30,8 @@ use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Box as GtkBox, Button, CssProvider, Entry, EventControllerKey, EventControllerMotion, Image,
-    Label, Orientation, Overlay, Picture, ScrolledWindow, Video, Window,
+    Box as GtkBox, Button, CssProvider, Entry, EventControllerKey, EventControllerMotion,
+    IconTheme, Image, Label, Orientation, Overlay, Picture, ScrolledWindow, Video, Window,
 };
 use crate::apps::scan_desktop_applications;
 use crate::gamezone_live::{
@@ -59,7 +59,7 @@ pub fn get_user_home() -> PathBuf {
         }
     }
     if let Ok(user) = std::env::var("USER") {
-        let p = PathBuf::from(format!("/home/{}", user));
+        let p = Path::new("/").join("home").join(user);
         if p.exists() {
             return p;
         }
@@ -160,71 +160,71 @@ impl Language {
 
     pub fn guest_player(&self) -> &'static str {
         match self {
-            Language::TR => "Misafir Oyuncu",
-            Language::EN => "Guest Gamer",
+            Language::TR => "Misafir oyuncu",
+            Language::EN => "Guest player",
         }
     }
 
     pub fn online_status(&self, platform: &str) -> String {
         match self {
-            Language::TR => format!("{} Çevrimiçi • Düşük Gecikme Modu", platform),
-            Language::EN => format!("{} Online • Low-Latency Mode", platform),
+            Language::TR => format!("{} çevrimiçi", platform),
+            Language::EN => format!("{} online", platform),
         }
     }
 
     pub fn offline_status(&self, platform: &str) -> String {
         match self {
-            Language::TR => format!("{} Çevrimdışı • Yerel Mod", platform),
-            Language::EN => format!("{} Offline • Local Mode", platform),
+            Language::TR => format!("{} çevrimdışı", platform),
+            Language::EN => format!("{} offline", platform),
         }
     }
 
     pub fn no_account_online(&self) -> &'static str {
         match self {
-            Language::TR => "Hesap Bağlanmadı • Çevrimiçi",
-            Language::EN => "No Account Linked • Online",
+            Language::TR => "Çevrimiçi",
+            Language::EN => "Online",
         }
     }
 
     pub fn no_account_offline(&self) -> &'static str {
         match self {
-            Language::TR => "Hesap Bağlanmadı • Çevrimdışı",
-            Language::EN => "No Account Linked • Offline",
+            Language::TR => "Çevrimdışı",
+            Language::EN => "Offline",
         }
     }
 
     pub fn steam_login(&self) -> &'static str {
         match self {
-            Language::TR => "Steam Girişi Yap",
+            Language::TR => "Steam ile giriş yap",
             Language::EN => "Sign in to Steam",
         }
     }
 
     pub fn bore_kernel(&self) -> &'static str {
         match self {
-            Language::TR => "Linux 7.2.9 • sched_ext & NTSYNC",
-            Language::EN => "Linux 7.2.9 • sched_ext & NTSYNC",
+            Language::TR => "Linux · sched_ext ve NTSYNC",
+            Language::EN => "Linux · sched_ext and NTSYNC",
         }
     }
 
     pub fn my_library(&self) -> &'static str {
         match self {
-            Language::TR => "Kütüphanem",
-            Language::EN => "My Library",
+            Language::TR => "Kütüphane",
+            Language::EN => "Library",
         }
     }
 
     pub fn all_games(&self) -> &'static str {
         match self {
-            Language::TR => "Tüm Oyunlar",
-            Language::EN => "All Games",
+            Language::TR => "Tüm oyunlar",
+            Language::EN => "All games",
         }
     }
 
     pub fn steam_library(&self) -> &'static str {
         match self {
-            Language::TR => "Steam Kütüphanesi",
-            Language::EN => "Steam Library",
+            Language::TR => "Steam kütüphanesi",
+            Language::EN => "Steam library",
         }
     }
 
@@ -238,8 +238,8 @@ impl Language {
 
     pub fn retro_console(&self) -> &'static str {
         match self {
-            Language::TR => "Retro Konsol (RetroArch)",
-            Language::EN => "Retro Console (RetroArch)",
+            Language::TR => "Retro konsol (RetroArch)",
+            Language::EN => "Retro console (RetroArch)",
         }
     }
 
@@ -249,14 +249,14 @@ impl Language {
 
     pub fn game_storefronts(&self) -> &'static str {
         match self {
-            Language::TR => "Oyun Mağazaları",
-            Language::EN => "Game Storefronts",
+            Language::TR => "Oyun mağazaları",
+            Language::EN => "Game stores",
         }
     }
 
     pub fn steam_store(&self) -> &'static str {
         match self {
-            Language::TR => "Steam Mağazası",
+            Language::TR => "Steam mağazası",
             Language::EN => "Steam Store",
         }
     }
@@ -267,36 +267,36 @@ impl Language {
 
     pub fn gog_store(&self) -> &'static str {
         match self {
-            Language::TR => "GOG.com Mağazası",
-            Language::EN => "GOG.com Store",
+            Language::TR => "GOG mağazası",
+            Language::EN => "GOG Store",
         }
     }
 
     pub fn tools_settings(&self) -> &'static str {
         match self {
-            Language::TR => "Araçlar & Ayarlar",
-            Language::EN => "Tools & Settings",
+            Language::TR => "Araçlar ve ayarlar",
+            Language::EN => "Tools and settings",
         }
     }
 
     pub fn protonup_qt(&self) -> &'static str {
         match self {
-            Language::TR => "ProtonUp-Qt Yöneticisi",
-            Language::EN => "ProtonUp-Qt Manager",
+            Language::TR => "ProtonUp-Qt yöneticisi",
+            Language::EN => "ProtonUp-Qt manager",
         }
     }
 
     pub fn clean_cache(&self) -> &'static str {
         match self {
-            Language::TR => "Afiş Önbelleğini Temizle",
-            Language::EN => "Clear Poster Cache",
+            Language::TR => "Medya önbelleğini temizle",
+            Language::EN => "Clear media cache",
         }
     }
 
     pub fn offline_alert(&self) -> &'static str {
         match self {
-            Language::TR => "İnternete bağlı değilsiniz. Sadece yüklü oyunları ve uygulamaları çalıştırabilirsiniz.",
-            Language::EN => "You are offline. Only installed games and applications can be launched.",
+            Language::TR => "İnternet bağlantısı yok. Yalnızca kurulu oyunlar ve uygulamalar açılabilir.",
+            Language::EN => "No internet connection. Only installed games and apps can be launched.",
         }
     }
 
@@ -309,113 +309,113 @@ impl Language {
 
     pub fn search_placeholder(&self) -> &'static str {
         match self {
-            Language::TR => "Oyun, mağaza veya eklenti ara...",
-            Language::EN => "Search games, stores, or addons...",
+            Language::TR => "Oyun veya uygulama ara",
+            Language::EN => "Search games or apps",
         }
     }
 
     pub fn featured_game(&self) -> &'static str {
         match self {
-            Language::TR => "ÖNE ÇIKAN OYUN",
-            Language::EN => "FEATURED GAME",
+            Language::TR => "Öne çıkan oyun",
+            Language::EN => "Featured game",
         }
     }
 
     pub fn play_button(&self) -> &'static str {
         match self {
-            Language::TR => "OYNA (A / Enter)",
-            Language::EN => "PLAY (A / Enter)",
+            Language::TR => "Oyna",
+            Language::EN => "Play",
         }
     }
 
     pub fn install_button(&self) -> &'static str {
         match self {
-            Language::TR => "YÜKLE (A / Enter)",
-            Language::EN => "INSTALL (A / Enter)",
+            Language::TR => "Yükle",
+            Language::EN => "Install",
         }
     }
 
     pub fn game_options(&self) -> &'static str {
         match self {
-            Language::TR => "Oyun Seçenekleri (X)",
-            Language::EN => "Game Options (X)",
+            Language::TR => "Oyun seçenekleri",
+            Language::EN => "Game options",
         }
     }
 
     pub fn store_page(&self) -> &'static str {
         match self {
-            Language::TR => "Mağaza Sayfası",
-            Language::EN => "Store Page",
+            Language::TR => "Mağaza sayfası",
+            Language::EN => "Store page",
         }
     }
 
     pub fn recently_played(&self) -> &'static str {
         match self {
-            Language::TR => "Son Oynananlar",
-            Language::EN => "Recently Played",
+            Language::TR => "Son oynananlar",
+            Language::EN => "Recently played",
         }
     }
 
     pub fn no_recent_title(&self) -> &'static str {
         match self {
-            Language::TR => "Henüz Bir Oyun Oynamadınız",
-            Language::EN => "No Recently Played Games",
+            Language::TR => "Son oynanan oyun yok",
+            Language::EN => "No recently played games",
         }
     }
 
     pub fn no_recent_desc(&self) -> &'static str {
         match self {
-            Language::TR => "Oynadığınız oyunlar ve son oturumlarınız burada otomatik olarak listelenecektir. Başlamak için aşağıdaki kütüphanenizden veya mağaza vitrininden bir oyun seçin.",
-            Language::EN => "Games you play and your recent gaming sessions will be listed here automatically. Select a game from your library or store showcase below to get started.",
+            Language::TR => "Oynadığınız oyunlar burada listelenir. Başlamak için kütüphanenizden veya mağazadan bir oyun seçin.",
+            Language::EN => "Games you play appear here automatically. Select a game from your library or store showcase below to begin.",
         }
     }
 
     pub fn whats_new(&self) -> &'static str {
         match self {
-            Language::TR => "YENİLİKLER",
-            Language::EN => "WHAT'S NEW",
+            Language::TR => "Yenilikler",
+            Language::EN => "What's new",
         }
     }
 
     pub fn friends(&self) -> &'static str {
         match self {
-            Language::TR => "ARKADAŞLAR (3)",
-            Language::EN => "FRIENDS (3)",
+            Language::TR => "Arkadaşlar",
+            Language::EN => "Friends",
         }
     }
 
     pub fn recommended(&self) -> &'static str {
         match self {
-            Language::TR => "TAVSİYE EDİLENLER",
-            Language::EN => "RECOMMENDED",
+            Language::TR => "Önerilenler",
+            Language::EN => "Recommended",
         }
     }
 
     pub fn community_hub(&self) -> &'static str {
         match self {
-            Language::TR => "TOPLULUK MERKEZİ",
-            Language::EN => "COMMUNITY HUB",
+            Language::TR => "Topluluk merkezi",
+            Language::EN => "Community hub",
         }
     }
 
     pub fn all_games_in_library(&self) -> &'static str {
         match self {
-            Language::TR => "Kütüphanemdeki Tüm Oyunlar",
-            Language::EN => "All Games in My Library",
+            Language::TR => "Kütüphanedeki oyunlar",
+            Language::EN => "Games in library",
         }
     }
 
     pub fn footer_play(&self) -> &'static str {
         match self {
-            Language::TR => "Oyna / Seç",
-            Language::EN => "Play / Select",
+            Language::TR => "Oyna veya seç",
+            Language::EN => "Play or select",
         }
     }
 
     pub fn footer_back(&self) -> &'static str {
         match self {
-            Language::TR => "Geri / Masaüstü",
-            Language::EN => "Back / Desktop",
+            Language::TR => "Masaüstüne dön",
+            Language::EN => "Exit to desktop",
         }
     }
 
@@ -442,15 +442,15 @@ impl Language {
 
     pub fn trailer_waiting(&self) -> &'static str {
         match self {
-            Language::TR => "Video Fragman: 10 sn bekleniyor...",
-            Language::EN => "Video Trailer: Waiting 10s...",
+            Language::TR => "Fragman hazırlanıyor",
+            Language::EN => "Preparing trailer",
         }
     }
 
     pub fn exit_to_desktop(&self) -> &'static str {
         match self {
-            Language::TR => "Masaüstüne Dön",
-            Language::EN => "Exit to Desktop",
+            Language::TR => "Masaüstüne dön",
+            Language::EN => "Exit to desktop",
         }
     }
 
@@ -463,43 +463,43 @@ impl Language {
 
     pub fn all_applications(&self) -> &'static str {
         match self {
-            Language::TR => "Tüm Uygulamalar",
-            Language::EN => "All Applications",
+            Language::TR => "Tüm uygulamalar",
+            Language::EN => "All applications",
         }
     }
 
     pub fn browse_games_and_apps(&self) -> &'static str {
         match self {
-            Language::TR => "Oyunlarına ve uygulamalarına göz at",
-            Language::EN => "Browse your games & apps",
+            Language::TR => "Oyunlar ve uygulamalar",
+            Language::EN => "Games and apps",
         }
     }
 
     pub fn customize_home(&self) -> &'static str {
         match self {
-            Language::TR => "Giriş ekranını özelleştir",
-            Language::EN => "Customize your Home",
+            Language::TR => "Oyun performans profili",
+            Language::EN => "Gaming performance profile",
         }
     }
 
     pub fn store_deals(&self) -> &'static str {
         match self {
-            Language::TR => "Mağaza & Fırsatlar",
-            Language::EN => "Store & Featured Deals",
+            Language::TR => "Oyun mağazaları",
+            Language::EN => "Game stores",
         }
     }
 
     pub fn play_like_pro(&self) -> &'static str {
         match self {
-            Language::TR => "Bir Profesyonel Gibi Oyna",
-            Language::EN => "Play like a Pro",
+            Language::TR => "Proton-GE ve ayarlar",
+            Language::EN => "Proton-GE and settings",
         }
     }
 
     pub fn back_to_home(&self) -> &'static str {
         match self {
-            Language::TR => "Ana Ekrana Dön",
-            Language::EN => "Back to Home",
+            Language::TR => "Ana ekrana dön",
+            Language::EN => "Back to home",
         }
     }
 }
@@ -986,37 +986,132 @@ fn load_picture_file(pic: &Picture, path: &Path) {
     pic.set_filename(Some(path));
 }
 
-fn create_nav_button(label_text: &str, icon_name_base: &str) -> Button {
+fn build_symbolic_icon(candidates: &[&str], css_class: &str) -> Image {
+    let chosen = gdk::Display::default()
+        .map(|d| IconTheme::for_display(&d))
+        .and_then(|theme| {
+            candidates
+                .iter()
+                .copied()
+                .find(|name| theme.has_icon(name))
+        })
+        .unwrap_or_else(|| {
+            candidates
+                .first()
+                .copied()
+                .unwrap_or("application-x-executable-symbolic")
+        });
+
+    let img = Image::from_icon_name(chosen);
+    img.set_pixel_size(16);
+    img.add_css_class(css_class);
+    img.set_halign(gtk4::Align::Center);
+    img.set_valign(gtk4::Align::Center);
+    img
+}
+
+fn create_symbolic_button(label_text: &str, icon_candidates: &[&str], btn_css_class: &str) -> (Button, Image, Label) {
     let btn = Button::new();
-    btn.add_css_class("xbox-nav-icon-btn");
+    btn.add_css_class(btn_css_class);
 
-    let b_box = GtkBox::new(Orientation::Horizontal, 7);
+    let b_box = GtkBox::new(Orientation::Horizontal, 8);
     b_box.set_valign(gtk4::Align::Center);
+    b_box.set_halign(gtk4::Align::Center);
 
-    let pic = Picture::new();
-    pic.set_size_request(16, 16);
-    pic.set_can_shrink(true);
-    pic.set_content_fit(gtk4::ContentFit::Contain);
-    pic.add_css_class("xbox-nav-btn-icon");
-
-    let icon_candidates = [
-        format!("/usr/share/solarui/icons/{}.png", icon_name_base),
-        format!("/usr/share/solarui/icons/{}.svg", icon_name_base),
-    ];
-    for ic in &icon_candidates {
-        if Path::new(ic).exists() {
-            load_picture_file(&pic, Path::new(ic));
-            b_box.append(&pic);
-            break;
-        }
-    }
+    let icon = build_symbolic_icon(icon_candidates, "gz-btn-icon");
+    b_box.append(&icon);
 
     let lbl = Label::new(Some(label_text));
     lbl.set_valign(gtk4::Align::Center);
     b_box.append(&lbl);
 
     btn.set_child(Some(&b_box));
+    (btn, icon, lbl)
+}
+
+fn set_symbolic_icon(img: &Image, candidates: &[&str]) {
+    let chosen = gdk::Display::default()
+        .map(|d| IconTheme::for_display(&d))
+        .and_then(|theme| {
+            candidates
+                .iter()
+                .copied()
+                .find(|name| theme.has_icon(name))
+        })
+        .unwrap_or_else(|| {
+            candidates
+                .first()
+                .copied()
+                .unwrap_or("application-x-executable-symbolic")
+        });
+    img.set_icon_name(Some(chosen));
+}
+
+fn create_nav_button(label_text: &str, icon_candidates: &[&str]) -> Button {
+    let (btn, _, _) = create_symbolic_button(label_text, icon_candidates, "xbox-nav-icon-btn");
     btn
+}
+
+fn append_footer_hint(bar: &GtkBox, keys: &[&str], desc_text: &str) {
+    let group = GtkBox::new(Orientation::Horizontal, 8);
+    group.set_valign(gtk4::Align::Center);
+    group.add_css_class("gz-legend-group");
+
+    let keys_box = GtkBox::new(Orientation::Horizontal, 4);
+    keys_box.set_valign(gtk4::Align::Center);
+    for (idx, k) in keys.iter().enumerate() {
+        if idx > 0 {
+            let sep = Label::new(Some("/"));
+            sep.add_css_class("gz-keycap-sep");
+            sep.set_valign(gtk4::Align::Center);
+            keys_box.append(&sep);
+        }
+        let cap = Label::new(Some(k));
+        cap.add_css_class("gz-keycap");
+        cap.set_valign(gtk4::Align::Center);
+        keys_box.append(&cap);
+    }
+    group.append(&keys_box);
+
+    let desc = Label::new(Some(desc_text));
+    desc.add_css_class("xbox-legend-desc");
+    desc.set_valign(gtk4::Align::Center);
+    group.append(&desc);
+
+    bar.append(&group);
+}
+
+fn read_battery_percent() -> Option<u8> {
+    for bat in ["BAT0", "BAT1", "BATT"] {
+        let cap_path = Path::new("/sys/class/power_supply").join(bat).join("capacity");
+        if let Ok(txt) = std::fs::read_to_string(cap_path) {
+            if let Ok(pct) = txt.trim().parse::<u8>() {
+                return Some(pct.min(100));
+            }
+        }
+    }
+    None
+}
+
+fn shell_display_name(engine: crate::engine::ShellEngine) -> &'static str {
+    match engine {
+        crate::engine::ShellEngine::Noctalia => "Noctalia",
+        crate::engine::ShellEngine::Caelestia => "Caelestia",
+        crate::engine::ShellEngine::End4Pc => "end4-pC",
+        crate::engine::ShellEngine::We10x => "We10X",
+    }
+}
+
+fn format_category_sentence_case(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    trimmed
+        .replace("STEAM ÖNE ÇIKAN", "Steam öne çıkan")
+        .replace("İNDİRİM", "indirim")
+        .replace("ÖNE ÇIKAN", "Öne çıkan")
+        .replace("•", "·")
 }
 
 fn build_gamezone_ui(main_loop: glib::MainLoop) {
@@ -1024,615 +1119,738 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     let provider = CssProvider::new();
     let css = r#"
         window {
-            background-color: #111216;
-            color: #f4f4f6;
-            font-family: "Inter", "Cantarell", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #141415;
+            color: #ededed;
+        }
+
+        *:focus-visible {
+            outline: 2px solid rgba(224, 87, 60, 0.65);
+            outline-offset: 2px;
         }
 
         button {
             background-image: none;
-        }
-
-        *,
-        *:focus,
-        *:focus-visible,
-        *:focus-within {
-            outline-color: transparent;
-            outline-width: 0px;
-            outline-style: none;
+            text-shadow: none;
+            -gtk-icon-shadow: none;
         }
 
         .xbox-root {
             background-color: transparent;
-            padding: 0;
-            margin: 0;
+            padding: 0px;
+            margin: 0px;
         }
 
-        /* ── Fullscreen Backdrop & Obsidian Scrim ── */
+        /* Fullscreen Hero Game Artwork + Minimal Dark Readability Scrim */
         .xbox-backdrop-layer {
-            background-color: #111216;
+            background-color: #0f0f10;
         }
 
         .xbox-backdrop-scrim {
-            background: linear-gradient(180deg,
-                rgba(12, 13, 17, 0.66) 0%,
-                rgba(12, 13, 17, 0.78) 44%,
-                rgba(12, 13, 17, 0.93) 76%,
-                rgba(12, 13, 17, 0.98) 100%
+            background-image: linear-gradient(
+                180deg,
+                rgba(15, 15, 16, 0.72) 0%,
+                rgba(15, 15, 16, 0.56) 36%,
+                rgba(15, 15, 16, 0.88) 72%,
+                rgba(15, 15, 16, 0.96) 100%
             );
         }
 
-        /* ── Top Living Flow HUD Bar ── */
+        /* Top Quiet Navigation & Status Bar */
         .xbox-top-bar {
-            padding: 20px 28px 12px 28px;
-            background: transparent;
+            padding: 16px 32px 12px 32px;
+            background-color: rgba(15, 15, 16, 0.76);
+            border-bottom: 1px solid rgba(237, 237, 237, 0.08);
         }
 
         .xbox-avatar {
-            min-width: 38px;
-            min-height: 38px;
-            border-radius: 9999px;
-            border: 1.5px solid rgba(255, 255, 255, 0.22);
-            background-color: #18191e;
+            min-width: 32px;
+            min-height: 32px;
+            border-radius: 999px;
+            border: 1px solid rgba(237, 237, 237, 0.12);
+            background-color: #19191b;
             margin-right: 12px;
-            padding: 2px;
         }
 
         .xbox-gamertag {
-            color: #f4f4f6;
-            font-size: 15px;
-            font-weight: 700;
-            letter-spacing: -0.2px;
-            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.88);
+            color: #ededed;
+            font-size: 14px;
+            font-weight: 500;
+            letter-spacing: 0px;
         }
 
-        .xbox-badge-tag {
-            background: rgba(244, 244, 246, 0.94);
-            color: #111215;
-            font-size: 9px;
-            font-weight: 900;
-            padding: 2px 7px;
+        .gz-platform-tag {
+            background-color: #19191b;
+            color: #a1a1a6;
+            border: 1px solid rgba(237, 237, 237, 0.08);
+            border-radius: 4px;
+            padding: 2px 8px;
+            margin-left: 8px;
+            font-size: 12px;
+            font-weight: 400;
+            letter-spacing: 0px;
+        }
+
+        .gz-status-dot {
+            min-width: 8px;
+            min-height: 8px;
             border-radius: 999px;
-            margin-left: 8px;
-            letter-spacing: 0.6px;
-            min-height: 14px;
+            background-color: #85858b;
         }
 
-        .xbox-gamerscore {
-            color: #a1a1aa;
-            font-size: 13px;
-            font-weight: 600;
-            margin-left: 8px;
+        .gz-status-dot.online,
+        .gz-status-dot.installed,
+        .gz-status-dot.safe {
+            background-color: #4cc38a;
         }
 
-        .xbox-score-icon {
-            color: #e54d2e;
-            font-size: 13px;
-            font-weight: 800;
-            margin-right: 3px;
+        .gz-status-dot.offline,
+        .gz-status-dot.warn {
+            background-color: #d9a03f;
+        }
+
+        .gz-status-dot.ember {
+            background-color: #e0573c;
+        }
+
+        .gz-status-text {
+            color: #85858b;
+            font-size: 12px;
+            font-weight: 400;
+            letter-spacing: 0px;
+            font-feature-settings: "tnum";
         }
 
         .xbox-top-nav-group {
-            background: rgba(22, 23, 28, 0.86);
-            border: 1px solid rgba(255, 255, 255, 0.10);
-            border-radius: 999px;
-            padding: 4px 6px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.42);
-        }
-
-        .xbox-nav-icon-btn {
-            background: transparent;
-            color: #c8cbd2;
-            border-radius: 999px;
-            padding: 6px 12px;
-            border: 1px solid transparent;
-            font-size: 12.5px;
-            font-weight: 700;
-            transition: all 180ms cubic-bezier(0.22, 1, 0.36, 1);
-        }
-
-        .xbox-nav-icon-btn:hover {
-            color: #ffffff;
-            background: rgba(255, 255, 255, 0.08);
-        }
-
-        .xbox-nav-icon-btn:focus {
-            color: #ffffff;
-            background: rgba(255, 255, 255, 0.16);
-            border: 1px solid rgba(255, 255, 255, 0.34);
-            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.36);
-        }
-
-        .xbox-nav-icon-btn.active {
-            color: #ffffff;
-            background: rgba(255, 255, 255, 0.13);
-            border: 1px solid rgba(255, 255, 255, 0.22);
-        }
-
-        .xbox-nav-btn-icon {
-            margin-right: 4px;
-            min-width: 16px;
-            min-height: 16px;
-        }
-
-        /* ── Search & Filter Omnibar In Drawer ── */
-        .xbox-search-bar {
-            background: #1c1e24;
-            color: #f4f4f6;
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 999px;
-            padding: 9px 18px;
-            font-size: 14px;
-            margin-bottom: 16px;
-        }
-
-        .xbox-search-bar:focus {
-            border: 1px solid rgba(255, 255, 255, 0.32);
+            background-color: #19191b;
+            border: 1px solid rgba(237, 237, 237, 0.08);
+            border-radius: 12px;
+            padding: 4px;
             box-shadow: none;
         }
 
-        /* ── Settings & Store Panels ── */
-        .xbox-modal-drawer {
-            background: rgba(20, 21, 26, 0.96);
-            border-radius: 22px;
-            border: 1px solid rgba(255, 255, 255, 0.11);
-            padding: 24px 32px;
+        .xbox-nav-icon-btn {
+            background-color: transparent;
+            background-image: none;
+            color: #a1a1a6;
+            border: 1px solid transparent;
+            border-bottom: 2px solid transparent;
+            border-radius: 8px;
+            min-height: 36px;
+            padding: 6px 12px;
+            font-size: 14px;
+            font-weight: 400;
+            letter-spacing: 0px;
+            box-shadow: none;
+            transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        .xbox-nav-icon-btn:hover {
+            color: #ededed;
+            background-color: #232325;
+        }
+
+        .xbox-nav-icon-btn:active {
+            transform: scale(0.98);
+        }
+
+        .xbox-nav-icon-btn.active {
+            color: #ededed;
+            background-color: #232325;
+            font-weight: 500;
+            border: 1px solid rgba(237, 237, 237, 0.12);
+            border-bottom: 2px solid #c83b22;
+        }
+
+        .gz-btn-icon {
+            color: #85858b;
+            -gtk-icon-size: 16px;
+        }
+
+        .xbox-nav-icon-btn.active .gz-btn-icon,
+        .xbox-nav-icon-btn:hover .gz-btn-icon,
+        .gz-subtab-btn.active .gz-btn-icon,
+        .gz-subtab-btn:hover .gz-btn-icon,
+        .gz-hero-action-btn .gz-btn-icon,
+        .xbox-apps-close-btn .gz-btn-icon {
+            color: #a1a1a6;
+        }
+
+        .gz-hero-play-primary .gz-btn-icon {
+            color: #141415;
+        }
+
+        /* Search Input */
+        .xbox-search-bar {
+            background-color: #232325;
+            background-image: none;
+            color: #ededed;
+            border: 1px solid rgba(237, 237, 237, 0.12);
+            border-radius: 8px;
+            padding: 8px 12px;
+            min-height: 20px;
+            font-size: 14px;
+            font-weight: 400;
+            letter-spacing: 0px;
+            caret-color: #ededed;
+            margin-bottom: 12px;
+            transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        border-color 150ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        .xbox-search-bar:focus {
+            border-color: rgba(224, 87, 60, 0.65);
+            box-shadow: none;
+        }
+
+        /* Settings, Store & All Applications Drawers */
+        .xbox-modal-drawer,
+        .xbox-apps-drawer {
+            background-color: #141415;
+            background-image: none;
+            border-radius: 16px;
+            border: 1px solid rgba(237, 237, 237, 0.08);
+            padding: 20px 24px;
             margin-top: 8px;
-            margin-bottom: 24px;
-            box-shadow: 0 18px 44px rgba(0, 0, 0, 0.72);
+            margin-bottom: 16px;
+            box-shadow: none;
         }
 
         .xbox-modal-card {
-            background: #22242c;
-            border-radius: 16px;
-            border: 1px solid rgba(255, 255, 255, 0.09);
+            background-color: #19191b;
+            background-image: none;
+            border-radius: 12px;
+            border: 1px solid rgba(237, 237, 237, 0.08);
             padding: 16px 20px;
-            margin-right: 14px;
-            min-width: 220px;
-            transition: all 160ms cubic-bezier(0.22, 1, 0.36, 1);
+            margin-right: 12px;
+            min-width: 240px;
+            box-shadow: none;
+            transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
         }
 
-        .xbox-modal-card:hover, .xbox-modal-card:focus {
-            border: 1px solid rgba(255, 255, 255, 0.36);
-            background: #2a2d37;
-            transform: scale(1.02);
+        .xbox-modal-card:hover {
+            background-color: #232325;
+            border-color: rgba(237, 237, 237, 0.16);
+        }
+
+        .xbox-modal-card:active {
+            transform: scale(0.98);
         }
 
         .xbox-modal-card-title {
-            color: #f4f4f6;
-            font-size: 15px;
-            font-weight: 700;
+            color: #ededed;
+            font-size: 14px;
+            font-weight: 500;
+            letter-spacing: 0px;
         }
 
         .xbox-modal-card-desc {
-            color: #9ca3af;
-            font-size: 12px;
+            color: #a1a1a6;
+            font-size: 13px;
+            font-weight: 400;
+            letter-spacing: 0px;
             margin-top: 4px;
         }
 
         .xbox-hud-right {
-            color: #d4d4d8;
+            color: #a1a1a6;
             font-size: 13px;
-            font-weight: 600;
+            font-weight: 400;
+            letter-spacing: 0px;
+            font-feature-settings: "tnum";
         }
 
         .xbox-hud-time {
-            color: #f4f4f6;
+            color: #ededed;
             font-size: 14px;
-            font-weight: 700;
-            margin-left: 12px;
+            font-weight: 500;
+            letter-spacing: 0px;
+            font-feature-settings: "tnum";
         }
 
         .xbox-lang-btn {
-            background: rgba(255, 255, 255, 0.08);
-            color: #e4e4e7;
-            font-size: 11px;
-            font-weight: 700;
-            border-radius: 999px;
-            padding: 4px 11px;
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            margin-left: 14px;
-            transition: all 150ms ease;
+            background-color: #232325;
+            background-image: none;
+            color: #ededed;
+            font-size: 12px;
+            font-weight: 500;
+            letter-spacing: 0px;
+            border-radius: 8px;
+            min-height: 36px;
+            padding: 6px 12px;
+            border: 1px solid rgba(237, 237, 237, 0.12);
+            box-shadow: none;
+            transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
         }
 
-        .xbox-lang-btn:hover, .xbox-lang-btn:focus {
-            background: #f2f3f5;
-            color: #111215;
-            border-color: #ffffff;
+        .xbox-lang-btn:hover {
+            background-color: #2c2c2f;
+            border-color: rgba(237, 237, 237, 0.18);
+            color: #ededed;
         }
 
-        /* ── Main Content Vertical Flow ── */
+        .xbox-lang-btn:active {
+            transform: scale(0.98);
+        }
+
+        /* Main Content Vertical Flow */
         .xbox-main-scroll {
-            background: transparent;
-            padding: 0;
-            margin: 0;
+            background-color: transparent;
+            padding: 0px;
+            margin: 0px;
         }
 
         .xbox-content-box {
-            padding: 0 44px 28px 44px;
-            background: transparent;
+            padding: 0px 32px 24px 32px;
+            background-color: transparent;
         }
 
         .xbox-hero-spacer {
-            min-height: 184px;
-            padding-top: 14px;
-            padding-bottom: 12px;
+            min-height: 192px;
+            padding-top: 16px;
+            padding-bottom: 16px;
         }
 
+        /* Vivid 16:9 Live Preview Frame (Visual Moment Companion) */
         .gz-preview-frame {
-            background: rgba(16, 17, 22, 0.92);
-            border: 1px solid rgba(255, 255, 255, 0.16);
-            border-radius: 18px;
+            background-color: #141415;
+            border: 1px solid rgba(237, 237, 237, 0.12);
+            border-radius: 12px;
             min-width: 304px;
-            min-height: 171px;
-            box-shadow: 0 14px 36px rgba(0, 0, 0, 0.65);
+            min-height: 172px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
         }
 
         .gz-preview-pic {
-            border-radius: 17px;
+            border-radius: 11px;
             min-width: 304px;
-            min-height: 171px;
+            min-height: 172px;
         }
 
         .gz-preview-badge {
-            background: rgba(14, 15, 19, 0.84);
-            color: #f4f4f6;
-            border: 1px solid rgba(255, 255, 255, 0.18);
-            border-radius: 999px;
-            padding: 3px 10px;
-            margin: 10px;
-            font-size: 10px;
-            font-weight: 800;
-            letter-spacing: 0.6px;
+            background-color: rgba(20, 20, 21, 0.88);
+            color: #ededed;
+            border: 1px solid rgba(237, 237, 237, 0.12);
+            border-radius: 6px;
+            padding: 4px 8px;
+            margin: 8px;
+            font-size: 12px;
+            font-weight: 500;
+            letter-spacing: 0px;
+        }
+
+        /* Primary Button: Off-white #ededed fill, #141415 text */
+        .gz-hero-play-primary {
+            background-color: #ededed;
+            background-image: none;
+            color: #141415;
+            border: 1px solid #ededed;
+            border-radius: 8px;
+            min-height: 40px;
+            padding: 8px 16px;
+            font-size: 14px;
+            font-weight: 500;
+            letter-spacing: 0px;
+            box-shadow: none;
+            transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        .gz-hero-play-primary:hover {
+            background-color: #ffffff;
+            border-color: #ffffff;
+            color: #141415;
+        }
+
+        .gz-hero-play-primary:active {
+            transform: scale(0.98);
+        }
+
+        /* Secondary Chrome Buttons: Graphite #232325 + Hairline */
+        .gz-hero-action-btn,
+        .xbox-apps-close-btn {
+            background-color: #232325;
+            background-image: none;
+            color: #ededed;
+            border: 1px solid rgba(237, 237, 237, 0.12);
+            border-radius: 8px;
+            min-height: 36px;
+            padding: 8px 16px;
+            font-size: 14px;
+            font-weight: 500;
+            letter-spacing: 0px;
+            box-shadow: none;
+            transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
         }
 
         .gz-hero-action-btn {
-            background: rgba(255, 255, 255, 0.09);
-            color: #f4f4f6;
-            border: 1px solid rgba(255, 255, 255, 0.16);
-            border-radius: 999px;
-            padding: 6px 15px;
-            font-size: 12px;
-            font-weight: 700;
-            transition: all 160ms cubic-bezier(0.22, 1, 0.36, 1);
+            min-height: 40px;
         }
 
-        .gz-hero-action-btn:hover, .gz-hero-action-btn:focus {
-            background: rgba(255, 255, 255, 0.18);
-            border-color: rgba(255, 255, 255, 0.36);
+        .gz-toolbar-btn {
+            min-height: 36px;
+            padding: 8px 12px;
         }
 
-        .gz-hero-play-primary {
-            background: #f4f4f6;
-            color: #111216;
-            border: 1px solid #ffffff;
-            border-radius: 999px;
-            padding: 6px 18px;
-            font-size: 12px;
-            font-weight: 800;
-            transition: all 160ms cubic-bezier(0.22, 1, 0.36, 1);
+        .gz-hero-action-btn:hover,
+        .xbox-apps-close-btn:hover {
+            background-color: #2c2c2f;
+            border-color: rgba(237, 237, 237, 0.18);
+            color: #ededed;
         }
 
-        .gz-hero-play-primary:hover, .gz-hero-play-primary:focus {
-            background: #ffffff;
-            transform: scale(1.02);
+        .gz-hero-action-btn:active,
+        .xbox-apps-close-btn:active {
+            transform: scale(0.98);
         }
 
+        /* Segmented Sub-Tab Bar */
         .gz-subtab-bar {
-            background: rgba(22, 23, 29, 0.86);
-            border: 1px solid rgba(255, 255, 255, 0.10);
-            border-radius: 999px;
-            padding: 4px 5px;
-            margin-bottom: 10px;
+            background-color: #19191b;
+            border: 1px solid rgba(237, 237, 237, 0.08);
+            border-radius: 12px;
+            padding: 4px;
         }
 
         .gz-subtab-btn {
-            background: transparent;
-            color: #a1a1aa;
+            background-color: transparent;
+            background-image: none;
+            color: #a1a1a6;
             border: 1px solid transparent;
-            border-radius: 999px;
-            padding: 5px 15px;
-            font-size: 12px;
-            font-weight: 700;
-            transition: all 160ms cubic-bezier(0.22, 1, 0.36, 1);
+            border-bottom: 2px solid transparent;
+            border-radius: 8px;
+            min-height: 36px;
+            padding: 6px 12px;
+            font-size: 14px;
+            font-weight: 400;
+            letter-spacing: 0px;
+            font-feature-settings: "tnum";
+            box-shadow: none;
+            transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
         }
 
         .gz-subtab-btn:hover {
-            color: #f4f4f6;
-            background: rgba(255, 255, 255, 0.06);
+            color: #ededed;
+            background-color: #232325;
+        }
+
+        .gz-subtab-btn:active {
+            transform: scale(0.98);
         }
 
         .gz-subtab-btn.active {
-            background: rgba(255, 255, 255, 0.14);
-            color: #ffffff;
-            border: 1px solid rgba(255, 255, 255, 0.24);
-            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.32);
+            background-color: #232325;
+            color: #ededed;
+            font-weight: 500;
+            border: 1px solid rgba(237, 237, 237, 0.12);
+            border-bottom: 2px solid #c83b22;
+            box-shadow: none;
         }
 
         .gz-card-discount-pill {
-            background: rgba(22, 101, 52, 0.92);
-            color: #dcfce7;
-            border: 1px solid rgba(74, 222, 128, 0.35);
-            border-radius: 999px;
+            background-color: rgba(20, 20, 21, 0.90);
+            color: #4cc38a;
+            border: 1px solid rgba(76, 195, 138, 0.45);
+            border-radius: 4px;
             padding: 2px 8px;
             margin: 8px;
-            font-size: 10px;
-            font-weight: 800;
+            font-size: 12px;
+            font-weight: 500;
+            letter-spacing: 0px;
+            font-feature-settings: "tnum";
         }
 
         .gz-card-installed-pill {
-            background: rgba(207, 63, 36, 0.92);
-            color: #ffffff;
-            border: 1px solid rgba(255, 255, 255, 0.28);
-            border-radius: 999px;
+            background-color: rgba(20, 20, 21, 0.90);
+            color: #ededed;
+            border: 1px solid rgba(224, 87, 60, 0.55);
+            border-radius: 4px;
             padding: 2px 8px;
             margin: 8px;
-            font-size: 9.5px;
-            font-weight: 800;
+            font-size: 12px;
+            font-weight: 500;
+            letter-spacing: 0px;
         }
 
         .gz-local-empty-card {
-            background: rgba(24, 26, 32, 0.90);
-            border: 1px solid rgba(255, 255, 255, 0.10);
-            border-radius: 18px;
-            padding: 18px 24px;
-            margin-bottom: 18px;
+            background-color: #19191b;
+            border: 1px solid rgba(237, 237, 237, 0.08);
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 16px;
         }
 
-        .xbox-hero-kicker {
-            color: #f0785a;
-            font-size: 11px;
-            font-weight: 800;
-            letter-spacing: 1.4px;
-            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.90);
-        }
-
-        .xbox-hero-headline {
-            color: #f4f4f6;
-            font-size: 28px;
-            font-weight: 800;
-            letter-spacing: -0.5px;
-            margin-top: 4px;
-            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.90);
+        .gz-hero-meta {
+            color: #a1a1a6;
+            font-size: 12px;
+            font-weight: 400;
+            letter-spacing: 0px;
+            font-feature-settings: "tnum";
         }
 
         .xbox-hero-desc {
-            color: #d4d4d8;
-            font-size: 13.5px;
-            font-weight: 500;
+            color: #a1a1a6;
+            font-size: 14px;
+            font-weight: 400;
+            letter-spacing: 0px;
             margin-top: 4px;
-            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.90);
         }
 
-        /* ── Focused Title Label ── */
+        /* Focused Hero Game Title */
         .xbox-active-title-label {
-            color: #f4f4f6;
-            font-size: 23px;
-            font-weight: 800;
-            letter-spacing: -0.4px;
+            color: #ededed;
+            font-size: 24px;
+            font-weight: 600;
+            letter-spacing: 0px;
             margin-bottom: 4px;
-            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.75);
         }
 
-        .xbox-active-badge {
-            background: rgba(207, 63, 36, 0.20);
-            color: #f5b4a5;
-            border: 1px solid rgba(229, 77, 46, 0.36);
-            border-radius: 999px;
-            padding: 3px 11px;
-            font-size: 10.5px;
-            font-weight: 800;
-            margin-left: 10px;
-            margin-bottom: 5px;
-            letter-spacing: 0.6px;
-        }
-
-        /* ── Game Carousel Row ── */
+        /* Game Artwork Carousel Row */
         .xbox-carousel-scroll {
-            background: transparent;
-            margin-bottom: 16px;
+            background-color: transparent;
+            margin-bottom: 20px;
         }
 
         .xbox-carousel-scroll undershoot.top,
         .xbox-carousel-scroll undershoot.bottom,
         .xbox-carousel-scroll undershoot.left,
         .xbox-carousel-scroll undershoot.right {
-            background: none;
+            background-image: none;
         }
 
         .xbox-carousel-scroll scrollbar {
             opacity: 0;
-            min-height: 0;
-            min-width: 0;
+            min-height: 0px;
+            min-width: 0px;
         }
 
         .xbox-game-card {
-            background: linear-gradient(180deg, rgba(28, 30, 36, 0.96), rgba(18, 19, 24, 0.98));
+            background-color: #19191b;
             background-image: none;
-            border-radius: 20px;
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            padding: 0;
-            margin-right: 14px;
-            margin-top: 8px;
-            margin-bottom: 8px;
-            min-width: 156px;
-            min-height: 156px;
-            transition: all 200ms cubic-bezier(0.22, 1, 0.36, 1);
-            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.52);
+            border-radius: 12px;
+            border: 1px solid rgba(237, 237, 237, 0.10);
+            padding: 0px;
+            margin-right: 12px;
+            margin-top: 4px;
+            margin-bottom: 4px;
+            min-width: 160px;
+            min-height: 160px;
+            box-shadow: none;
+            transition: border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
         }
 
         .xbox-game-card:hover {
-            border-color: rgba(255, 255, 255, 0.42);
-            transform: scale(1.03);
+            border-color: rgba(237, 237, 237, 0.32);
         }
 
-        .xbox-game-card:focus, .xbox-game-card.active-focus {
-            border: 1.5px solid rgba(255, 255, 255, 0.80);
-            box-shadow: 0 14px 32px rgba(0, 0, 0, 0.72);
-            transform: scale(1.05);
+        .xbox-game-card:focus,
+        .xbox-game-card.active-focus {
+            border: 2px solid #e0573c;
+        }
+
+        .xbox-game-card:active {
+            transform: scale(0.98);
         }
 
         .xbox-game-card-img {
-            border-radius: 19px;
-            min-width: 156px;
-            min-height: 156px;
+            border-radius: 11px;
+            min-width: 160px;
+            min-height: 160px;
         }
 
+        /* Minimal Dark Readability Scrim Over Cover Art Only */
         .xbox-card-caption {
-            background: linear-gradient(180deg, rgba(14, 15, 19, 0.0) 0%, rgba(14, 15, 19, 0.84) 48%, rgba(14, 15, 19, 0.96) 100%);
-            border-bottom-left-radius: 19px;
-            border-bottom-right-radius: 19px;
-            padding: 18px 11px 9px 11px;
+            background-image: linear-gradient(
+                180deg,
+                rgba(15, 15, 16, 0.0) 0%,
+                rgba(15, 15, 16, 0.86) 62%,
+                rgba(15, 15, 16, 0.96) 100%
+            );
+            border-bottom-left-radius: 11px;
+            border-bottom-right-radius: 11px;
+            padding: 16px 12px 8px 12px;
         }
 
         .xbox-card-caption-title {
-            color: #f4f4f6;
-            font-size: 12px;
-            font-weight: 700;
-        }
-
-        /* ── Bento Grid Bottom Banners ── */
-        .xbox-bento-row {
-            margin-bottom: 20px;
-        }
-
-        .xbox-bento-card {
-            background: #181a20;
-            border-radius: 18px;
-            border: 1px solid rgba(255, 255, 255, 0.10);
-            padding: 0;
-            margin-right: 14px;
-            min-width: 275px;
-            min-height: 155px;
-            transition: all 180ms cubic-bezier(0.22, 1, 0.36, 1);
-            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.48);
-        }
-
-        .xbox-bento-card:hover, .xbox-bento-card:focus {
-            border: 1.5px solid rgba(255, 255, 255, 0.48);
-            box-shadow: 0 14px 30px rgba(0, 0, 0, 0.68);
-            transform: scale(1.025);
-        }
-
-        .xbox-bento-overlay-box {
-            background: linear-gradient(180deg, rgba(12, 13, 16, 0.05) 0%, rgba(12, 13, 16, 0.82) 100%);
-            border-radius: 17px;
-            padding: 14px 16px;
-        }
-
-        .xbox-bento-tag {
-            color: #e56b4e;
-            font-size: 10px;
-            font-weight: 800;
-            text-transform: uppercase;
-            letter-spacing: 0.9px;
-        }
-
-        .xbox-bento-title {
-            color: #f4f4f6;
-            font-size: 15px;
-            font-weight: 700;
-            margin-top: 2px;
-            text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
-        }
-
-        .xbox-bento-subtitle {
-            color: #a1a1aa;
-            font-size: 12px;
+            color: #ededed;
+            font-size: 13px;
             font-weight: 500;
-            margin-top: 2px;
+            letter-spacing: 0px;
         }
 
-        /* ── All Apps View Grid ── */
-        .xbox-apps-drawer {
-            background: rgba(20, 21, 26, 0.96);
-            border-radius: 22px;
-            border: 1px solid rgba(255, 255, 255, 0.11);
-            padding: 24px 32px;
-            margin-top: 8px;
-            margin-bottom: 24px;
-        }
-
-        .xbox-apps-header {
-            color: #f4f4f6;
-            font-size: 20px;
-            font-weight: 800;
+        /* Quiet Graphite Utility Cards (Bottom Row) */
+        .xbox-bento-row {
             margin-bottom: 16px;
         }
 
-        .xbox-apps-close-btn {
-            background: rgba(255, 255, 255, 0.08);
-            color: #f4f4f6;
-            font-size: 12px;
-            font-weight: 700;
-            border-radius: 999px;
-            padding: 6px 14px;
-            border: 1px solid rgba(255, 255, 255, 0.16);
+        .xbox-bento-card {
+            background-color: #19191b;
+            background-image: none;
+            border-radius: 12px;
+            border: 1px solid rgba(237, 237, 237, 0.08);
+            padding: 16px 20px;
+            min-height: 96px;
+            box-shadow: none;
+            transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
         }
 
-        .xbox-apps-close-btn:hover, .xbox-apps-close-btn:focus {
-            background: #c83b22;
-            border-color: rgba(255, 255, 255, 0.32);
+        .xbox-bento-card:hover {
+            background-color: #232325;
+            border-color: rgba(237, 237, 237, 0.16);
+        }
+
+        .xbox-bento-card:active {
+            transform: scale(0.98);
+        }
+
+        .xbox-bento-icon {
+            color: #85858b;
+            -gtk-icon-size: 16px;
+        }
+
+        .xbox-bento-title {
+            color: #ededed;
+            font-size: 16px;
+            font-weight: 500;
+            letter-spacing: 0px;
+        }
+
+        .xbox-bento-subtitle {
+            color: #a1a1a6;
+            font-size: 13px;
+            font-weight: 400;
+            letter-spacing: 0px;
+            margin-top: 4px;
+            font-feature-settings: "tnum";
+        }
+
+        /* Drawer Titles & App Tiles */
+        .xbox-apps-header {
+            color: #ededed;
+            font-size: 20px;
+            font-weight: 600;
+            letter-spacing: 0px;
+            margin-bottom: 12px;
         }
 
         .xbox-app-tile {
-            background: #20222a;
-            border-radius: 14px;
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            background-color: #19191b;
+            background-image: none;
+            border-radius: 12px;
+            border: 1px solid rgba(237, 237, 237, 0.08);
             padding: 12px;
             margin-right: 12px;
             margin-bottom: 12px;
-            min-width: 150px;
-            transition: all 150ms ease;
+            min-width: 148px;
+            box-shadow: none;
+            transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
         }
 
-        .xbox-app-tile:hover, .xbox-app-tile:focus {
-            border: 1px solid rgba(255, 255, 255, 0.36);
-            background: #282b35;
-            transform: scale(1.03);
+        .xbox-app-tile:hover {
+            background-color: #232325;
+            border-color: rgba(237, 237, 237, 0.16);
+        }
+
+        .xbox-app-tile:active {
+            transform: scale(0.98);
         }
 
         .xbox-app-title {
-            color: #f4f4f6;
-            font-size: 12px;
-            font-weight: 700;
-            margin-top: 6px;
+            color: #ededed;
+            font-size: 13px;
+            font-weight: 400;
+            letter-spacing: 0px;
+            margin-top: 8px;
         }
 
-        /* ── Bottom Gamepad Bar (Legend) ── */
+        /* Bottom Controller & Keyboard Keycap Bar */
         .xbox-controller-bar {
-            background: rgba(15, 16, 20, 0.90);
-            border-top: 1px solid rgba(255, 255, 255, 0.08);
-            padding: 10px 44px;
+            background-color: #0f0f10;
+            border-top: 1px solid rgba(237, 237, 237, 0.08);
+            padding: 12px 32px;
         }
 
-        .xbox-legend-key {
-            background: rgba(255, 255, 255, 0.10);
-            color: #f4f4f6;
-            border: 1px solid rgba(255, 255, 255, 0.18);
-            border-radius: 9999px;
-            font-size: 11px;
-            font-weight: 800;
-            min-width: 20px;
+        .gz-legend-group {
+            margin-right: 24px;
+        }
+
+        .gz-keycap {
+            background-color: #232325;
+            color: #ededed;
+            border: 1px solid rgba(237, 237, 237, 0.12);
+            border-bottom: 2px solid rgba(0, 0, 0, 0.72);
+            border-radius: 6px;
+            padding: 2px 8px;
             min-height: 20px;
-            padding: 2px 6px;
-            margin-right: 6px;
+            font-family: monospace;
+            font-size: 12px;
+            font-weight: 500;
+            letter-spacing: 0px;
+            font-feature-settings: "tnum";
+            box-shadow: inset 0 1px 0 rgba(237, 237, 237, 0.08);
+        }
+
+        .gz-keycap-sep {
+            color: #85858b;
+            font-size: 12px;
+            font-weight: 400;
         }
 
         .xbox-legend-desc {
-            color: #a1a1aa;
+            color: #a1a1a6;
             font-size: 12px;
-            font-weight: 600;
-            margin-right: 28px;
+            font-weight: 400;
+            letter-spacing: 0px;
         }
 
-        /* ── Offline Banner ── */
+        /* Offline Notice Banner */
         .xbox-offline-banner {
-            background: rgba(44, 24, 22, 0.90);
-            border: 1px solid rgba(229, 77, 46, 0.38);
-            border-radius: 14px;
+            background-color: #19191b;
+            border: 1px solid rgba(217, 160, 63, 0.35);
+            border-radius: 12px;
             padding: 8px 16px;
-            margin: 0 44px 12px 44px;
+            margin: 12px 32px 0px 32px;
+        }
+
+        .gz-offline-icon {
+            color: #d9a03f;
+            -gtk-icon-size: 16px;
+        }
+
+        .gz-offline-text {
+            color: #ededed;
+            font-size: 13px;
+            font-weight: 400;
+            letter-spacing: 0px;
+        }
+
+        .gz-modal-meta {
+            color: #a1a1a6;
+            font-size: 13px;
+            font-weight: 400;
+            letter-spacing: 0px;
+            font-feature-settings: "tnum";
         }
     "#;
 
@@ -1710,10 +1928,13 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     offline_banner.add_css_class("xbox-offline-banner");
     offline_banner.set_visible(!is_online);
 
-    let offline_icon = Label::new(Some("!"));
-    offline_icon.set_css_classes(&["xbox-legend-key"]);
+    let offline_icon = build_symbolic_icon(
+        &["network-offline-symbolic", "dialog-warning-symbolic"],
+        "gz-offline-icon",
+    );
 
     let offline_label = Label::new(Some(lang.offline_alert()));
+    offline_label.add_css_class("gz-offline-text");
     offline_label.set_hexpand(true);
     offline_label.set_halign(gtk4::Align::Start);
 
@@ -1737,25 +1958,25 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
             .args([
                 "-a", "Blaze GameZone",
                 "-i", "network-offline",
-                "Çevrimdışı Uyarı",
+                "Çevrimdışı bildirim",
                 msg,
             ])
             .spawn();
     });
 
-    // ── TOP FLUENT HUD BAR ──
+    // ── TOP QUIET NAVIGATION & STATUS BAR ──
     let top_bar = GtkBox::new(Orientation::Horizontal, 0);
     top_bar.add_css_class("xbox-top-bar");
 
-    // Left: Avatar + Gamertag + Gamerscore
+    // Left: Avatar + Player Name + Platform Tag + Real Online/Offline Dot
     let user_box = GtkBox::new(Orientation::Horizontal, 0);
     user_box.set_valign(gtk4::Align::Center);
 
     let acct: AccountSummary = gamezone_live::detect_accounts_with_avatar();
 
     let avatar_img = Image::new();
-    avatar_img.set_pixel_size(34);
-    avatar_img.set_size_request(34, 34);
+    avatar_img.set_pixel_size(32);
+    avatar_img.set_size_request(32, 32);
     avatar_img.add_css_class("xbox-avatar");
 
     let mut avatar_loaded = false;
@@ -1777,19 +1998,24 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
                 let gbytes = glib::Bytes::from(&bytes);
                 if let Ok(tex) = gdk::Texture::from_bytes(&gbytes) {
                     avatar_img.set_paintable(Some(&tex));
+                    avatar_loaded = true;
                     break;
                 }
             }
         }
     }
+    if !avatar_loaded {
+        set_symbolic_icon(&avatar_img, &["avatar-default-symbolic", "user-home-symbolic"]);
+        avatar_img.set_pixel_size(16);
+    }
     user_box.append(&avatar_img);
 
     let (gamertag_text, badge_tag_text) = if let Some(ref s) = acct.steam_persona {
-        (s.clone(), "STEAM")
+        (s.clone(), "Steam")
     } else if let Some(ref e) = acct.epic_display_name {
-        (e.clone(), "EPIC")
+        (e.clone(), "Epic")
     } else {
-        (lang.guest_player().to_string(), "BLAZE OS")
+        (lang.guest_player().to_string(), "GameZone")
     };
 
     let lbl_tag = Label::new(Some(&gamertag_text));
@@ -1797,26 +2023,35 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     lbl_tag.set_valign(gtk4::Align::Center);
     user_box.append(&lbl_tag);
 
-    let lbl_ultimate = Label::new(Some(badge_tag_text));
-    lbl_ultimate.add_css_class("xbox-badge-tag");
-    lbl_ultimate.set_valign(gtk4::Align::Center);
-    user_box.append(&lbl_ultimate);
+    let lbl_platform = Label::new(Some(badge_tag_text));
+    lbl_platform.add_css_class("gz-platform-tag");
+    lbl_platform.set_valign(gtk4::Align::Center);
+    user_box.append(&lbl_platform);
 
-    let score_box = GtkBox::new(Orientation::Horizontal, 2);
-    score_box.set_valign(gtk4::Align::Center);
-    score_box.set_margin_start(10);
+    let net_box = GtkBox::new(Orientation::Horizontal, 8);
+    net_box.set_valign(gtk4::Align::Center);
+    net_box.set_margin_start(12);
 
-    let lbl_score_icon = Label::new(Some("G"));
-    lbl_score_icon.add_css_class("xbox-score-icon");
-    lbl_score_icon.set_valign(gtk4::Align::Center);
+    let net_dot = GtkBox::new(Orientation::Horizontal, 0);
+    net_dot.add_css_class("gz-status-dot");
+    net_dot.add_css_class(if is_online { "online" } else { "offline" });
+    net_dot.set_size_request(8, 8);
+    net_dot.set_valign(gtk4::Align::Center);
+    net_dot.set_halign(gtk4::Align::Center);
+    net_dot.set_hexpand(false);
+    net_dot.set_vexpand(false);
 
-    let lbl_score = Label::new(Some("21,337"));
-    lbl_score.add_css_class("xbox-gamerscore");
-    lbl_score.set_valign(gtk4::Align::Center);
+    let net_lbl = Label::new(Some(if is_online {
+        lang.no_account_online()
+    } else {
+        lang.no_account_offline()
+    }));
+    net_lbl.add_css_class("gz-status-text");
+    net_lbl.set_valign(gtk4::Align::Center);
 
-    score_box.append(&lbl_score_icon);
-    score_box.append(&lbl_score);
-    user_box.append(&score_box);
+    net_box.append(&net_dot);
+    net_box.append(&net_lbl);
+    user_box.append(&net_box);
 
     top_bar.append(&user_box);
 
@@ -1825,36 +2060,51 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     top_spacer1.set_hexpand(true);
     top_bar.append(&top_spacer1);
 
-    // Center: Nav icon group (Library, Store, Game Pass, Search, Settings)
+    // Center: Nav icon group (Library, Store, Discover, Search, Settings)
     let nav_pill_group = GtkBox::new(Orientation::Horizontal, 4);
     nav_pill_group.add_css_class("xbox-top-nav-group");
     nav_pill_group.set_valign(gtk4::Align::Center);
 
-    let btn_library = create_nav_button(match lang {
-        Language::TR => "Kütüphane",
-        Language::EN => "Library",
-    }, "xbox_nav_library");
+    let btn_library = create_nav_button(
+        match lang {
+            Language::TR => "Kütüphane",
+            Language::EN => "Library",
+        },
+        &["view-grid-symbolic", "view-app-grid-symbolic"],
+    );
     btn_library.add_css_class("active");
 
-    let btn_store = create_nav_button(match lang {
-        Language::TR => "Mağaza",
-        Language::EN => "Store",
-    }, "xbox_nav_store");
+    let btn_store = create_nav_button(
+        match lang {
+            Language::TR => "Mağaza",
+            Language::EN => "Store",
+        },
+        &["system-software-install-symbolic", "package-x-generic-symbolic", "document-open-symbolic"],
+    );
 
-    let btn_discover = create_nav_button(match lang {
-        Language::TR => "Keşfet",
-        Language::EN => "Game Pass",
-    }, "xbox_nav_gamepass");
+    let btn_discover = create_nav_button(
+        match lang {
+            Language::TR => "Keşfet",
+            Language::EN => "Discover",
+        },
+        &["input-gaming-symbolic", "applications-games-symbolic", "web-browser-symbolic"],
+    );
 
-    let btn_search = create_nav_button(match lang {
-        Language::TR => "Ara",
-        Language::EN => "Search",
-    }, "xbox_nav_search");
+    let btn_search = create_nav_button(
+        match lang {
+            Language::TR => "Ara",
+            Language::EN => "Search",
+        },
+        &["system-search-symbolic", "edit-find-symbolic"],
+    );
 
-    let btn_settings = create_nav_button(match lang {
-        Language::TR => "Ayarlar",
-        Language::EN => "Settings",
-    }, "xbox_nav_settings");
+    let btn_settings = create_nav_button(
+        match lang {
+            Language::TR => "Ayarlar",
+            Language::EN => "Settings",
+        },
+        &["preferences-system-symbolic", "emblem-system-symbolic"],
+    );
 
     nav_pill_group.append(&btn_library);
     nav_pill_group.append(&btn_store);
@@ -1869,22 +2119,32 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     top_spacer2.set_hexpand(true);
     top_bar.append(&top_spacer2);
 
-    // Right: Battery + Status + Clock + Lang Toggle
-    let status_box = GtkBox::new(Orientation::Horizontal, 8);
+    // Right: Real Battery (when present) + Live Clock + Lang Toggle + Return to Desktop
+    let status_box = GtkBox::new(Orientation::Horizontal, 12);
     status_box.set_valign(gtk4::Align::Center);
 
-    let mic_lbl = Label::new(Some("Mute: Off"));
-    mic_lbl.add_css_class("xbox-hud-right");
-    status_box.append(&mic_lbl);
-
-    let bat_lbl = Label::new(Some("100%"));
-    bat_lbl.add_css_class("xbox-hud-right");
-    status_box.append(&bat_lbl);
+    if let Some(pct) = read_battery_percent() {
+        let bat_lbl = Label::new(Some(&format!("{}%", pct)));
+        bat_lbl.add_css_class("xbox-hud-right");
+        status_box.append(&bat_lbl);
+    }
 
     let time_now = chrono::Local::now().format("%H:%M").to_string();
     let time_lbl = Label::new(Some(&time_now));
     time_lbl.add_css_class("xbox-hud-time");
     status_box.append(&time_lbl);
+
+    {
+        let time_lbl_tick = time_lbl.clone();
+        let win_weak_clock = window.downgrade();
+        glib::timeout_add_seconds_local(30, move || {
+            if win_weak_clock.upgrade().is_none() {
+                return glib::ControlFlow::Break;
+            }
+            time_lbl_tick.set_text(&chrono::Local::now().format("%H:%M").to_string());
+            glib::ControlFlow::Continue
+        });
+    }
 
     let lang_btn = Button::with_label(lang.toggle_btn_label());
     lang_btn.add_css_class("xbox-lang-btn");
@@ -1902,8 +2162,11 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     });
     status_box.append(&lang_btn);
 
-    let exit_desktop_btn = Button::with_label(lang.exit_to_desktop());
-    exit_desktop_btn.add_css_class("xbox-apps-close-btn");
+    let (exit_desktop_btn, _, _) = create_symbolic_button(
+        lang.exit_to_desktop(),
+        &["user-desktop-symbolic", "application-exit-symbolic"],
+        "xbox-apps-close-btn",
+    );
     let win_exit_top = window.clone();
     let loop_exit_top = main_loop.clone();
     let prev_exit_top = preview_ctrl.clone();
@@ -1938,48 +2201,50 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     hero_row.set_valign(gtk4::Align::End);
     hero_row.set_hexpand(true);
 
-    let hero_left = GtkBox::new(Orientation::Vertical, 3);
+    let hero_left = GtkBox::new(Orientation::Vertical, 4);
     hero_left.set_hexpand(true);
     hero_left.set_valign(gtk4::Align::End);
-
-    let hero_kicker = Label::new(Some("BLAZE UNIVERSE • GAMEZONE"));
-    hero_kicker.add_css_class("xbox-hero-kicker");
-    hero_kicker.set_halign(gtk4::Align::Start);
-    hero_left.append(&hero_kicker);
 
     // Official Transparent Steam Game Logo (`logo.png`)
     let hero_logo_pic = Picture::new();
     hero_logo_pic.set_can_shrink(true);
     hero_logo_pic.set_content_fit(gtk4::ContentFit::Contain);
-    hero_logo_pic.set_size_request(210, 56);
+    hero_logo_pic.set_size_request(208, 56);
     hero_logo_pic.set_halign(gtk4::Align::Start);
-    hero_logo_pic.set_margin_top(2);
-    hero_logo_pic.set_margin_bottom(2);
+    hero_logo_pic.set_margin_bottom(4);
     hero_logo_pic.set_visible(false);
     hero_left.append(&hero_logo_pic);
 
-    // Active Focused Game Title + Status Pill
-    let title_row = GtkBox::new(Orientation::Horizontal, 8);
-    title_row.set_valign(gtk4::Align::Center);
+    // Quiet Status Dot + Category / Discount Meta Line
+    let meta_row = GtkBox::new(Orientation::Horizontal, 8);
+    meta_row.set_valign(gtk4::Align::Center);
 
+    let active_status_dot = GtkBox::new(Orientation::Horizontal, 0);
+    active_status_dot.add_css_class("gz-status-dot");
+    active_status_dot.add_css_class("ember");
+    active_status_dot.set_size_request(8, 8);
+    active_status_dot.set_valign(gtk4::Align::Center);
+    active_status_dot.set_halign(gtk4::Align::Center);
+    active_status_dot.set_hexpand(false);
+    active_status_dot.set_vexpand(false);
+
+    let active_badge_lbl = Label::new(Some(""));
+    active_badge_lbl.add_css_class("gz-hero-meta");
+    active_badge_lbl.set_halign(gtk4::Align::Start);
+
+    meta_row.append(&active_status_dot);
+    meta_row.append(&active_badge_lbl);
+    hero_left.append(&meta_row);
+
+    // Active Focused Game Title
     let active_title_lbl = Label::new(Some(""));
     active_title_lbl.add_css_class("xbox-active-title-label");
     active_title_lbl.set_halign(gtk4::Align::Start);
     active_title_lbl.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     active_title_lbl.set_max_width_chars(38);
+    hero_left.append(&active_title_lbl);
 
-    let active_badge_lbl = Label::new(Some(""));
-    active_badge_lbl.add_css_class("xbox-active-badge");
-    active_badge_lbl.set_halign(gtk4::Align::Start);
-
-    title_row.append(&active_title_lbl);
-    title_row.append(&active_badge_lbl);
-    hero_left.append(&title_row);
-
-    let hero_desc = Label::new(Some(match lang {
-        Language::TR => "Linux 7.2.9 sched_ext • NTSYNC Çekirdek Senkronizasyonu • Resmi Steam Medya Motoru",
-        Language::EN => "Linux 7.2.9 sched_ext • NTSYNC Kernel Sync • Official Steam Media Engine",
-    }));
+    let hero_desc = Label::new(Some(""));
     hero_desc.add_css_class("xbox-hero-desc");
     hero_desc.set_halign(gtk4::Align::Start);
     hero_desc.set_wrap(true);
@@ -1988,20 +2253,26 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     hero_desc.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     hero_left.append(&hero_desc);
 
-    let hero_actions = GtkBox::new(Orientation::Horizontal, 10);
-    hero_actions.set_margin_top(8);
+    let hero_actions = GtkBox::new(Orientation::Horizontal, 12);
+    hero_actions.set_margin_top(12);
 
-    let hero_play_btn = Button::with_label(match lang {
-        Language::TR => "▶ Oyna / Mağazada Aç",
-        Language::EN => "▶ Play / Open in Store",
-    });
-    hero_play_btn.add_css_class("gz-hero-play-primary");
+    let (hero_play_btn, hero_play_icon, hero_play_lbl) = create_symbolic_button(
+        match lang {
+            Language::TR => "Oyna",
+            Language::EN => "Play",
+        },
+        &["media-playback-start-symbolic"],
+        "gz-hero-play-primary",
+    );
 
-    let hero_trailer_btn = Button::with_label(match lang {
-        Language::TR => "▶ Fragman & Ön İzleme",
-        Language::EN => "▶ Trailer & Preview",
-    });
-    hero_trailer_btn.add_css_class("gz-hero-action-btn");
+    let (hero_trailer_btn, _, _) = create_symbolic_button(
+        match lang {
+            Language::TR => "Fragman izle",
+            Language::EN => "Watch trailer",
+        },
+        &["camera-video-symbolic", "media-playback-start-symbolic"],
+        "gz-hero-action-btn",
+    );
 
     hero_actions.append(&hero_play_btn);
     hero_actions.append(&hero_trailer_btn);
@@ -2012,7 +2283,7 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     // Right 16:9 Live Video Trailer & Official HD Screenshot Frame
     let preview_frame = Overlay::new();
     preview_frame.add_css_class("gz-preview-frame");
-    preview_frame.set_size_request(304, 171);
+    preview_frame.set_size_request(304, 172);
     preview_frame.set_valign(gtk4::Align::End);
     preview_frame.set_halign(gtk4::Align::End);
 
@@ -2020,15 +2291,15 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     preview_pic.add_css_class("gz-preview-pic");
     preview_pic.set_can_shrink(true);
     preview_pic.set_content_fit(gtk4::ContentFit::Cover);
-    preview_pic.set_size_request(304, 171);
+    preview_pic.set_size_request(304, 172);
     if !def_wallpaper.is_empty() {
         load_picture_file(&preview_pic, Path::new(&def_wallpaper));
     }
     preview_frame.set_child(Some(&preview_pic));
 
     let preview_badge = Label::new(Some(match lang {
-        Language::TR => "◉ RESMİ ÖN İZLEME",
-        Language::EN => "◉ OFFICIAL PREVIEW",
+        Language::TR => "Ön izleme",
+        Language::EN => "Preview",
     }));
     preview_badge.add_css_class("gz-preview-badge");
     preview_badge.set_halign(gtk4::Align::Start);
@@ -2038,34 +2309,40 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     hero_row.append(&preview_frame);
     content_box.append(&hero_row);
 
-    // ── SEGMENTED SUB-TAB BAR: [★ Steam Öne Çıkanlar] | [▣ Bilgisayarımdaki & Hesabımdaki Oyunlar] ──
+    // ── SEGMENTED SUB-TAB BAR: Steam öne çıkanlar | Kurulu ve hesap oyunları ──
     let start_on_local = std::env::var("GAMEZONE_TAB").ok().as_deref() == Some("local");
 
     let subtab_header_row = GtkBox::new(Orientation::Horizontal, 12);
     subtab_header_row.set_valign(gtk4::Align::Center);
-    subtab_header_row.set_margin_bottom(4);
+    subtab_header_row.set_margin_bottom(12);
 
     let subtab_bar = GtkBox::new(Orientation::Horizontal, 4);
     subtab_bar.add_css_class("gz-subtab-bar");
 
-    let btn_tab_featured = Button::with_label(match lang {
-        Language::TR => "★ Steam Öne Çıkanlar",
-        Language::EN => "★ Steam Featured",
-    });
-    btn_tab_featured.add_css_class("gz-subtab-btn");
+    let (btn_tab_featured, _, _) = create_symbolic_button(
+        match lang {
+            Language::TR => "Steam öne çıkanlar",
+            Language::EN => "Steam featured",
+        },
+        &["starred-symbolic", "media-playback-start-symbolic"],
+        "gz-subtab-btn",
+    );
     if !start_on_local {
         btn_tab_featured.add_css_class("active");
     }
 
     let local_tab_label = |count: usize| -> String {
         match lang {
-            Language::TR => format!("▣ Bilgisayarımdaki & Hesabımdaki Oyunlar ({})", count),
-            Language::EN => format!("▣ My PC & Account Games ({})", count),
+            Language::TR => format!("Kurulu ve hesap oyunları ({})", count),
+            Language::EN => format!("Installed and account games ({})", count),
         }
     };
 
-    let btn_tab_local = Button::with_label(&local_tab_label(local_detected_initial.len()));
-    btn_tab_local.add_css_class("gz-subtab-btn");
+    let (btn_tab_local, _, btn_tab_local_lbl) = create_symbolic_button(
+        &local_tab_label(local_detected_initial.len()),
+        &["computer-symbolic", "drive-harddisk-symbolic", "folder-symbolic"],
+        "gz-subtab-btn",
+    );
     if start_on_local {
         btn_tab_local.add_css_class("active");
     }
@@ -2078,20 +2355,26 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     subtab_spacer.set_hexpand(true);
     subtab_header_row.append(&subtab_spacer);
 
-    let btn_refresh_featured = Button::with_label(match lang {
-        Language::TR => "↻ Önerilenleri Yenile",
-        Language::EN => "↻ Refresh Featured",
-    });
-    btn_refresh_featured.add_css_class("gz-hero-action-btn");
-    btn_refresh_featured.set_margin_bottom(8);
+    let (btn_refresh_featured, _, _) = create_symbolic_button(
+        match lang {
+            Language::TR => "Önerilenleri yenile",
+            Language::EN => "Refresh featured",
+        },
+        &["view-refresh-symbolic"],
+        "gz-hero-action-btn",
+    );
+    btn_refresh_featured.add_css_class("gz-toolbar-btn");
     subtab_header_row.append(&btn_refresh_featured);
 
-    let btn_add_external = Button::with_label(match lang {
-        Language::TR => "+ Harici Oyun / Klasör Tanıt",
-        Language::EN => "+ Add External Game / Folder",
-    });
-    btn_add_external.add_css_class("gz-hero-action-btn");
-    btn_add_external.set_margin_bottom(8);
+    let (btn_add_external, _, _) = create_symbolic_button(
+        match lang {
+            Language::TR => "Harici oyun ekle",
+            Language::EN => "Add external game",
+        },
+        &["list-add-symbolic"],
+        "gz-hero-action-btn",
+    );
+    btn_add_external.add_css_class("gz-toolbar-btn");
     subtab_header_row.append(&btn_add_external);
 
     content_box.append(&subtab_header_row);
@@ -2119,15 +2402,15 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     let le_text_box = GtkBox::new(Orientation::Vertical, 4);
     le_text_box.set_hexpand(true);
     let le_title = Label::new(Some(match lang {
-        Language::TR => "Bilgisayarınızda veya Bağlı Hesaplarınızda Henüz Oyun Algılanmadı",
-        Language::EN => "No Installed or Account Games Detected Yet",
+        Language::TR => "Kurulu veya bağlı hesap oyunu bulunamadı",
+        Language::EN => "No installed or account games found",
     }));
     le_title.add_css_class("xbox-modal-card-title");
     le_title.set_halign(gtk4::Align::Start);
 
     let le_desc = Label::new(Some(match lang {
-        Language::TR => "Steam, Epic (Heroic), GOG, Lutris, Flatpak veya ~/Oyunlar ve ~/Games klasörlerine indirdiğiniz harici oyunlar otomatik algılanıp bu sekmeye taşınır.",
-        Language::EN => "Games from Steam, Epic (Heroic), GOG, Lutris, Flatpak, or ~/Games are automatically detected and placed here.",
+        Language::TR => "Steam, Epic (Heroic), GOG, Lutris, Flatpak veya ~/Oyunlar ve ~/Games klasörlerindeki oyunlar otomatik algılanır",
+        Language::EN => "Games from Steam, Epic (Heroic), GOG, Lutris, Flatpak, or ~/Games are detected automatically",
     }));
     le_desc.add_css_class("xbox-modal-card-desc");
     le_desc.set_halign(gtk4::Align::Start);
@@ -2165,13 +2448,15 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     }));
     let active_buttons_rc: Rc<RefCell<Vec<Button>>> = Rc::new(RefCell::new(Vec::new()));
 
-    // Focuses a game: updates official transparent logo, title, price/description, backdrop & starts live trailer!
+    // Focuses a game: updates official transparent logo, title, price/description, backdrop & starts live trailer
     let focus_game_ui: Rc<dyn Fn(&GameEntry)> = {
         let focused_rc = focused_game_rc.clone();
         let title_lbl = active_title_lbl.clone();
         let badge_lbl = active_badge_lbl.clone();
+        let status_dot = active_status_dot.clone();
         let desc_lbl = hero_desc.clone();
-        let play_btn = hero_play_btn.clone();
+        let play_icon = hero_play_icon.clone();
+        let play_lbl = hero_play_lbl.clone();
         let logo_pic = hero_logo_pic.clone();
         let bg_pic = bg_picture.clone();
         let prev_pic = preview_pic.clone();
@@ -2183,26 +2468,36 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
             *focused_rc.borrow_mut() = Some(game.clone());
             title_lbl.set_text(&game.title);
 
+            status_dot.remove_css_class("installed");
+            status_dot.remove_css_class("ember");
+            if game.is_installed {
+                status_dot.add_css_class("installed");
+            } else {
+                status_dot.add_css_class("ember");
+            }
+
             let badge_txt = if game.is_installed {
                 match lang {
-                    Language::TR => "KURULU • OYNA".to_string(),
-                    Language::EN => "INSTALLED • PLAY".to_string(),
+                    Language::TR => "Kurulu · Oynamaya hazır".to_string(),
+                    Language::EN => "Installed · Ready to play".to_string(),
                 }
             } else {
-                game.category.to_uppercase()
+                format_category_sentence_case(&game.category)
             };
             badge_lbl.set_text(&badge_txt);
             desc_lbl.set_text(&game.banner_desc);
 
             if game.is_installed {
-                play_btn.set_label(match lang {
-                    Language::TR => "▶ Hemen Oyna",
-                    Language::EN => "▶ Play Now",
+                set_symbolic_icon(&play_icon, &["media-playback-start-symbolic"]);
+                play_lbl.set_text(match lang {
+                    Language::TR => "Oyna",
+                    Language::EN => "Play",
                 });
             } else {
-                play_btn.set_label(match lang {
-                    Language::TR => "↗ Steam Mağazasında Aç",
-                    Language::EN => "↗ Open in Steam Store",
+                set_symbolic_icon(&play_icon, &["go-next-symbolic", "web-browser-symbolic"]);
+                play_lbl.set_text(match lang {
+                    Language::TR => "Steam mağazasında aç",
+                    Language::EN => "Open in Steam Store",
                 });
             }
 
@@ -2230,8 +2525,8 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
 
             prev_ctrl.stop();
             prev_badge.set_text(match lang {
-                Language::TR => "◉ RESMİ ÖN İZLEME",
-                Language::EN => "◉ OFFICIAL PREVIEW",
+                Language::TR => "Ön izleme",
+                Language::EN => "Preview",
             });
             if let Some(img_p) = get_game_screenshot_path(game).or_else(|| get_game_cover_path(game)) {
                 load_picture_file(&prev_pic, Path::new(&img_p));
@@ -2281,7 +2576,7 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
 
                 let card_overlay = Overlay::new();
                 let img = create_game_cover_image(game);
-                img.set_size_request(156, 156);
+                img.set_size_request(160, 160);
                 img.add_css_class("xbox-game-card-img");
                 card_overlay.set_child(Some(&img));
 
@@ -2291,11 +2586,11 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
                     .or_default()
                     .push(img.clone());
 
-                // Top-right badge pill (Installed OR Steam Discount %)
+                // Top-right quiet badge tag (Installed OR Steam Discount %)
                 if game.is_installed {
                     let pill = Label::new(Some(match lang {
-                        Language::TR => "KURULU",
-                        Language::EN => "INSTALLED",
+                        Language::TR => "Kurulu",
+                        Language::EN => "Installed",
                     }));
                     pill.add_css_class("gz-card-installed-pill");
                     pill.set_halign(gtk4::Align::End);
@@ -2316,7 +2611,7 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
                     }
                 }
 
-                let cap_box = GtkBox::new(Orientation::Vertical, 1);
+                let cap_box = GtkBox::new(Orientation::Vertical, 0);
                 cap_box.add_css_class("xbox-card-caption");
                 cap_box.set_valign(gtk4::Align::End);
                 cap_box.set_hexpand(true);
@@ -2449,14 +2744,14 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
         });
     }
 
-    // "+ Harici Oyun / Klasör Tanıt" Modal Dialog -> detects external games & moves to Local sub-tab!
+    // "Harici oyun ekle" Modal Dialog -> detects external games & moves to Local sub-tab
     {
         let parent_win = window.clone();
         let l_games_rc = local_games_rc.clone();
         let l_cbox = local_carousel_box.clone();
         let l_btns = local_btns_rc.clone();
         let l_empty = local_empty_card.clone();
-        let b_loc = btn_tab_local.clone();
+        let b_loc_lbl = btn_tab_local_lbl.clone();
         let pop_fn = populate_carousel_row.clone();
         let sw_fn = switch_subtab.clone();
         let mtx_ext = media_tx.clone();
@@ -2469,7 +2764,7 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
                 l_cbox.clone(),
                 l_btns.clone(),
                 l_empty.clone(),
-                b_loc.clone(),
+                b_loc_lbl.clone(),
                 pop_fn.clone(),
                 sw_fn.clone(),
                 mtx_ext.clone(),
@@ -2745,8 +3040,8 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
 
     let store_hdr = GtkBox::new(Orientation::Horizontal, 12);
     let store_title = Label::new(Some(match lang {
-        Language::TR => "Oyun Mağazaları & Vitrinler",
-        Language::EN => "Game Stores & Showcases",
+        Language::TR => "Oyun mağazaları",
+        Language::EN => "Game stores",
     }));
     store_title.add_css_class("xbox-apps-header");
     store_title.set_halign(gtk4::Align::Start);
@@ -2762,7 +3057,7 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     store_hdr.append(&store_close_btn);
     store_drawer.append(&store_hdr);
 
-    let store_cards_row = GtkBox::new(Orientation::Horizontal, 14);
+    let store_cards_row = GtkBox::new(Orientation::Horizontal, 12);
 
     // Steam Store Card
     let card_steam = Button::new();
@@ -2771,19 +3066,21 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     let cs_title = Label::new(Some("Steam Store"));
     cs_title.add_css_class("xbox-modal-card-title");
     cs_title.set_halign(gtk4::Align::Start);
+    cs_title.set_wrap(true);
     let cs_desc = Label::new(Some(match lang {
-        Language::TR => "Resmi Steam Mağazası & İndirimler",
-        Language::EN => "Official Steam Store & Sales",
+        Language::TR => "Resmi Steam mağazası ve indirimler",
+        Language::EN => "Official Steam Store and sales",
     }));
     cs_desc.add_css_class("xbox-modal-card-desc");
     cs_desc.set_halign(gtk4::Align::Start);
+    cs_desc.set_wrap(true);
     cs_box.append(&cs_title);
     cs_box.append(&cs_desc);
     card_steam.set_child(Some(&cs_box));
     let alert_cs = trigger_offline_alert.clone();
     card_steam.connect_clicked(move |_| {
         if !is_system_online() {
-            alert_cs("İnternete bağlı değilsiniz.");
+            alert_cs(lang.offline_alert());
         } else {
             open_browser_url("https://store.steampowered.com/");
         }
@@ -2797,19 +3094,21 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     let ce_title = Label::new(Some("Epic Games Store"));
     ce_title.add_css_class("xbox-modal-card-title");
     ce_title.set_halign(gtk4::Align::Start);
+    ce_title.set_wrap(true);
     let ce_desc = Label::new(Some(match lang {
-        Language::TR => "Haftalık Ücretsiz Oyunlar & Fırsatlar",
-        Language::EN => "Weekly Free Games & Deals",
+        Language::TR => "Haftalık ücretsiz oyunlar ve fırsatlar",
+        Language::EN => "Weekly free games and deals",
     }));
     ce_desc.add_css_class("xbox-modal-card-desc");
     ce_desc.set_halign(gtk4::Align::Start);
+    ce_desc.set_wrap(true);
     ce_box.append(&ce_title);
     ce_box.append(&ce_desc);
     card_epic.set_child(Some(&ce_box));
     let alert_ce = trigger_offline_alert.clone();
     card_epic.connect_clicked(move |_| {
         if !is_system_online() {
-            alert_ce("İnternete bağlı değilsiniz.");
+            alert_ce(lang.offline_alert());
         } else {
             open_browser_url("https://store.epicgames.com/");
         }
@@ -2820,22 +3119,24 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     let card_gog = Button::new();
     card_gog.add_css_class("xbox-modal-card");
     let cg_box = GtkBox::new(Orientation::Vertical, 4);
-    let cg_title = Label::new(Some("GOG.com Store"));
+    let cg_title = Label::new(Some("GOG Store"));
     cg_title.add_css_class("xbox-modal-card-title");
     cg_title.set_halign(gtk4::Align::Start);
+    cg_title.set_wrap(true);
     let cg_desc = Label::new(Some(match lang {
-        Language::TR => "DRM-Free Klasikler & Yeni Oyunlar",
-        Language::EN => "DRM-Free Classics & Indie Titles",
+        Language::TR => "DRM koruması olmayan klasikler ve yeni oyunlar",
+        Language::EN => "DRM-free classics and indie titles",
     }));
     cg_desc.add_css_class("xbox-modal-card-desc");
     cg_desc.set_halign(gtk4::Align::Start);
+    cg_desc.set_wrap(true);
     cg_box.append(&cg_title);
     cg_box.append(&cg_desc);
     card_gog.set_child(Some(&cg_box));
     let alert_cg = trigger_offline_alert.clone();
     card_gog.connect_clicked(move |_| {
         if !is_system_online() {
-            alert_cg("İnternete bağlı değilsiniz.");
+            alert_cg(lang.offline_alert());
         } else {
             open_browser_url("https://www.gog.com/");
         }
@@ -2847,17 +3148,19 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     card_soft.add_css_class("xbox-modal-card");
     let cso_box = GtkBox::new(Orientation::Vertical, 4);
     let cso_title = Label::new(Some(match lang {
-        Language::TR => "Blaze Yazılım Merkezi",
-        Language::EN => "Blaze Software Center",
+        Language::TR => "FireHub yazılım mağazası",
+        Language::EN => "FireHub software store",
     }));
     cso_title.add_css_class("xbox-modal-card-title");
     cso_title.set_halign(gtk4::Align::Start);
+    cso_title.set_wrap(true);
     let cso_desc = Label::new(Some(match lang {
-        Language::TR => "FireHub Mağaza • Portadora & Flathub",
-        Language::EN => "FireHub Store • Portadora & Flathub",
+        Language::TR => "Portadora ve Flathub uygulamaları",
+        Language::EN => "Portadora and Flathub applications",
     }));
     cso_desc.add_css_class("xbox-modal-card-desc");
     cso_desc.set_halign(gtk4::Align::Start);
+    cso_desc.set_wrap(true);
     cso_box.append(&cso_title);
     cso_box.append(&cso_desc);
     card_soft.set_child(Some(&cso_box));
@@ -2869,7 +3172,12 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     });
     store_cards_row.append(&card_soft);
 
-    store_drawer.append(&store_cards_row);
+    let store_cards_scroll = ScrolledWindow::builder()
+        .hscrollbar_policy(gtk4::PolicyType::Automatic)
+        .vscrollbar_policy(gtk4::PolicyType::Never)
+        .child(&store_cards_row)
+        .build();
+    store_drawer.append(&store_cards_scroll);
     content_box.append(&store_drawer);
 
     // ── SETTINGS DRAWER / MODAL ──
@@ -2879,8 +3187,8 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
 
     let set_hdr = GtkBox::new(Orientation::Horizontal, 12);
     let set_title = Label::new(Some(match lang {
-        Language::TR => "GameZone & Sistem Ayarları",
-        Language::EN => "GameZone & System Settings",
+        Language::TR => "GameZone ve sistem ayarları",
+        Language::EN => "GameZone and system settings",
     }));
     set_title.add_css_class("xbox-apps-header");
     set_title.set_halign(gtk4::Align::Start);
@@ -2896,21 +3204,26 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     set_hdr.append(&set_close_btn);
     settings_drawer.append(&set_hdr);
 
-    let set_cards_row = GtkBox::new(Orientation::Horizontal, 14);
+    let set_cards_row = GtkBox::new(Orientation::Horizontal, 12);
 
     // Setting 1: Built-in Proton-GE Manager
     let card_set_proton = Button::new();
     card_set_proton.add_css_class("xbox-modal-card");
     let cp_box = GtkBox::new(Orientation::Vertical, 4);
-    let cp_title = Label::new(Some("Blaze Proton-GE Yöneticisi"));
+    let cp_title = Label::new(Some(match lang {
+        Language::TR => "Proton-GE yöneticisi",
+        Language::EN => "Proton-GE manager",
+    }));
     cp_title.add_css_class("xbox-modal-card-title");
     cp_title.set_halign(gtk4::Align::Start);
+    cp_title.set_wrap(true);
     let cp_desc = Label::new(Some(match lang {
-        Language::TR => "GE-Proton & NTSYNC Uyumluluk Yöneticisi",
-        Language::EN => "GE-Proton & NTSYNC Compatibility Manager",
+        Language::TR => "GE-Proton ve NTSYNC uyumluluk sürümleri",
+        Language::EN => "GE-Proton and NTSYNC compatibility versions",
     }));
     cp_desc.add_css_class("xbox-modal-card-desc");
     cp_desc.set_halign(gtk4::Align::Start);
+    cp_desc.set_wrap(true);
     cp_box.append(&cp_title);
     cp_box.append(&cp_desc);
     card_set_proton.set_child(Some(&cp_box));
@@ -2924,17 +3237,19 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     card_set_solar.add_css_class("xbox-modal-card");
     let csl_box = GtkBox::new(Orientation::Vertical, 4);
     let csl_title = Label::new(Some(match lang {
-        Language::TR => "SolarUI Masaüstü Ayarları",
-        Language::EN => "SolarUI Desktop Settings",
+        Language::TR => "SolarUI ayarları",
+        Language::EN => "SolarUI settings",
     }));
     csl_title.add_css_class("xbox-modal-card-title");
     csl_title.set_halign(gtk4::Align::Start);
+    csl_title.set_wrap(true);
     let csl_desc = Label::new(Some(match lang {
-        Language::TR => "Tema, Panel & Kabuk Yapılandırması",
-        Language::EN => "Theme, Panel & Shell Configuration",
+        Language::TR => "Tema, panel ve kabuk yapılandırması",
+        Language::EN => "Theme, panel and shell configuration",
     }));
     csl_desc.add_css_class("xbox-modal-card-desc");
     csl_desc.set_halign(gtk4::Align::Start);
+    csl_desc.set_wrap(true);
     csl_box.append(&csl_title);
     csl_box.append(&csl_desc);
     card_set_solar.set_child(Some(&csl_box));
@@ -2950,84 +3265,99 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     let cad_box = GtkBox::new(Orientation::Vertical, 4);
     let adult_title_text = move |allowed: bool| -> String {
         match (lang, allowed) {
-            (Language::TR, false) => "18 Yaşından Büyüküm: KAPALI (Güvenli)".to_string(),
-            (Language::TR, true) => "18 Yaşından Büyüküm: AÇIK (+18 Göster)".to_string(),
-            (Language::EN, false) => "I Am 18+ (Adult Content): OFF (Safe)".to_string(),
-            (Language::EN, true) => "I Am 18+ (Adult Content): ON (+18 Shown)".to_string(),
+            (Language::TR, false) => "18 yaşından büyüğüm: kapalı".to_string(),
+            (Language::TR, true) => "18 yaşından büyüğüm: açık (+18 göster)".to_string(),
+            (Language::EN, false) => "18+ content: off".to_string(),
+            (Language::EN, true) => "18+ content: on (+18 shown)".to_string(),
         }
     };
     let adult_desc_text = move |allowed: bool| -> String {
         match (lang, allowed) {
             (Language::TR, false) => {
-                "Varsayılan kapalı: Pornografik, hentai ve +18 yetişkin içerikli oyunlar önerilenlere düşmez."
+                "Varsayılan kapalı: yetişkin ve +18 oyunlar önerilenlerde gizlenir"
                     .to_string()
             }
             (Language::TR, true) => {
-                "+18 yetişkin içerikli oyunların mağaza önerilerinde görünmesine izin veriliyor."
+                "+18 yetişkin içerikli oyunlar mağaza önerilerinde gösterilir"
                     .to_string()
             }
             (Language::EN, false) => {
-                "Default off: Pornographic, hentai, and 18+ adult games are strictly excluded from recommendations."
+                "Off by default: 18+ adult games are excluded from recommendations"
                     .to_string()
             }
             (Language::EN, true) => {
-                "18+ adult games are permitted to appear in store recommendations."
+                "18+ adult games are shown in store recommendations"
                     .to_string()
             }
         }
     };
     let cur_adult_allowed = is_adult_content_allowed();
+    let cad_title_row = GtkBox::new(Orientation::Horizontal, 8);
+    cad_title_row.set_valign(gtk4::Align::Center);
+    let cad_dot = GtkBox::new(Orientation::Horizontal, 0);
+    cad_dot.add_css_class("gz-status-dot");
+    cad_dot.add_css_class(if cur_adult_allowed { "warn" } else { "safe" });
+    cad_dot.set_size_request(8, 8);
+    cad_dot.set_valign(gtk4::Align::Center);
+    cad_dot.set_halign(gtk4::Align::Center);
+    cad_dot.set_hexpand(false);
+    cad_dot.set_vexpand(false);
+
     let cad_title = Label::new(Some(&adult_title_text(cur_adult_allowed)));
     cad_title.add_css_class("xbox-modal-card-title");
     cad_title.set_halign(gtk4::Align::Start);
+    cad_title.set_wrap(true);
+    cad_title_row.append(&cad_dot);
+    cad_title_row.append(&cad_title);
+
     let cad_desc = Label::new(Some(&adult_desc_text(cur_adult_allowed)));
     cad_desc.add_css_class("xbox-modal-card-desc");
     cad_desc.set_halign(gtk4::Align::Start);
     cad_desc.set_wrap(true);
-    cad_box.append(&cad_title);
+    cad_box.append(&cad_title_row);
     cad_box.append(&cad_desc);
     card_set_adult.set_child(Some(&cad_box));
     {
         let cad_t_lbl = cad_title.clone();
         let cad_d_lbl = cad_desc.clone();
+        let cad_dot_c = cad_dot.clone();
         let refresh_adult = trigger_featured_refresh.clone();
         card_set_adult.connect_clicked(move |_| {
             let next_state = !is_adult_content_allowed();
             set_adult_content_allowed(next_state);
             cad_t_lbl.set_text(&adult_title_text(next_state));
             cad_d_lbl.set_text(&adult_desc_text(next_state));
+            cad_dot_c.remove_css_class("safe");
+            cad_dot_c.remove_css_class("warn");
+            cad_dot_c.add_css_class(if next_state { "warn" } else { "safe" });
             refresh_adult(true);
             let msg = if next_state {
-                "18 yaş üstü (+18) yetişkin içerik filtresi devre dışı bırakıldı."
+                "+18 yetişkin içerik filtresi kapatıldı"
             } else {
-                "Güvenli Aile/Çocuk Modu aktif: +18 / pornografik / hentai oyunlar gizlendi."
+                "+18 yetişkin içerik filtresi açıldı"
             };
             let _ = Command::new("notify-send")
-                .args(["-a", "Blaze GameZone", "-i", "preferences-system", "İçerik Filtresi", msg])
+                .args(["-a", "Blaze GameZone", "-i", "preferences-system", "İçerik filtresi", msg])
                 .spawn();
         });
     }
     set_cards_row.append(&card_set_adult);
 
-    // Setting 2.6: Desktop Shell Selector & Instant Switch ("Masaüstü Kabuğu Değiştir")
+    // Setting 2.6: Desktop Shell Selector & Instant Switch ("Masaüstü kabuğu")
     let card_set_shell = Button::new();
     card_set_shell.add_css_class("xbox-modal-card");
     let csh_box = GtkBox::new(Orientation::Vertical, 4);
+    let cur_shell_name = shell_display_name(solar_common::SolarConfig::load().shell.engine);
     let csh_title = Label::new(Some(&match lang {
-        Language::TR => format!(
-            "Masaüstü Kabuğu: {}",
-            solar_common::SolarConfig::load().shell.engine.as_str().to_uppercase()
-        ),
-        Language::EN => format!(
-            "Desktop Shell: {}",
-            solar_common::SolarConfig::load().shell.engine.as_str().to_uppercase()
-        ),
+        Language::TR => format!("Masaüstü kabuğu: {}", cur_shell_name),
+        Language::EN => format!("Desktop shell: {}", cur_shell_name),
     }));
     csh_title.add_css_class("xbox-modal-card-title");
     csh_title.set_halign(gtk4::Align::Start);
+    csh_title.set_wrap(true);
     let csh_desc = Label::new(Some(match lang {
-        Language::TR => "Tıkla: Noctalia • Caelestia • end4-pC • We10X arasında masaüstü kabuğunu değiştir",
-        Language::EN => "Click to cycle desktop shell: Noctalia • Caelestia • end4-pC • We10X",
+        Language::TR => "Noctalia, Caelestia, end4-pC veya We10X arasında geç",
+        Language::EN => "Switch between Noctalia, Caelestia, end4-pC and We10X",
     }));
     csh_desc.add_css_class("xbox-modal-card-desc");
     csh_desc.set_halign(gtk4::Align::Start);
@@ -3060,9 +3390,10 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
             });
             let prev_shell_file = solar_common::get_solar_runtime_dir().join("gamezone_prev_shell.txt");
             let _ = std::fs::write(&prev_shell_file, next_eng.as_str());
+            let next_name = shell_display_name(next_eng);
             csh_t_lbl.set_text(&match lang {
-                Language::TR => format!("Masaüstü Kabuğu: {}", next_eng.as_str().to_uppercase()),
-                Language::EN => format!("Desktop Shell: {}", next_eng.as_str().to_uppercase()),
+                Language::TR => format!("Masaüstü kabuğu: {}", next_name),
+                Language::EN => format!("Desktop shell: {}", next_name),
             });
         });
     }
@@ -3073,27 +3404,29 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     card_set_perf.add_css_class("xbox-modal-card");
     let cperf_box = GtkBox::new(Orientation::Vertical, 4);
     let cperf_title = Label::new(Some(match lang {
-        Language::TR => "sched_ext & NTSYNC Güç Profili",
-        Language::EN => "sched_ext & NTSYNC Power Profile",
+        Language::TR => "Oyun güç profili",
+        Language::EN => "Gaming power profile",
     }));
     cperf_title.add_css_class("xbox-modal-card-title");
     cperf_title.set_halign(gtk4::Align::Start);
+    cperf_title.set_wrap(true);
     let kern_ver = std::fs::read_to_string("/proc/sys/kernel/osrelease")
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|_| "7.2.x".to_string());
     let cperf_desc = Label::new(Some(&match lang {
-        Language::TR => format!("Linux {} Düşük Gecikmeli Oyun Çekirdeği Aktif", kern_ver),
-        Language::EN => format!("Linux {} Low-Latency Gaming Kernel Active", kern_ver),
+        Language::TR => format!("Linux {} · sched_ext ve NTSYNC etkin", kern_ver),
+        Language::EN => format!("Linux {} · sched_ext and NTSYNC active", kern_ver),
     }));
     cperf_desc.add_css_class("xbox-modal-card-desc");
     cperf_desc.set_halign(gtk4::Align::Start);
+    cperf_desc.set_wrap(true);
     cperf_box.append(&cperf_title);
     cperf_box.append(&cperf_desc);
     card_set_perf.set_child(Some(&cperf_box));
     card_set_perf.connect_clicked(|_| {
         activate_gaming_optimizations();
         let _ = Command::new("notify-send")
-            .args(["-a", "Blaze GameZone", "-i", "preferences-system", "Performans Modu", "sched_ext + NTSYNC Düşük Gecikme Profili etkinleştirildi."])
+            .args(["-a", "Blaze GameZone", "-i", "preferences-system", "Performans profili", "sched_ext ve NTSYNC oyun profili etkinleştirildi"])
             .spawn();
     });
     set_cards_row.append(&card_set_perf);
@@ -3105,12 +3438,14 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     let cc_title = Label::new(Some(lang.clean_cache()));
     cc_title.add_css_class("xbox-modal-card-title");
     cc_title.set_halign(gtk4::Align::Start);
+    cc_title.set_wrap(true);
     let cc_desc = Label::new(Some(match lang {
-        Language::TR => "Medya ve Kapak Önbelleğini Sıfırla",
-        Language::EN => "Reset Media and Cover Cache",
+        Language::TR => "İndirilen kapak ve ekran görüntülerini temizle",
+        Language::EN => "Reset cached covers and screenshots",
     }));
     cc_desc.add_css_class("xbox-modal-card-desc");
     cc_desc.set_halign(gtk4::Align::Start);
+    cc_desc.set_wrap(true);
     cc_box.append(&cc_title);
     cc_box.append(&cc_desc);
     card_set_cache.set_child(Some(&cc_box));
@@ -3126,12 +3461,14 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     let cex_title = Label::new(Some(lang.exit_to_desktop()));
     cex_title.add_css_class("xbox-modal-card-title");
     cex_title.set_halign(gtk4::Align::Start);
+    cex_title.set_wrap(true);
     let cex_desc = Label::new(Some(match lang {
-        Language::TR => "GameZone'u Kapat & Masaüstü Kabuğuna Dön",
-        Language::EN => "Close GameZone & Restore Desktop Shell",
+        Language::TR => "GameZone'u kapat ve masaüstü kabuğuna dön",
+        Language::EN => "Close GameZone and restore desktop shell",
     }));
     cex_desc.add_css_class("xbox-modal-card-desc");
     cex_desc.set_halign(gtk4::Align::Start);
+    cex_desc.set_wrap(true);
     cex_box.append(&cex_title);
     cex_box.append(&cex_desc);
     card_set_exit.set_child(Some(&cex_box));
@@ -3170,7 +3507,7 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     search_input.add_css_class("xbox-search-bar");
     search_input.set_placeholder_text(Some(lang.search_placeholder()));
     search_input.set_hexpand(true);
-    search_input.set_margin_end(16);
+    search_input.set_margin_end(12);
 
     let apps_close_btn = Button::with_label(lang.back_to_home());
     apps_close_btn.add_css_class("xbox-apps-close-btn");
@@ -3184,7 +3521,7 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     apps_header_box.append(&apps_close_btn);
     apps_drawer.append(&apps_header_box);
 
-    let apps_grid_box = GtkBox::new(Orientation::Vertical, 10);
+    let apps_grid_box = GtkBox::new(Orientation::Vertical, 12);
     let desktop_apps = scan_desktop_applications();
     let mut app_row = GtkBox::new(Orientation::Horizontal, 0);
     let mut row_count = 0;
@@ -3234,7 +3571,7 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
         tile.connect_clicked(move |_| {
             println!("Launching {} -> {}", app_name, app_exec);
             let _ = Command::new("notify-send")
-                .args(["-a", "Blaze GameZone", "-i", "application-x-executable", "Uygulama Başlatılıyor", &app_name])
+                .args(["-a", "Blaze GameZone", "-i", "application-x-executable", "Uygulama başlatılıyor", &app_name])
                 .spawn();
             let parts: Vec<&str> = app_exec.split_whitespace().collect();
             if let Some(cmd) = parts.get(0) {
@@ -3257,47 +3594,53 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     apps_drawer.append(&apps_grid_box);
     content_box.append(&apps_drawer);
 
-    // ── 2. BENTO QUICK ACTION ROW (BOTTOM 4 BENTO TILES) ──
-    let bento_row = GtkBox::new(Orientation::Horizontal, 0);
+    // ── 2. QUIET GRAPHITE UTILITY CARDS (BOTTOM 4 ACTIONS) ──
+    let bento_row = GtkBox::new(Orientation::Horizontal, 12);
     bento_row.add_css_class("xbox-bento-row");
+    bento_row.set_homogeneous(true);
+    bento_row.set_hexpand(true);
 
-    // Tile 1: "Browse your games & apps"
-    let bento_apps = Button::new();
-    bento_apps.add_css_class("xbox-bento-card");
-    let bento1_overlay = Overlay::new();
-    bento1_overlay.set_size_request(275, 155);
+    let make_utility_card = |icon_names: &[&str], title: &str, subtitle: &str| -> Button {
+        let btn = Button::new();
+        btn.add_css_class("xbox-bento-card");
+        btn.set_hexpand(true);
 
-    let b1_pic = Picture::new();
-    b1_pic.set_can_shrink(true);
-    b1_pic.set_content_fit(gtk4::ContentFit::Cover);
-    for b1_path in [
-        "/usr/share/solarui/covers/bento_browse.png",
-    ] {
-        if Path::new(b1_path).exists() {
-            load_picture_file(&b1_pic, Path::new(b1_path));
-            break;
-        }
-    }
-    bento1_overlay.set_child(Some(&b1_pic));
+        let card_box = GtkBox::new(Orientation::Vertical, 8);
+        card_box.set_valign(gtk4::Align::Center);
+        card_box.set_halign(gtk4::Align::Fill);
 
-    let b1_content = GtkBox::new(Orientation::Vertical, 2);
-    b1_content.add_css_class("xbox-bento-overlay-box");
-    b1_content.set_valign(gtk4::Align::End);
+        let top_row = GtkBox::new(Orientation::Horizontal, 8);
+        top_row.set_valign(gtk4::Align::Center);
+        let icon = build_symbolic_icon(icon_names, "xbox-bento-icon");
+        let title_lbl = Label::new(Some(title));
+        title_lbl.add_css_class("xbox-bento-title");
+        title_lbl.set_halign(gtk4::Align::Start);
+        title_lbl.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        top_row.append(&icon);
+        top_row.append(&title_lbl);
 
-    let b1_tag = Label::new(Some("BLAZE LIBRARY"));
-    b1_tag.add_css_class("xbox-bento-tag");
-    b1_tag.set_halign(gtk4::Align::Start);
+        let sub_lbl = Label::new(Some(subtitle));
+        sub_lbl.add_css_class("xbox-bento-subtitle");
+        sub_lbl.set_halign(gtk4::Align::Start);
+        sub_lbl.set_wrap(true);
+        sub_lbl.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        sub_lbl.set_lines(2);
 
-    let b1_title = Label::new(Some(lang.browse_games_and_apps()));
-    b1_title.add_css_class("xbox-bento-title");
-    b1_title.set_halign(gtk4::Align::Start);
-    b1_title.set_wrap(true);
+        card_box.append(&top_row);
+        card_box.append(&sub_lbl);
+        btn.set_child(Some(&card_box));
+        btn
+    };
 
-    b1_content.append(&b1_tag);
-    b1_content.append(&b1_title);
-    bento1_overlay.add_overlay(&b1_content);
-    bento_apps.set_child(Some(&bento1_overlay));
-
+    // Card 1: Games & Apps Drawer
+    let bento_apps = make_utility_card(
+        &["view-app-grid-symbolic", "view-grid-symbolic"],
+        lang.browse_games_and_apps(),
+        match lang {
+            Language::TR => "Kurulu oyunları ve masaüstü uygulamalarını aç",
+            Language::EN => "Browse installed games and desktop apps",
+        },
+    );
     let drawer_show = apps_drawer.clone();
     bento_apps.connect_clicked(move |_| {
         let is_vis = drawer_show.is_visible();
@@ -3305,152 +3648,57 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     });
     bento_row.append(&bento_apps);
 
-    // Tile 2: "Customize your Home / BORE Performance"
-    let bento_perf = Button::new();
-    bento_perf.add_css_class("xbox-bento-card");
-    let bento2_overlay = Overlay::new();
-    bento2_overlay.set_size_request(275, 155);
-
-    let b2_pic = Picture::new();
-    b2_pic.set_can_shrink(true);
-    b2_pic.set_content_fit(gtk4::ContentFit::Cover);
-    for b2_path in [
-        "/usr/share/solarui/covers/bento_performance.png",
-    ] {
-        if Path::new(b2_path).exists() {
-            load_picture_file(&b2_pic, Path::new(b2_path));
-            break;
-        }
-    }
-    bento2_overlay.set_child(Some(&b2_pic));
-
-    let b2_content = GtkBox::new(Orientation::Vertical, 2);
-    b2_content.add_css_class("xbox-bento-overlay-box");
-    b2_content.set_valign(gtk4::Align::End);
-
-    let b2_tag = Label::new(Some("SCHED_EXT & NTSYNC"));
-    b2_tag.add_css_class("xbox-bento-tag");
-    b2_tag.set_halign(gtk4::Align::Start);
-
-    let b2_title = Label::new(Some(lang.customize_home()));
-    b2_title.add_css_class("xbox-bento-title");
-    b2_title.set_halign(gtk4::Align::Start);
-
-    let b2_sub = Label::new(Some(&format!("Linux {} • eBPF & NTSYNC", kern_ver)));
-    b2_sub.add_css_class("xbox-bento-subtitle");
-    b2_sub.set_halign(gtk4::Align::Start);
-
-    b2_content.append(&b2_tag);
-    b2_content.append(&b2_title);
-    b2_content.append(&b2_sub);
-    bento2_overlay.add_overlay(&b2_content);
-    bento_perf.set_child(Some(&bento2_overlay));
-
+    // Card 2: Gaming Performance Profile
+    let perf_sub = match lang {
+        Language::TR => format!("Linux {} · sched_ext ve NTSYNC", kern_ver),
+        Language::EN => format!("Linux {} · sched_ext and NTSYNC", kern_ver),
+    };
+    let bento_perf = make_utility_card(
+        &["preferences-system-devices-symbolic", "emblem-system-symbolic"],
+        lang.customize_home(),
+        &perf_sub,
+    );
     bento_perf.connect_clicked(|_| {
         activate_gaming_optimizations();
         let _ = Command::new("notify-send")
             .args([
                 "-a", "Blaze GameZone",
                 "-i", "preferences-system",
-                "Performans Modu",
-                "sched_ext & NTSYNC Oyun Çekirdeği devrede.",
+                "Performans profili",
+                "sched_ext ve NTSYNC oyun profili etkinleştirildi",
             ])
             .spawn();
     });
     bento_row.append(&bento_perf);
 
-    // Tile 3: "Store / Featured Deals"
-    let bento_store = Button::new();
-    bento_store.add_css_class("xbox-bento-card");
-    let bento3_overlay = Overlay::new();
-    bento3_overlay.set_size_request(275, 155);
-
-    let b3_pic = Picture::new();
-    b3_pic.set_can_shrink(true);
-    b3_pic.set_content_fit(gtk4::ContentFit::Cover);
-    for b3_path in [
-        "/usr/share/solarui/covers/bento_store.png",
-    ] {
-        if Path::new(b3_path).exists() {
-            load_picture_file(&b3_pic, Path::new(b3_path));
-            break;
-        }
-    }
-    bento3_overlay.set_child(Some(&b3_pic));
-
-    let b3_content = GtkBox::new(Orientation::Vertical, 2);
-    b3_content.add_css_class("xbox-bento-overlay-box");
-    b3_content.set_valign(gtk4::Align::End);
-
-    let b3_tag = Label::new(Some("BLAZE STORE"));
-    b3_tag.add_css_class("xbox-bento-tag");
-    b3_tag.set_halign(gtk4::Align::Start);
-
-    let b3_title = Label::new(Some(lang.store_deals()));
-    b3_title.add_css_class("xbox-bento-title");
-    b3_title.set_halign(gtk4::Align::Start);
-
-    let b3_sub = Label::new(Some("Steam • Epic • GOG"));
-    b3_sub.add_css_class("xbox-bento-subtitle");
-    b3_sub.set_halign(gtk4::Align::Start);
-
-    b3_content.append(&b3_tag);
-    b3_content.append(&b3_title);
-    b3_content.append(&b3_sub);
-    bento3_overlay.add_overlay(&b3_content);
-    bento_store.set_child(Some(&bento3_overlay));
-
+    // Card 3: Game Stores
+    let bento_store = make_utility_card(
+        &["system-software-install-symbolic", "package-x-generic-symbolic", "web-browser-symbolic"],
+        lang.store_deals(),
+        match lang {
+            Language::TR => "Steam, Epic, GOG ve FireHub",
+            Language::EN => "Steam, Epic, GOG and FireHub",
+        },
+    );
     let alert_st = trigger_offline_alert.clone();
     bento_store.connect_clicked(move |_| {
         if !is_system_online() {
-            alert_st("İnternete bağlı değilsiniz. Sadece yüklü oyunları çalıştırabilirsiniz.");
+            alert_st(lang.offline_alert());
         } else {
             open_browser_url("https://store.steampowered.com/");
         }
     });
     bento_row.append(&bento_store);
 
-    // Tile 4: "Play like a Pro / Settings & Proton"
-    let bento_pro = Button::new();
-    bento_pro.add_css_class("xbox-bento-card");
-    let bento4_overlay = Overlay::new();
-    bento4_overlay.set_size_request(275, 155);
-
-    let b4_pic = Picture::new();
-    b4_pic.set_can_shrink(true);
-    b4_pic.set_content_fit(gtk4::ContentFit::Cover);
-    for b4_path in [
-        "/usr/share/solarui/covers/bento_settings.png",
-    ] {
-        if Path::new(b4_path).exists() {
-            load_picture_file(&b4_pic, Path::new(b4_path));
-            break;
-        }
-    }
-    bento4_overlay.set_child(Some(&b4_pic));
-
-    let b4_content = GtkBox::new(Orientation::Vertical, 2);
-    b4_content.add_css_class("xbox-bento-overlay-box");
-    b4_content.set_valign(gtk4::Align::End);
-
-    let b4_tag = Label::new(Some("SETTINGS & PROTON"));
-    b4_tag.add_css_class("xbox-bento-tag");
-    b4_tag.set_halign(gtk4::Align::Start);
-
-    let b4_title = Label::new(Some(lang.play_like_pro()));
-    b4_title.add_css_class("xbox-bento-title");
-    b4_title.set_halign(gtk4::Align::Start);
-
-    let b4_sub = Label::new(Some("Blaze Proton-GE • Gamepad Config"));
-    b4_sub.add_css_class("xbox-bento-subtitle");
-    b4_sub.set_halign(gtk4::Align::Start);
-
-    b4_content.append(&b4_tag);
-    b4_content.append(&b4_title);
-    b4_content.append(&b4_sub);
-    bento4_overlay.add_overlay(&b4_content);
-    bento_pro.set_child(Some(&bento4_overlay));
-
+    // Card 4: Proton-GE & Settings
+    let bento_pro = make_utility_card(
+        &["input-gaming-symbolic", "preferences-system-symbolic", "emblem-system-symbolic"],
+        lang.play_like_pro(),
+        match lang {
+            Language::TR => "GE-Proton sürümleri ve kabuk tercihleri",
+            Language::EN => "GE-Proton versions and shell preferences",
+        },
+    );
     bento_pro.connect_clicked(move |_| {
         open_proton_ge_manager_modal(lang);
     });
@@ -3461,38 +3709,15 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     main_scroll.set_child(Some(&content_box));
     root_box.append(&main_scroll);
 
-    // ── FOOTER CONTROLLER BAR ──
+    // ── FOOTER CONTROLLER & KEYBOARD KEYCAP BAR ──
     let controller_bar = GtkBox::new(Orientation::Horizontal, 0);
     controller_bar.add_css_class("xbox-controller-bar");
+    controller_bar.set_valign(gtk4::Align::Center);
 
-    let k_a = Label::new(Some("A"));
-    k_a.add_css_class("xbox-legend-key");
-    let d_a = Label::new(Some(lang.footer_play()));
-    d_a.add_css_class("xbox-legend-desc");
-
-    let k_b = Label::new(Some("B"));
-    k_b.add_css_class("xbox-legend-key");
-    let d_b = Label::new(Some(lang.footer_back()));
-    d_b.add_css_class("xbox-legend-desc");
-
-    let k_x = Label::new(Some("X"));
-    k_x.add_css_class("xbox-legend-key");
-    let d_x = Label::new(Some(lang.footer_options()));
-    d_x.add_css_class("xbox-legend-desc");
-
-    let k_y = Label::new(Some("Y"));
-    k_y.add_css_class("xbox-legend-key");
-    let d_y = Label::new(Some(lang.footer_search()));
-    d_y.add_css_class("xbox-legend-desc");
-
-    controller_bar.append(&k_a);
-    controller_bar.append(&d_a);
-    controller_bar.append(&k_b);
-    controller_bar.append(&d_b);
-    controller_bar.append(&k_x);
-    controller_bar.append(&d_x);
-    controller_bar.append(&k_y);
-    controller_bar.append(&d_y);
+    append_footer_hint(&controller_bar, &["A", "Enter"], lang.footer_play());
+    append_footer_hint(&controller_bar, &["B", "Esc"], lang.footer_back());
+    append_footer_hint(&controller_bar, &["X"], lang.footer_options());
+    append_footer_hint(&controller_bar, &["Y"], lang.footer_search());
 
     root_box.append(&controller_bar);
 
@@ -3528,41 +3753,70 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
         });
     }
 
+    // Top nav active-state helper
+    let sync_nav_active: Rc<dyn Fn(u8)> = {
+        let bl = btn_library.clone();
+        let bs = btn_store.clone();
+        let bsr = btn_search.clone();
+        let bset = btn_settings.clone();
+        Rc::new(move |active_idx: u8| {
+            for b in [&bl, &bs, &bsr, &bset] {
+                b.remove_css_class("active");
+            }
+            match active_idx {
+                1 => bs.add_css_class("active"),
+                2 => bsr.add_css_class("active"),
+                3 => bset.add_css_class("active"),
+                _ => bl.add_css_class("active"),
+            }
+        })
+    };
+
     // Top buttons connections
     let drawer_lib = apps_drawer.clone();
     let drawer_st_lib = store_drawer.clone();
     let drawer_set_lib = settings_drawer.clone();
+    let sync_lib = sync_nav_active.clone();
     btn_library.connect_clicked(move |_| {
         drawer_st_lib.set_visible(false);
         drawer_set_lib.set_visible(false);
         let is_v = drawer_lib.is_visible();
         drawer_lib.set_visible(!is_v);
+        sync_lib(0);
     });
 
     let drawer_st_open = store_drawer.clone();
     let drawer_apps_st = apps_drawer.clone();
     let drawer_set_st = settings_drawer.clone();
+    let sync_st = sync_nav_active.clone();
     btn_store.connect_clicked(move |_| {
         drawer_apps_st.set_visible(false);
         drawer_set_st.set_visible(false);
         let is_v = drawer_st_open.is_visible();
         drawer_st_open.set_visible(!is_v);
+        sync_st(if !is_v { 1 } else { 0 });
     });
 
     let alert_cloud_top = trigger_offline_alert.clone();
     btn_discover.connect_clicked(move |_| {
         if !is_system_online() {
-            alert_cloud_top("İnternete bağlı değilsiniz. Sadece yüklü oyunları çalıştırabilirsiniz.");
+            alert_cloud_top(lang.offline_alert());
         } else {
             open_browser_url("https://www.xbox.com/play");
         }
     });
 
     let drawer_search = apps_drawer.clone();
+    let drawer_st_sr = store_drawer.clone();
+    let drawer_set_sr = settings_drawer.clone();
     let search_inp_foc = search_input.clone();
+    let sync_sr = sync_nav_active.clone();
     btn_search.connect_clicked(move |_| {
+        drawer_st_sr.set_visible(false);
+        drawer_set_sr.set_visible(false);
         let is_v = drawer_search.is_visible();
         drawer_search.set_visible(!is_v);
+        sync_sr(if !is_v { 2 } else { 0 });
         if !is_v {
             search_inp_foc.grab_focus();
         }
@@ -3571,24 +3825,27 @@ fn build_gamezone_ui(main_loop: glib::MainLoop) {
     let drawer_set_open = settings_drawer.clone();
     let drawer_apps_set = apps_drawer.clone();
     let drawer_st_set = store_drawer.clone();
+    let sync_set = sync_nav_active.clone();
     btn_settings.connect_clicked(move |_| {
         drawer_apps_set.set_visible(false);
         drawer_st_set.set_visible(false);
         let is_v = drawer_set_open.is_visible();
         drawer_set_open.set_visible(!is_v);
+        sync_set(if !is_v { 3 } else { 0 });
     });
     if std::env::var("GAMEZONE_OPEN_SETTINGS").as_deref() == Ok("1") {
         settings_drawer.set_visible(true);
+        sync_nav_active(3);
     }
 
-    // Bento Store Card opens store_drawer
+    // Store utility card opens store_drawer
     let bento_st_drawer = store_drawer.clone();
     bento_store.connect_clicked(move |_| {
         let is_v = bento_st_drawer.is_visible();
         bento_st_drawer.set_visible(!is_v);
     });
 
-    // Bento Pro Card opens settings_drawer
+    // Settings utility card opens settings_drawer
     let bento_set_drawer = settings_drawer.clone();
     bento_pro.connect_clicked(move |_| {
         let is_v = bento_set_drawer.is_visible();
@@ -3741,20 +3998,20 @@ fn open_external_game_scanner_modal(
     local_cbox: GtkBox,
     local_btns: Rc<RefCell<Vec<Button>>>,
     local_empty_card: GtkBox,
-    btn_tab_local: Button,
+    btn_tab_local_lbl: Label,
     populate_fn: Rc<dyn Fn(&GtkBox, &[GameEntry], &Rc<RefCell<Vec<Button>>>)>,
     switch_subtab: Rc<dyn Fn(u8)>,
     media_tx: async_channel::Sender<MediaUpdateEvent>,
 ) {
     let modal = Window::builder()
         .title(match lang {
-            Language::TR => "Harici Oyun veya Klasör Tanıt",
-            Language::EN => "Add External Game or Folder",
+            Language::TR => "Harici oyun ekle",
+            Language::EN => "Add external game",
         })
         .transient_for(parent)
         .modal(true)
-        .default_width(540)
-        .default_height(300)
+        .default_width(544)
+        .default_height(304)
         .build();
 
     let box_root = GtkBox::new(Orientation::Vertical, 12);
@@ -3765,16 +4022,16 @@ fn open_external_game_scanner_modal(
     box_root.set_margin_end(16);
 
     let hdr = Label::new(Some(match lang {
-        Language::TR => "Farklı Kaynaktan İndirilen Oyunu veya Klasörü Ekle",
-        Language::EN => "Register Externally Downloaded Game or Folder",
+        Language::TR => "Harici oyun veya klasör ekle",
+        Language::EN => "Add external game or folder",
     }));
     hdr.add_css_class("xbox-apps-header");
     hdr.set_halign(gtk4::Align::Start);
     box_root.append(&hdr);
 
     let sub = Label::new(Some(match lang {
-        Language::TR => "Klasör yolu (örn. /mnt/nvme/Oyunlar veya ~/Downloads/Oyun) ya da doğrudan çalıştırılabilir dosya (.exe, .AppImage, .x86_64) girin. Resmi kapak, logo ve fragman otomatik çekilir.",
-        Language::EN => "Enter a game folder (e.g. /mnt/nvme/Games) or executable (.exe, .AppImage, .x86_64). Official cover, logo & trailer will be fetched automatically.",
+        Language::TR => "Oyun klasörü veya çalıştırılabilir dosya (.exe, .AppImage, .x86_64) yolu girin. Kapak, logo ve fragman otomatik alınır.",
+        Language::EN => "Enter a game folder or executable (.exe, .AppImage, .x86_64). Cover, logo and trailer are fetched automatically.",
     }));
     sub.add_css_class("xbox-modal-card-desc");
     sub.set_halign(gtk4::Align::Start);
@@ -3784,17 +4041,20 @@ fn open_external_game_scanner_modal(
     let entry_title = Entry::new();
     entry_title.add_css_class("xbox-search-bar");
     entry_title.set_placeholder_text(Some(match lang {
-        Language::TR => "Oyun Adı (isteğe bağlı — tek .exe/.AppImage eklerken)",
-        Language::EN => "Game Title (optional — when adding a single binary)",
+        Language::TR => "Oyun adı (isteğe bağlı)",
+        Language::EN => "Game title (optional)",
     }));
     box_root.append(&entry_title);
 
     let entry_path = Entry::new();
     entry_path.add_css_class("xbox-search-bar");
-    entry_path.set_placeholder_text(Some("/home/blaze/Oyunlar  veya  /home/blaze/Oyunlar/Hades/Hades.exe"));
+    entry_path.set_placeholder_text(Some(match lang {
+        Language::TR => "~/Oyunlar veya ~/Oyunlar/Hades/Hades.exe",
+        Language::EN => "~/Games or ~/Games/Hades/Hades.exe",
+    }));
     box_root.append(&entry_path);
 
-    let actions = GtkBox::new(Orientation::Horizontal, 10);
+    let actions = GtkBox::new(Orientation::Horizontal, 12);
     actions.set_halign(gtk4::Align::End);
 
     let btn_cancel = Button::with_label(lang.close());
@@ -3805,8 +4065,8 @@ fn open_external_game_scanner_modal(
     });
 
     let btn_save = Button::with_label(match lang {
-        Language::TR => "Tara ve Bilgisayarımdaki Oyunlara Taşı",
-        Language::EN => "Scan & Move to My PC Games",
+        Language::TR => "Tara ve ekle",
+        Language::EN => "Scan and add",
     });
     btn_save.add_css_class("gz-hero-play-primary");
 
@@ -3817,7 +4077,7 @@ fn open_external_game_scanner_modal(
         if raw_p.is_empty() {
             return;
         }
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/home/blaze".to_string());
+        let home = get_user_home().to_string_lossy().to_string();
         let expanded = if let Some(rest) = raw_p.strip_prefix("~/") {
             format!("{}/{}", home, rest)
         } else {
@@ -3835,7 +4095,7 @@ fn open_external_game_scanner_modal(
             } else {
                 pb.file_stem()
                     .and_then(|s| s.to_str())
-                    .unwrap_or("Harici Oyun")
+                    .unwrap_or("Harici oyun")
                     .to_string()
             };
             cfg.executables.push(CustomExecutableEntry {
@@ -3848,9 +4108,9 @@ fn open_external_game_scanner_modal(
         let rescanned = gamezone_live::scan_computer_and_account_games(discover_all_games());
         *local_games_rc.borrow_mut() = rescanned.clone();
         local_empty_card.set_visible(rescanned.is_empty());
-        btn_tab_local.set_label(&match lang {
-            Language::TR => format!("▣ Bilgisayarımdaki & Hesabımdaki Oyunlar ({})", rescanned.len()),
-            Language::EN => format!("▣ My PC & Account Games ({})", rescanned.len()),
+        btn_tab_local_lbl.set_text(&match lang {
+            Language::TR => format!("Kurulu ve hesap oyunları ({})", rescanned.len()),
+            Language::EN => format!("Installed and account games ({})", rescanned.len()),
         });
         populate_fn(&local_cbox, &rescanned, &local_btns);
         gamezone_live::spawn_official_media_fetcher(rescanned, media_tx.clone());
@@ -3878,13 +4138,13 @@ fn update_hero_showcase(
 ) {
     title_lbl.set_text(&game.title);
     if game.is_installed {
-        sub_lbl.set_text(&format!("{} • Kurulu ve Hazır • Düşük Gecikme Modu Aktif", game.banner_desc));
-        play_btn.set_label(&format!("OYNA (A / Enter) - {}", game.title));
+        sub_lbl.set_text(&format!("{} · Kurulu ve hazır", game.banner_desc));
+        play_btn.set_label(&format!("Oyna · {}", game.title));
         play_btn.remove_css_class("hero-install-btn");
         play_btn.add_css_class("hero-play-btn");
     } else {
-        sub_lbl.set_text(&format!("{} • Henüz Kurulu Değil (İndirilebilir)", game.banner_desc));
-        play_btn.set_label(&format!("YÜKLE / MAĞAZADA GÖR (A) - {}", game.title));
+        sub_lbl.set_text(&format!("{} · Kurulu değil", game.banner_desc));
+        play_btn.set_label(&format!("Mağazada gör · {}", game.title));
         play_btn.remove_css_class("hero-play-btn");
         play_btn.add_css_class("hero-install-btn");
     }
@@ -4036,7 +4296,7 @@ fn fetch_and_apply_store_screenshot(game: &GameEntry, hero_pic: &Picture, bg_pic
 // ── 10 Saniye Hover: Steam Oynanış Videosu / Fragmanı Kendi Çerçevesinde Başlatma ──
 fn trigger_store_video_preview(game: &GameEntry, hero_vid: &Video, hero_pic: &Picture, trailer_badge: &Label) {
     println!("Triggering 10s gameplay video preview for {}", game.title);
-    trailer_badge.set_text("▶ Oynanış Fragmanı Başlatıldı (Kendi Çerçevesinde)");
+    trailer_badge.set_text("Oynanış fragmanı");
 
     // 1. Önce diskteki önbelleğe veya paketli fragmana bak
     if let Some(local_path) = get_game_trailer_path(game) {
@@ -4202,7 +4462,7 @@ fn create_game_cover_image(game: &GameEntry) -> Picture {
     let pic = Picture::new();
     pic.set_can_shrink(true);
     pic.set_content_fit(gtk4::ContentFit::Cover);
-    pic.set_size_request(156, 156);
+    pic.set_size_request(160, 160);
     pic.add_css_class("game-cover-pic");
 
     if let Some(p) = get_game_cover_path(game) {
@@ -4869,30 +5129,30 @@ fn open_proton_ge_manager_modal(lang: Language) {
     // If external protonup-qt exists and user installed it, we still offer our native GTK4 manager
     let win = Window::builder()
         .title(match lang {
-            Language::TR => "Blaze Proton-GE & Uyumluluk Yöneticisi",
-            Language::EN => "Blaze Proton-GE & Compatibility Manager",
+            Language::TR => "Proton-GE ve uyumluluk yöneticisi",
+            Language::EN => "Proton-GE and compatibility manager",
         })
         .default_width(640)
-        .default_height(440)
+        .default_height(432)
         .modal(true)
         .build();
 
-    let root = GtkBox::new(Orientation::Vertical, 14);
+    let root = GtkBox::new(Orientation::Vertical, 16);
     root.set_margin_top(20);
     root.set_margin_bottom(20);
-    root.set_margin_start(22);
-    root.set_margin_end(22);
+    root.set_margin_start(24);
+    root.set_margin_end(24);
 
     let hdr = Label::new(Some(match lang {
-        Language::TR => "Blaze Proton-GE & NTSYNC Uyumluluk Yöneticisi",
-        Language::EN => "Blaze Proton-GE & NTSYNC Compatibility Manager",
+        Language::TR => "Proton-GE ve NTSYNC uyumluluk yöneticisi",
+        Language::EN => "Proton-GE and NTSYNC compatibility manager",
     }));
     hdr.add_css_class("xbox-apps-header");
     hdr.set_halign(gtk4::Align::Start);
     root.append(&hdr);
 
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/blaze".to_string());
-    let compat_dir = PathBuf::from(&home).join(".steam/root/compatibilitytools.d");
+    let home = get_user_home();
+    let compat_dir = home.join(".steam/root/compatibilitytools.d");
     let _ = std::fs::create_dir_all(&compat_dir);
 
     let mut installed = Vec::new();
@@ -4908,38 +5168,40 @@ fn open_proton_ge_manager_modal(lang: Language) {
     let ntsync_ok = Path::new("/dev/ntsync").exists();
     let scx_ok = Path::new("/sys/kernel/sched_ext").exists();
     let status_text = format!(
-        "• Hedef Dizin: {}\n• Çekirdek NTSYNC (/dev/ntsync): {}\n• Çekirdek sched_ext (eBPF): {}\n• Kurulu Proton-GE Sürümleri: {}",
+        "Hedef dizin: {}\nNTSYNC (/dev/ntsync): {}\nsched_ext (eBPF): {}\nKurulu Proton-GE sürümleri: {}",
         compat_dir.display(),
-        if ntsync_ok { "AKTİF (Hazır)" } else { "Modül Bekleniyor (modprobe ntsync)" },
-        if scx_ok { "AKTİF (Hazır)" } else { "Standart EEVDF Zamanlayıcı" },
+        if ntsync_ok { "Etkin" } else { "Modül bekleniyor (modprobe ntsync)" },
+        if scx_ok { "Etkin" } else { "Standart EEVDF zamanlayıcı" },
         if installed.is_empty() { "Henüz kurulu GE-Proton yok".to_string() } else { installed.join(", ") }
     );
 
     let info_lbl = Label::new(Some(&status_text));
+    info_lbl.add_css_class("gz-modal-meta");
     info_lbl.set_halign(gtk4::Align::Start);
     info_lbl.set_wrap(true);
     root.append(&info_lbl);
 
     let prog_lbl = Label::new(Some(match lang {
-        Language::TR => "En son GE-Proton sürümünü GitHub üzerinden doğrudan Steam uyumluluk dizinine indirebilirsiniz.",
-        Language::EN => "Download and extract the latest GE-Proton release directly into your Steam compatibilitytools.d directory.",
+        Language::TR => "En son GE-Proton sürümünü GitHub üzerinden doğrudan Steam uyumluluk dizinine indirebilirsiniz",
+        Language::EN => "Download and extract the latest GE-Proton release into Steam compatibilitytools.d",
     }));
+    prog_lbl.add_css_class("xbox-modal-card-desc");
     prog_lbl.set_halign(gtk4::Align::Start);
     prog_lbl.set_wrap(true);
     root.append(&prog_lbl);
 
     let btn_row = GtkBox::new(Orientation::Horizontal, 12);
     let dl_btn = Button::with_label(match lang {
-        Language::TR => "En Güncel GE-Proton Sürümünü İndir & Kur",
-        Language::EN => "Download & Install Latest GE-Proton",
+        Language::TR => "Son GE-Proton sürümünü indir ve kur",
+        Language::EN => "Download and install latest GE-Proton",
     });
-    dl_btn.add_css_class("xbox-apps-close-btn");
+    dl_btn.add_css_class("gz-hero-play-primary");
 
     let prog_lbl_clone = prog_lbl.clone();
     let compat_clone = compat_dir.clone();
     dl_btn.connect_clicked(move |b| {
         b.set_sensitive(false);
-        prog_lbl_clone.set_text("GitHub API üzerinden en son GloriousEggroll/proton-ge-custom sürümü sorgulanıyor...");
+        prog_lbl_clone.set_text("GitHub üzerinden en son GloriousEggroll/proton-ge-custom sürümü sorgulanıyor");
         let (tx, rx) = async_channel::unbounded::<(String, bool)>();
         let target_dir = compat_clone.clone();
         std::thread::spawn(move || {
@@ -4950,12 +5212,12 @@ API_JSON=$(curl -fsSL https://api.github.com/repos/GloriousEggroll/proton-ge-cus
 TAR_URL=$(printf '%s' "$API_JSON" | grep -oE 'https://github.com/GloriousEggroll/proton-ge-custom/releases/download/[^"]+\.tar\.gz' | head -n 1)
 TAG_NAME=$(printf '%s' "$API_JSON" | grep -oE '"tag_name":\s*"[^"]+"' | head -n 1 | cut -d'"' -f4)
 if [ -z "$TAR_URL" ]; then
-    echo "ERR:GitHub API'den GE-Proton indirme bağlantısı alınamadı."
+    echo "ERR:GitHub API'den GE-Proton indirme bağlantısı alınamadı"
     exit 1
 fi
-echo "INFO:$TAG_NAME indiriliyor ve {dir} dizinine açılıyor..."
+echo "INFO:$TAG_NAME indiriliyor ve {dir} dizinine açılıyor"
 curl -fL "$TAR_URL" | tar -xz -C "{dir}"
-echo "OK:$TAG_NAME başarıyla kuruldu! Steam'i yeniden başlattığınızda Uyumluluk sekmesinde görünecektir."
+echo "OK:$TAG_NAME kuruldu. Steam'i yeniden başlattığınızda Uyumluluk sekmesinde görünür."
 "#,
                 dir = target_dir.display()
             );
@@ -5091,7 +5353,7 @@ mod tests {
     fn test_adult_content_filter_detection() {
         assert!(
             crate::gamezone_live::is_adult_or_nsfw_game(
-                "Fuck Everything 👉👌💦",
+                "Fuck Everything \u{1F449}\u{1F44C}\u{1F4A6}",
                 "Your brand-new AI sex doll asked what you're into...",
                 ""
             ),

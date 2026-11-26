@@ -12,19 +12,14 @@ use gtk4::gdk;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Box as GtkBox, Button, Entry, EventControllerKey, Image, Label, ListBox, ListBoxRow,
+    Box as GtkBox, Button, Entry, EventControllerKey, IconTheme, Image, Label, ListBox, ListBoxRow,
     Orientation, ScrolledWindow, Window,
 };
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 use crate::apps::{scan_desktop_applications, AppInfo};
-use crate::living_flow::{apply_living_flow_theme, load_png_emblem, FluidCloud, FluidCloudTone};
-
-const OMNIBAR_EMBLEM_PNG: &[u8] =
-    include_bytes!("../../../data/icons/living-flow/solar-settings-64.png");
-const FALLBACK_APP_PNG: &[u8] =
-    include_bytes!("../../../data/icons/living-flow/application-x-executable-64.png");
+use crate::living_flow::{apply_living_flow_theme, FluidCloud, FluidCloudTone};
 
 #[derive(Clone, Debug)]
 pub enum OmnibarItemType {
@@ -108,49 +103,109 @@ pub fn launch_omnibar_window() {
     let _ = std::fs::remove_file(&pid_file);
 }
 
+fn build_symbolic_icon(candidates: &[&str], css_class: &str) -> Image {
+    let chosen = gdk::Display::default()
+        .map(|d| IconTheme::for_display(&d))
+        .and_then(|theme| {
+            candidates
+                .iter()
+                .copied()
+                .find(|name| theme.has_icon(name))
+        })
+        .unwrap_or_else(|| {
+            candidates
+                .first()
+                .copied()
+                .unwrap_or("application-x-executable-symbolic")
+        });
+
+    let img = Image::from_icon_name(chosen);
+    img.set_pixel_size(16);
+    img.add_css_class(css_class);
+    img.set_halign(gtk4::Align::Center);
+    img.set_valign(gtk4::Align::Center);
+    img
+}
+
+fn append_footer_keycap_hint(container: &GtkBox, keys: &[&str], desc: &str) {
+    let group = GtkBox::new(Orientation::Horizontal, 8);
+    group.set_valign(gtk4::Align::Center);
+
+    let keys_box = GtkBox::new(Orientation::Horizontal, 4);
+    keys_box.set_valign(gtk4::Align::Center);
+    for key in keys {
+        let cap = Label::new(Some(key));
+        cap.add_css_class("lf-keycap");
+        cap.set_valign(gtk4::Align::Center);
+        keys_box.append(&cap);
+    }
+    group.append(&keys_box);
+
+    let lbl = Label::new(Some(desc));
+    lbl.add_css_class("footer-hint-text");
+    lbl.set_valign(gtk4::Align::Center);
+    group.append(&lbl);
+
+    container.append(&group);
+}
+
 fn build_omnibar_ui(main_loop: glib::MainLoop) {
     let extra_css = r#"
         .omnibar-card {
-            background-color: rgba(15, 17, 23, 0.96);
-            background-image: linear-gradient(155deg, rgba(168, 85, 247, 0.12) 0%, rgba(255, 90, 31, 0.08) 45%, rgba(15, 17, 23, 0.98) 100%);
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            border-top: 1px solid rgba(255, 255, 255, 0.24);
-            border-radius: 26px;
-            padding: 18px 20px;
-            box-shadow: 0 28px 68px rgba(0, 0, 0, 0.85);
+            background-color: #141415;
+            background-image: none;
+            border: 1px solid rgba(237, 237, 237, 0.08);
+            border-radius: 16px;
+            padding: 16px 20px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
         }
 
         .omnibar-header {
             margin-bottom: 12px;
         }
 
+        .omnibar-header-icon {
+            color: #85858b;
+            -gtk-icon-size: 16px;
+        }
+
         .omnibar-brand-title {
-            color: #F8FAFC;
+            color: #ededed;
             font-size: 14px;
-            font-weight: 800;
-            letter-spacing: 0.3px;
+            font-weight: 500;
+            letter-spacing: 0px;
         }
 
         .omnibar-brand-sub {
-            color: #94A3B8;
-            font-size: 11px;
-            font-weight: 600;
+            color: #85858b;
+            font-size: 12px;
+            font-weight: 400;
+            letter-spacing: 0px;
         }
 
         .omnibar-entry {
-            background-color: rgba(24, 28, 38, 0.95);
-            color: #F8FAFC;
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            border-radius: 16px;
-            font-size: 16px;
-            font-weight: 600;
-            padding: 12px 18px;
+            background-color: #19191b;
+            background-image: none;
+            color: #ededed;
+            border: 1px solid rgba(237, 237, 237, 0.12);
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 400;
+            letter-spacing: 0px;
+            font-feature-settings: "tnum";
+            padding: 12px 16px;
             margin-bottom: 12px;
+            caret-color: #ededed;
+            box-shadow: none;
+            transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        color 150ms cubic-bezier(0.22, 1, 0.36, 1);
         }
 
         .omnibar-entry:focus {
-            border-color: rgba(255, 122, 69, 0.80);
-            box-shadow: 0 0 0 2px rgba(255, 90, 31, 0.22);
+            background-color: #232325;
+            border-color: rgba(224, 87, 60, 0.65);
+            box-shadow: none;
         }
 
         .results-list {
@@ -158,74 +213,101 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
         }
 
         .result-row {
-            background-color: rgba(255, 255, 255, 0.025);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            border-radius: 14px;
-            padding: 10px 14px;
-            margin-bottom: 6px;
-            transition: all 140ms ease;
+            background-color: transparent;
+            background-image: none;
+            border: 1px solid transparent;
+            border-left: 2px solid transparent;
+            border-radius: 8px;
+            padding: 8px 12px;
+            margin-bottom: 4px;
+            box-shadow: none;
+            transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        border-color 150ms cubic-bezier(0.22, 1, 0.36, 1),
+                        color 150ms cubic-bezier(0.22, 1, 0.36, 1);
         }
 
-        .result-row:selected, .result-row:hover {
-            background-color: rgba(255, 90, 31, 0.15);
-            background-image: linear-gradient(90deg, rgba(255, 90, 31, 0.20) 0%, rgba(168, 85, 247, 0.14) 100%);
-            border: 1px solid rgba(255, 140, 66, 0.50);
+        .result-row:hover {
+            background-color: #19191b;
+            background-image: none;
+            border-color: rgba(237, 237, 237, 0.08);
+            border-left-color: rgba(237, 237, 237, 0.12);
+        }
+
+        .result-row:selected {
+            background-color: #232325;
+            background-image: none;
+            border: 1px solid rgba(237, 237, 237, 0.12);
+            border-left: 2px solid #e0573c;
+        }
+
+        .result-icon-slot {
+            min-width: 24px;
+            min-height: 24px;
+        }
+
+        .result-symbolic-icon {
+            color: #a1a1a6;
+            -gtk-icon-size: 16px;
+        }
+
+        .result-row:selected .result-symbolic-icon {
+            color: #ededed;
         }
 
         .result-title {
-            color: #F8FAFC;
+            color: #ededed;
             font-size: 14px;
-            font-weight: 700;
+            font-weight: 500;
+            letter-spacing: 0px;
+            font-feature-settings: "tnum";
         }
 
         .result-subtitle {
-            color: #94A3B8;
-            font-size: 11.5px;
+            color: #a1a1a6;
+            font-size: 12px;
+            font-weight: 400;
+            letter-spacing: 0px;
+            font-feature-settings: "tnum";
         }
 
         .result-badge {
-            background-color: rgba(255, 255, 255, 0.07);
-            color: #E2E8F0;
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            border-radius: 999px;
-            padding: 3px 10px;
-            font-size: 10.5px;
-            font-weight: 800;
-            letter-spacing: 0.4px;
-        }
-
-        .footer-hint {
-            color: #64748B;
-            font-size: 11px;
-            font-weight: 600;
-            margin-top: 8px;
-            padding-left: 6px;
-        }
-
-        .omnibar-close-btn {
-            background-color: rgba(239, 68, 68, 0.14);
-            color: #FCA5A5;
-            border: 1px solid rgba(239, 68, 68, 0.30);
-            border-radius: 999px;
-            min-width: 28px;
-            min-height: 28px;
-            padding: 0;
+            background-color: #19191b;
+            color: #85858b;
+            border: 1px solid rgba(237, 237, 237, 0.08);
+            border-radius: 4px;
+            padding: 2px 8px;
             font-size: 12px;
-            font-weight: 800;
+            font-weight: 400;
+            letter-spacing: 0px;
+            font-feature-settings: "tnum";
         }
 
-        .omnibar-close-btn:hover {
-            background-color: rgba(239, 68, 68, 0.85);
-            color: #FFFFFF;
+        .result-row:selected .result-badge {
+            background-color: #141415;
+            color: #a1a1a6;
+            border-color: rgba(237, 237, 237, 0.12);
+        }
+
+        .omnibar-footer {
+            border-top: 1px solid rgba(237, 237, 237, 0.08);
+            padding-top: 12px;
+            margin-top: 8px;
+        }
+
+        .footer-hint-text {
+            color: #85858b;
+            font-size: 12px;
+            font-weight: 400;
+            letter-spacing: 0px;
         }
     "#;
     apply_living_flow_theme(extra_css);
 
     let window = Window::builder()
-        .title("SolarUI Omnibar")
+        .title("Solar Omnibar")
         .decorated(false)
         .default_width(720)
-        .default_height(490)
+        .default_height(492)
         .resizable(false)
         .build();
 
@@ -239,20 +321,23 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
     let root_box = GtkBox::new(Orientation::Vertical, 0);
     root_box.add_css_class("omnibar-card");
 
-    // Top Capsule Header with FluidCloud
-    let header_row = GtkBox::new(Orientation::Horizontal, 10);
+    // Top Header with symbolic search icon, title, status dot and close control
+    let header_row = GtkBox::new(Orientation::Horizontal, 12);
     header_row.add_css_class("omnibar-header");
-    let emblem = load_png_emblem(OMNIBAR_EMBLEM_PNG, 28);
-    header_row.append(&emblem);
+    let header_icon = build_symbolic_icon(
+        &["system-search-symbolic", "edit-find-symbolic"],
+        "omnibar-header-icon",
+    );
+    header_row.append(&header_icon);
 
-    let brand_col = GtkBox::new(Orientation::Vertical, 1);
+    let brand_col = GtkBox::new(Orientation::Vertical, 2);
     brand_col.set_valign(gtk4::Align::Center);
     let b_title = Label::new(Some("Solar Omnibar"));
     b_title.add_css_class("omnibar-brand-title");
     b_title.set_halign(gtk4::Align::Start);
     brand_col.append(&b_title);
 
-    let b_sub = Label::new(Some("Uygulama • Matematik • Kur & Kripto • Pano • Sistem"));
+    let b_sub = Label::new(Some("Uygulama, hesaplama, kur, pano ve sistem"));
     b_sub.add_css_class("omnibar-brand-sub");
     b_sub.set_halign(gtk4::Align::Start);
     brand_col.append(&b_sub);
@@ -262,11 +347,15 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
     spacer.set_hexpand(true);
     header_row.append(&spacer);
 
-    let fluid_cloud = FluidCloud::new("Hazır • Mod+Space");
+    let fluid_cloud = FluidCloud::new("Hazır");
     header_row.append(fluid_cloud.widget());
 
-    let close_btn = Button::with_label("✕");
-    close_btn.add_css_class("omnibar-close-btn");
+    let close_btn = Button::new();
+    let close_icon = build_symbolic_icon(&["window-close-symbolic"], "omnibar-header-icon");
+    close_btn.set_child(Some(&close_icon));
+    close_btn.add_css_class("lf-win-btn");
+    close_btn.add_css_class("lf-win-close");
+    close_btn.set_tooltip_text(Some("Kapat"));
     let win_close = window.downgrade();
     let loop_close = main_loop.clone();
     close_btn.connect_clicked(move |_| {
@@ -282,7 +371,7 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
     // Search input
     let entry = Entry::new();
     entry.add_css_class("omnibar-entry");
-    entry.set_placeholder_text(Some("Komut, uygulama, pano (cb), matematik (= 25*1024) veya kur çevir (100 usd to try)..."));
+    entry.set_placeholder_text(Some("Uygulama, komut, =hesaplama, kur veya pano (cb) ara"));
     root_box.append(&entry);
 
     // Results container
@@ -298,13 +387,13 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
     scrolled.set_child(Some(&list_box));
     root_box.append(&scrolled);
 
-    // Footer hints
-    let footer_box = GtkBox::new(Orientation::Horizontal, 12);
-    let hint_label = Label::new(Some("↑/↓: Seç • Enter: Çalıştır / Kopyala • Esc: Kapat"));
-    hint_label.add_css_class("footer-hint");
-    hint_label.set_hexpand(true);
-    hint_label.set_halign(gtk4::Align::Start);
-    footer_box.append(&hint_label);
+    // Footer split keycap hints
+    let footer_box = GtkBox::new(Orientation::Horizontal, 16);
+    footer_box.add_css_class("omnibar-footer");
+    footer_box.set_valign(gtk4::Align::Center);
+    append_footer_keycap_hint(&footer_box, &["↑", "↓"], "Seç");
+    append_footer_keycap_hint(&footer_box, &["Enter"], "Çalıştır veya kopyala");
+    append_footer_keycap_hint(&footer_box, &["Esc"], "Kapat");
     root_box.append(&footer_box);
 
     window.set_child(Some(&root_box));
@@ -440,15 +529,15 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
         let new_items = generate_omnibar_items(query, &apps_clone);
         let count = new_items.len();
         if query.trim().is_empty() {
-            cloud_search.pulse(
-                &format!("Hazır • {} öneri", count),
-                FluidCloudTone::Info,
-                false,
-            );
+            cloud_search.pulse(&format!("{} öneri", count), FluidCloudTone::Info, false);
         } else {
             cloud_search.pulse(
                 &format!("{} eşleşme", count),
-                if count > 0 { FluidCloudTone::Success } else { FluidCloudTone::Warning },
+                if count > 0 {
+                    FluidCloudTone::Success
+                } else {
+                    FluidCloudTone::Warning
+                },
                 false,
             );
         }
@@ -463,10 +552,17 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
 
             let row_box = GtkBox::new(Orientation::Horizontal, 12);
             row_box.set_hexpand(true);
+            row_box.set_valign(gtk4::Align::Center);
 
-            // Resolved Icon (PNG file or fallback emblem)
-            let icon = resolve_omnibar_icon(item.icon_name.as_deref(), 28);
-            row_box.append(&icon);
+            // Fixed-width icon column: uniform 16px symbolic icons for built-ins,
+            // real app icons (20px) with quiet symbolic fallback for desktop apps
+            let icon_slot = GtkBox::new(Orientation::Horizontal, 0);
+            icon_slot.add_css_class("result-icon-slot");
+            icon_slot.set_halign(gtk4::Align::Center);
+            icon_slot.set_valign(gtk4::Align::Center);
+            let icon = resolve_omnibar_item_icon(item);
+            icon_slot.append(&icon);
+            row_box.append(&icon_slot);
 
             // Text details
             let text_box = GtkBox::new(Orientation::Vertical, 2);
@@ -486,7 +582,7 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
 
             row_box.append(&text_box);
 
-            // Badge
+            // Quiet category tag
             let badge_lbl = Label::new(Some(&item.badge));
             badge_lbl.add_css_class("result-badge");
             badge_lbl.set_valign(gtk4::Align::Center);
@@ -513,41 +609,94 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
     entry.grab_focus();
 }
 
-fn resolve_omnibar_icon(icon_opt: Option<&str>, size: i32) -> Image {
-    let icon_str = icon_opt.unwrap_or("application-x-executable");
-    let mut candidates = Vec::new();
-    if icon_str.starts_with('/') {
-        candidates.push(std::path::PathBuf::from(icon_str));
-    } else {
-        for base in [
-            "/usr/share/solarui/icons/living-flow",
-            "/usr/share/icons/hicolor/128x128/apps",
-            "/usr/share/icons/hicolor/256x256/apps",
-            "/usr/share/icons/hicolor/64x64/apps",
-            "/usr/share/icons/hicolor/48x48/apps",
-            "/usr/share/pixmaps",
-        ] {
-            candidates.push(std::path::Path::new(base).join(format!("{}-64.png", icon_str)));
-            candidates.push(std::path::Path::new(base).join(format!("{}.png", icon_str)));
+fn resolve_omnibar_item_icon(item: &OmnibarItem) -> Image {
+    match &item.item_type {
+        OmnibarItemType::App(_) => resolve_app_icon(item.icon_name.as_deref(), 20),
+        OmnibarItemType::Calculation(_, _) | OmnibarItemType::Conversion(_, _) => {
+            build_symbolic_icon(
+                &["accessories-calculator-symbolic", "system-run-symbolic"],
+                "result-symbolic-icon",
+            )
+        }
+        OmnibarItemType::Clipboard(_, _) => {
+            build_symbolic_icon(&["edit-paste-symbolic"], "result-symbolic-icon")
+        }
+        OmnibarItemType::ProcessKill(_, _) => build_symbolic_icon(
+            &["process-stop-symbolic", "media-playback-stop-symbolic"],
+            "result-symbolic-icon",
+        ),
+        OmnibarItemType::WebSearch(_, _) => build_symbolic_icon(
+            &[
+                "web-browser-symbolic",
+                "network-server-symbolic",
+                "system-search-symbolic",
+            ],
+            "result-symbolic-icon",
+        ),
+        OmnibarItemType::AiQuery(_) => build_symbolic_icon(
+            &["system-help-symbolic", "dialog-information-symbolic"],
+            "result-symbolic-icon",
+        ),
+        OmnibarItemType::SystemAction(_, _, _) => {
+            let icon_name = item
+                .icon_name
+                .as_deref()
+                .unwrap_or("application-x-executable-symbolic");
+            build_symbolic_icon(
+                &[
+                    icon_name,
+                    "emblem-system-symbolic",
+                    "application-x-executable-symbolic",
+                ],
+                "result-symbolic-icon",
+            )
         }
     }
-    for cand in candidates {
-        if cand.exists() {
-            if let Ok(bytes) = std::fs::read(&cand) {
-                let gbytes = glib::Bytes::from(&bytes);
-                if let Ok(texture) = gdk::Texture::from_bytes(&gbytes) {
-                    let img = Image::from_paintable(Some(&texture));
-                    img.set_pixel_size(size);
-                    img.set_size_request(size, size);
-                    return img;
+}
+
+fn resolve_app_icon(icon_opt: Option<&str>, size: i32) -> Image {
+    if let Some(icon_str) = icon_opt {
+        let mut candidates = Vec::new();
+        if icon_str.starts_with('/') {
+            candidates.push(std::path::PathBuf::from(icon_str));
+        } else {
+            for base in [
+                "/usr/share/icons/hicolor/128x128/apps",
+                "/usr/share/icons/hicolor/256x256/apps",
+                "/usr/share/icons/hicolor/64x64/apps",
+                "/usr/share/icons/hicolor/48x48/apps",
+                "/usr/share/pixmaps",
+            ] {
+                candidates.push(std::path::Path::new(base).join(format!("{}.png", icon_str)));
+            }
+        }
+        for cand in candidates {
+            if cand.exists() {
+                if let Ok(bytes) = std::fs::read(&cand) {
+                    let gbytes = glib::Bytes::from(&bytes);
+                    if let Ok(texture) = gdk::Texture::from_bytes(&gbytes) {
+                        let img = Image::from_paintable(Some(&texture));
+                        img.set_pixel_size(size);
+                        img.set_size_request(size, size);
+                        img.set_halign(gtk4::Align::Center);
+                        img.set_valign(gtk4::Align::Center);
+                        return img;
+                    }
                 }
             }
         }
+        if let Some(display) = gdk::Display::default() {
+            let theme = IconTheme::for_display(&display);
+            if theme.has_icon(icon_str) {
+                let img = Image::from_icon_name(icon_str);
+                img.set_pixel_size(size);
+                img.set_halign(gtk4::Align::Center);
+                img.set_valign(gtk4::Align::Center);
+                return img;
+            }
+        }
     }
-    let img = Image::from_icon_name(icon_str);
-    img.set_pixel_size(size);
-    let _ = FALLBACK_APP_PNG;
-    img
+    build_symbolic_icon(&["application-x-executable-symbolic"], "result-symbolic-icon")
 }
 
 fn execute_omnibar_item(item: &OmnibarItem) {
@@ -569,14 +718,14 @@ fn execute_omnibar_item(item: &OmnibarItem) {
             println!("Calculation copied: {}", res_str);
             let _ = Command::new("wl-copy").arg(&res_str).spawn();
             let _ = Command::new("notify-send")
-                .args(["-a", "SolarUI Omnibar", "Sonuç Panoya Kopyalandı", &res_str])
+                .args(["-a", "Solar Omnibar", "Sonuç panoya kopyalandı", &res_str])
                 .spawn();
         }
         OmnibarItemType::Conversion(_, val) => {
             println!("Conversion copied: {}", val);
             let _ = Command::new("wl-copy").arg(val).spawn();
             let _ = Command::new("notify-send")
-                .args(["-a", "SolarUI Omnibar", "Dönüştürme Panoya Kopyalandı", val])
+                .args(["-a", "Solar Omnibar", "Çeviri panoya kopyalandı", val])
                 .spawn();
         }
         OmnibarItemType::Clipboard(raw_entry, text) => {
@@ -626,14 +775,14 @@ fn execute_omnibar_item(item: &OmnibarItem) {
 
             let preview_short = truncate_chars(text, 50);
             let _ = Command::new("notify-send")
-                .args(["-a", "SolarUI Omnibar", "Pano Kopyalandı", &preview_short])
+                .args(["-a", "Solar Omnibar", "Panoya kopyalandı", &preview_short])
                 .spawn();
         }
         OmnibarItemType::ProcessKill(pid, name) => {
             println!("Killing process: {} (PID: {})", name, pid);
             let _ = Command::new("kill").arg("-9").arg(pid.to_string()).status();
             let _ = Command::new("notify-send")
-                .args(["-a", "SolarUI Omnibar", "İşlem Sonlandırıldı", &format!("{} (PID: {})", name, pid)])
+                .args(["-a", "Solar Omnibar", "Süreç sonlandırıldı", &format!("{} (PID {})", name, pid)])
                 .spawn();
         }
         OmnibarItemType::SystemAction(_, _, cmd) => {
@@ -676,6 +825,29 @@ fn url_encode_query(input: &str) -> String {
     encoded
 }
 
+fn format_category_badge(raw: &str) -> String {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "game" => "Oyun".to_string(),
+        "network" => "Ağ".to_string(),
+        "utility" => "Araç".to_string(),
+        "system" => "Sistem".to_string(),
+        "development" => "Geliştirme".to_string(),
+        "graphics" => "Grafik".to_string(),
+        "audiovideo" | "audio" | "video" => "Medya".to_string(),
+        "office" => "Ofis".to_string(),
+        "settings" => "Ayarlar".to_string(),
+        "education" | "science" => "Eğitim".to_string(),
+        "" => "Uygulama".to_string(),
+        other => {
+            let mut chars = other.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
+                None => "Uygulama".to_string(),
+            }
+        }
+    }
+}
+
 fn scan_clipboard_items(filter: &str, limit: usize) -> Vec<OmnibarItem> {
     let mut items = Vec::new();
     let q_lower = filter.trim().to_lowercase();
@@ -699,16 +871,16 @@ fn scan_clipboard_items(filter: &str, limit: usize) -> Vec<OmnibarItem> {
                     let title = truncate_chars(preview, 65);
 
                     let subtitle = if !id_str.is_empty() {
-                        format!("Pano Kaydı #{} • Seçmek için Enter", id_str)
+                        format!("Pano kaydı #{}", id_str)
                     } else {
-                        "Pano Kaydı • Seçmek için Enter".to_string()
+                        "Pano kaydı".to_string()
                     };
 
                     items.push(OmnibarItem {
                         title,
                         subtitle,
-                        badge: "PANO".to_string(),
-                        icon_name: Some("edit-paste".to_string()),
+                        badge: "Pano".to_string(),
+                        icon_name: Some("edit-paste-symbolic".to_string()),
                         item_type: OmnibarItemType::Clipboard(line.to_string(), preview.to_string()),
                     });
 
@@ -729,9 +901,9 @@ fn scan_clipboard_items(filter: &str, limit: usize) -> Vec<OmnibarItem> {
                     let title = truncate_chars(&text, 65);
                     items.push(OmnibarItem {
                         title,
-                        subtitle: "Mevcut Pano İçeriği • Kopyalamak için Enter".to_string(),
-                        badge: "PANO".to_string(),
-                        icon_name: Some("edit-paste".to_string()),
+                        subtitle: "Mevcut pano içeriği".to_string(),
+                        badge: "Pano".to_string(),
+                        icon_name: Some("edit-paste-symbolic".to_string()),
                         item_type: OmnibarItemType::Clipboard(text.clone(), text),
                     });
                 }
@@ -773,9 +945,9 @@ fn generate_omnibar_items(raw_query: &str, apps: &[AppInfo]) -> Vec<OmnibarItem>
         if let Some(result) = evaluate_simple_math(clean) {
             items.push(OmnibarItem {
                 title: format!("= {}", result),
-                subtitle: format!("Matematiksel Hesaplama: {}", clean),
-                badge: "HESAPLAMA".to_string(),
-                icon_name: Some("accessories-calculator".to_string()),
+                subtitle: format!("Hesaplama: {}", clean),
+                badge: "Hesaplama".to_string(),
+                icon_name: Some("accessories-calculator-symbolic".to_string()),
                 item_type: OmnibarItemType::Calculation(clean.to_string(), result),
             });
         }
@@ -786,9 +958,9 @@ fn generate_omnibar_items(raw_query: &str, apps: &[AppInfo]) -> Vec<OmnibarItem>
         if let Some((title, res_str)) = evaluate_units(query) {
             items.push(OmnibarItem {
                 title,
-                subtitle: format!("Çevrimdışı Yaklaşık Kur / Birim Çevirisi: {}", query),
-                badge: "ÇEVİRİ".to_string(),
-                icon_name: Some("accessories-calculator".to_string()),
+                subtitle: format!("Çevrimdışı yaklaşık çeviri: {}", query),
+                badge: "Çeviri".to_string(),
+                icon_name: Some("accessories-calculator-symbolic".to_string()),
                 item_type: OmnibarItemType::Conversion(query.to_string(), res_str),
             });
         }
@@ -800,10 +972,10 @@ fn generate_omnibar_items(raw_query: &str, apps: &[AppInfo]) -> Vec<OmnibarItem>
         let running_procs = scan_running_processes(&proc_query);
         for (pid, name) in running_procs.into_iter().take(5) {
             items.push(OmnibarItem {
-                title: format!("Görevi Sonlandır: {} (PID: {})", name, pid),
-                subtitle: "Enter tuşuna basarak süreci derhal kapatın (SIGKILL)".to_string(),
-                badge: "SÜREÇ".to_string(),
-                icon_name: Some("process-stop".to_string()),
+                title: format!("Süreci sonlandır: {} (PID {})", name, pid),
+                subtitle: "Seçilen süreci kapat".to_string(),
+                badge: "Süreç".to_string(),
+                icon_name: Some("process-stop-symbolic".to_string()),
                 item_type: OmnibarItemType::ProcessKill(pid, name),
             });
         }
@@ -818,36 +990,36 @@ fn generate_omnibar_items(raw_query: &str, apps: &[AppInfo]) -> Vec<OmnibarItem>
         | solar_common::ShellEngine::We10x => "solar-shell switch noctalia",
     };
     let toggle_shell_desc = match cfg.shell.engine {
-        solar_common::ShellEngine::Noctalia => "Aktif: Noctalia • Tıkla -> Caelestia kabuğuna geç",
-        solar_common::ShellEngine::Caelestia => "Aktif: Caelestia • Tıkla -> Noctalia kabuğuna geri dön",
-        solar_common::ShellEngine::End4Pc => "Aktif: end4-pC • Tıkla -> Noctalia kabuğuna geri dön",
-        solar_common::ShellEngine::We10x => "Aktif: We10X • Tıkla -> Noctalia kabuğuna geri dön",
+        solar_common::ShellEngine::Noctalia => "Etkin: Noctalia · Caelestia kabuğuna geç",
+        solar_common::ShellEngine::Caelestia => "Etkin: Caelestia · Noctalia kabuğuna geç",
+        solar_common::ShellEngine::End4Pc => "Etkin: end4-pC · Noctalia kabuğuna geç",
+        solar_common::ShellEngine::We10x => "Etkin: We10X · Noctalia kabuğuna geç",
     };
 
     let sys_commands = [
-        ("game", "Blaze GameZone Tam Ekran Oyun Kabuğu", "Steam Deck / Xbox UI Konsol Modunu Başlat", "solar-shell gamezone", "input-gaming"),
-        ("store", "FireHub Yazılım ve Paket Mağazası", "Portadora & Flathub uygulama mağazasını aç", "firehub", "system-software-install"),
-        ("welcome", "SolarUI Masaüstü Rehberi ve Kısayollar", "Hoş geldiniz penceresini ve kısayol kılavuzunu aç", "solar-shell welcome", "preferences-desktop-Display"),
-        ("oobe", "BlazeOS Apple 'Hello' Karşılama ve Kurulum Asistanı", "Dil, bölge, kullanıcı ve masaüstü ilk kurulum sihirbazı", "/usr/bin/blaze-setup", "system-software-install"),
-        ("setup", "İlk Kurulum Asistanı (OOBE)", "Sistem ayarlarını ve kullanıcı tercihlerini yapılandır", "/usr/bin/blaze-setup", "system-software-install"),
-        ("berp", "Blaze Emergency Recovery Protocol (BERP)", "Kurtarma ve Zaman Makinesi Konsolunu Başlat", "ptyxis -- blaze-recovery", "system-error"),
-        ("kurtarma", "Blaze Acil Kurtarma ve Zaman Makinesi", "Sistem geri yükleme ve donanım denetim konsolu", "ptyxis -- blaze-recovery", "system-error"),
-        ("akrep", "Akrep Güvenlik Merkezi (Security Center)", "SELinux, Firewalld, Flatpak ve cihaz güvenliği teşhis merkezi", "akrep-ui", "security-high"),
-        ("security", "Akrep Security Center (Salt Okunur)", "BlazeOS sistem güvenlik duruşu ve bütünlük görünümü", "akrep-ui", "security-high"),
-        ("konami", "Blaze SolarEvolution Retro Modu (Easter Egg)", "80'ler CRT ve Matrix atmosferini tetikle", "solar-shell konami", "input-gaming"),
-        ("season", "Mevsimsel Atmosfer ve Renk Teması", "Gündönümü ve ekinoks renk tonunu göster", "solar-shell season", "preferences-desktop-wallpaper"),
-        ("theme", "Masaüstü Kabuk Motorunu Değiştir (Hızlı Geçiş)", toggle_shell_desc, toggle_shell_cmd, "preferences-desktop-theme"),
-        ("noctalia", "Noctalia v5 Masaüstü Kabuğuna Geç", "Saf C++23 yüksek performanslı Noctalia kabuğuna dön", "solar-shell switch noctalia", "preferences-desktop-theme"),
-        ("caelestia", "Caelestia Masaüstü Kabuğuna Geç", "Quickshell QML tabanlı Caelestia kabuğunu etkinleştir", "solar-shell switch caelestia", "preferences-desktop-theme"),
-        ("end4", "end4-pC Masaüstü Kabuğuna Geç", "Material 3 Expressive Quickshell kabuğunu etkinleştir", "solar-shell switch end4-pc", "preferences-desktop-theme"),
-        ("we10x", "We10X (Tanıdık Klasik Düzen) Masaüstü Kabuğuna Geç", "Windows 10 alışkanlıklarıyla Başlat menüsü, görev çubuğu ve masaüstü simgelerini etkinleştir", "solar-shell switch we10x", "preferences-desktop-theme"),
-        ("launcher", "Aktif Kabuğun Kendi Uygulama Menüsünü Aç", "Seçili kabuk motorunun (Noctalia / Caelestia) yerel başlatıcısını aç", "solar-shell route launcher", "view-app-grid-symbolic"),
-        ("settings", "SolarUI ve Masaüstü Ayarları", "Görev çubuğu, tema, ekran ve sistem tercihlerini yönet", "solar-shell settings", "preferences-system"),
-        ("ekran", "Ekran Çözünürlüğü ve Bağımsız DPI Ölçeği", "Çoklu monitör ve arayüz boyutlandırma ayarları", "solar-shell settings", "video-display"),
-        ("pano", "Pano Geçmişi Yöneticisi", "Kopyalanan metinleri ve panoyu filtrele (cb)", "fuzzel-clipboard", "edit-paste"),
-        ("lock", "Ekranı Kilitle", "Oturumu güvenle kilitle", "solar-lock", "system-lock-screen"),
-        ("reboot", "Sistemi Yeniden Başlat", "Bilgisayarı baştan başlat", "systemctl reboot", "system-reboot"),
-        ("power", "Bilgisayarı Kapat", "Sistemi güvenle kapat", "systemctl poweroff", "system-shutdown"),
+        ("game", "Blaze GameZone", "Tam ekran oyun kabuğunu aç", "solar-shell gamezone", "input-gaming-symbolic"),
+        ("store", "FireHub yazılım mağazası", "Portadora ve Flathub uygulamalarını aç", "firehub", "system-software-install-symbolic"),
+        ("welcome", "SolarUI kısayol rehberi", "Masaüstü ve pencere kısayollarını aç", "solar-shell welcome", "preferences-desktop-keyboard-shortcuts-symbolic"),
+        ("oobe", "BlazeOS kurulum asistanı", "Dil, bölge, kullanıcı ve masaüstü ilk kurulumu", "/usr/bin/blaze-setup", "system-software-install-symbolic"),
+        ("setup", "İlk kurulum asistanı", "Sistem ayarlarını ve kullanıcı tercihlerini yapılandır", "/usr/bin/blaze-setup", "system-software-install-symbolic"),
+        ("berp", "Blaze Acil Kurtarma (BERP)", "Kurtarma ve anlık görüntü konsolunu aç", "ptyxis -- blaze-recovery", "dialog-warning-symbolic"),
+        ("kurtarma", "Acil kurtarma ve geri yükleme", "Sistem geri yükleme ve donanım denetim konsolu", "ptyxis -- blaze-recovery", "dialog-warning-symbolic"),
+        ("akrep", "Akrep güvenlik merkezi", "SELinux, güvenlik duvarı, Flatpak ve cihaz güvenliği", "akrep-ui", "security-high-symbolic"),
+        ("security", "Akrep güvenlik durumu", "Sistem güvenlik duruşu ve bütünlük görünümü", "akrep-ui", "security-high-symbolic"),
+        ("konami", "SolarEvolution retro modu", "CRT ve terminal görünümünü aç", "solar-shell konami", "input-gaming-symbolic"),
+        ("season", "Mevsimsel tema", "Gündönümü ve ekinoks renk tonunu göster", "solar-shell season", "preferences-desktop-wallpaper-symbolic"),
+        ("theme", "Masaüstü kabuğunu değiştir", toggle_shell_desc, toggle_shell_cmd, "preferences-desktop-appearance-symbolic"),
+        ("noctalia", "Noctalia kabuğuna geç", "Noctalia masaüstü kabuğunu etkinleştir", "solar-shell switch noctalia", "preferences-desktop-appearance-symbolic"),
+        ("caelestia", "Caelestia kabuğuna geç", "Caelestia masaüstü kabuğunu etkinleştir", "solar-shell switch caelestia", "preferences-desktop-appearance-symbolic"),
+        ("end4", "end4-pC kabuğuna geç", "end4-pC masaüstü kabuğunu etkinleştir", "solar-shell switch end4-pc", "preferences-desktop-appearance-symbolic"),
+        ("we10x", "We10X kabuğuna geç", "Klasik başlat menüsü, görev çubuğu ve masaüstü simgeleri", "solar-shell switch we10x", "preferences-desktop-appearance-symbolic"),
+        ("launcher", "Kabuk uygulama menüsünü aç", "Etkin kabuğun yerel uygulama başlatıcısını aç", "solar-shell route launcher", "view-app-grid-symbolic"),
+        ("settings", "SolarUI masaüstü ayarları", "Görev çubuğu, tema, ekran ve sistem tercihleri", "solar-shell settings", "preferences-system-symbolic"),
+        ("ekran", "Ekran ve ölçekleme ayarları", "Çoklu monitör çözünürlüğü ve arayüz ölçeği", "solar-shell settings", "video-display-symbolic"),
+        ("pano", "Pano geçmişi", "Kopyalanan metinleri filtrele (cb)", "fuzzel-clipboard", "edit-paste-symbolic"),
+        ("lock", "Ekranı kilitle", "Oturumu kilitle", "solar-lock", "system-lock-screen-symbolic"),
+        ("reboot", "Sistemi yeniden başlat", "Bilgisayarı yeniden başlat", "systemctl reboot", "system-reboot-symbolic"),
+        ("power", "Bilgisayarı kapat", "Sistemi kapat", "systemctl poweroff", "system-shutdown-symbolic"),
     ];
 
     for (cmd_id, title, desc, action, icon) in sys_commands {
@@ -855,7 +1027,7 @@ fn generate_omnibar_items(raw_query: &str, apps: &[AppInfo]) -> Vec<OmnibarItem>
             items.push(OmnibarItem {
                 title: title.to_string(),
                 subtitle: desc.to_string(),
-                badge: "SİSTEM".to_string(),
+                badge: "Sistem".to_string(),
                 icon_name: Some(icon.to_string()),
                 item_type: OmnibarItemType::SystemAction(cmd_id.to_string(), title.to_string(), action.to_string()),
             });
@@ -870,12 +1042,16 @@ fn generate_omnibar_items(raw_query: &str, apps: &[AppInfo]) -> Vec<OmnibarItem>
         let exec_match = app.exec.to_lowercase().contains(&q_lower);
 
         if query.is_empty() || name_match || comment_match || exec_match {
-            let cat = app.categories.first().cloned().unwrap_or_else(|| "Uygulama".to_string());
+            let cat = app
+                .categories
+                .first()
+                .map(|c| format_category_badge(c))
+                .unwrap_or_else(|| "Uygulama".to_string());
             items.push(OmnibarItem {
                 title: app.name.clone(),
                 subtitle: app.comment.clone().unwrap_or_else(|| app.exec.clone()),
-                badge: cat.to_uppercase(),
-                icon_name: app.icon.clone().or_else(|| Some("application-x-executable".to_string())),
+                badge: cat,
+                icon_name: app.icon.clone().or_else(|| Some("application-x-executable-symbolic".to_string())),
                 item_type: OmnibarItemType::App(app.clone()),
             });
         }
@@ -904,20 +1080,20 @@ fn generate_omnibar_items(raw_query: &str, apps: &[AppInfo]) -> Vec<OmnibarItem>
             };
 
             items.push(OmnibarItem {
-                title: format!("Web'de Ara ({}): \"{}\"", cfg.omnibar.search_engine, query),
-                subtitle: format!("Varsayılan tarayıcıda {} ile sonuçları görüntüle", cfg.omnibar.search_engine),
-                badge: "WEB".to_string(),
-                icon_name: Some("applications-internet".to_string()),
+                title: format!("Web'de ara ({}): {}", cfg.omnibar.search_engine, query),
+                subtitle: format!("{} ile varsayılan tarayıcıda aç", cfg.omnibar.search_engine),
+                badge: "Web".to_string(),
+                icon_name: Some("web-browser-symbolic".to_string()),
                 item_type: OmnibarItemType::WebSearch(query.to_string(), search_url),
             });
         }
 
         if !cfg.omnibar.ai_api_key.trim().is_empty() {
             items.push(OmnibarItem {
-                title: format!("Yapay Zekaya Sor: \"{}\"", query),
-                subtitle: "Gemini / OpenAI modeli üzerinden anında sorgula".to_string(),
-                badge: "AI".to_string(),
-                icon_name: Some("system-help".to_string()),
+                title: format!("Yapay zekaya sor: {}", query),
+                subtitle: "Tarayıcıda yapay zeka yanıtı aç".to_string(),
+                badge: "Yapay zeka".to_string(),
+                icon_name: Some("system-help-symbolic".to_string()),
                 item_type: OmnibarItemType::AiQuery(query.to_string()),
             });
         }
