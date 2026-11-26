@@ -1,6 +1,8 @@
 pub mod actions;
 pub mod apps;
 pub mod bar;
+pub mod blazeai;
+pub mod companion_avatar;
 pub mod engine;
 pub mod gui;
 pub mod ipc;

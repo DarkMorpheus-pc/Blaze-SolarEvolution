@@ -2,13 +2,14 @@ use gtk4::gdk;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Box as GtkBox, Button, CheckButton, DropDown, Image, Label, Orientation,
-    ScrolledWindow, Separator, Stack, StackTransitionType, StringList, Window,
+    Box as GtkBox, Button, CheckButton, DropDown, Entry, Image, Label, Orientation,
+    PasswordEntry, ScrolledWindow, Separator, Stack, StackTransitionType, StringList, Window,
 };
 use solar_common::{
-    HardwareDetector, HardwareTuningProfile, PerformanceTier, ShellEngine, SolarConfig,
-    SurfaceProvider,
+    BlazeAiProvider, CompanionExpression, CompanionShape, HardwareDetector, HardwareTuningProfile,
+    PerformanceTier, ShellEngine, SolarConfig, SurfaceProvider,
 };
+use std::cell::Cell;
 use crate::living_flow::{
     apply_living_flow_theme, build_living_flow_topbar, load_png_emblem, FluidCloud, FluidCloudTone,
 };
@@ -3836,6 +3837,377 @@ fn build_omnibar_tab() -> GtkBox {
     sec.append(&btn_row);
 
     tab.append(&sec);
+
+    // 3. Karakter ve BlazeAI Ayarları
+    let _ = crate::blazeai::migrate_legacy_api_key_if_needed();
+    let ai_cfg = SolarConfig::load();
+    let ai_sec = GtkBox::new(Orientation::Vertical, 12);
+    ai_sec.add_css_class("section-box");
+
+    let ai_title = Label::new(Some("Karakter ve BlazeAI"));
+    ai_title.add_css_class("section-title");
+    ai_title.set_halign(gtk4::Align::Start);
+    ai_sec.append(&ai_title);
+
+    let ai_desc = Label::new(Some(
+        "Sol paneldeki vektör karakteri, yapay zeka sağlayıcısını ve yerel hafıza tercihlerini yapılandırır",
+    ));
+    ai_desc.add_css_class("setting-subtext");
+    ai_desc.set_wrap(true);
+    ai_desc.set_xalign(0.0);
+    ai_desc.set_halign(gtk4::Align::Start);
+    ai_sec.append(&ai_desc);
+
+    let chk_panel_open = CheckButton::with_label(
+        "Sol karakter ve BlazeAI panelini varsayılan olarak açık tut",
+    );
+    chk_panel_open.set_active(ai_cfg.omnibar.companion_panel_open);
+    chk_panel_open.connect_toggled(|cb| {
+        let active = cb.is_active();
+        let _ = SolarConfig::update(|c| {
+            c.omnibar.companion_panel_open = active;
+        });
+    });
+    ai_sec.append(&chk_panel_open);
+
+    let syncing_ai_tab = Rc::new(Cell::new(false));
+
+    // Companion Name row
+    let cname_row = GtkBox::new(Orientation::Horizontal, 12);
+    let cname_lbl = Label::new(Some("Karakter adı"));
+    cname_lbl.add_css_class("setting-label");
+    cname_lbl.set_hexpand(true);
+    cname_lbl.set_halign(gtk4::Align::Start);
+    cname_row.append(&cname_lbl);
+
+    let cname_entry = Entry::new();
+    cname_entry.set_width_chars(18);
+    syncing_ai_tab.set(true);
+    cname_entry.set_text(&ai_cfg.omnibar.effective_companion_name());
+    syncing_ai_tab.set(false);
+    cname_row.append(&cname_entry);
+
+    let cname_reset_btn = Button::with_label("Varsayılan isme dön");
+    cname_reset_btn.add_css_class("secondary-btn");
+    cname_row.append(&cname_reset_btn);
+    ai_sec.append(&cname_row);
+
+    // Companion Shape row
+    let shape_row = GtkBox::new(Orientation::Horizontal, 12);
+    let shape_lbl = Label::new(Some("Karakter şekli"));
+    shape_lbl.add_css_class("setting-label");
+    shape_lbl.set_hexpand(true);
+    shape_lbl.set_halign(gtk4::Align::Start);
+    shape_row.append(&shape_lbl);
+
+    let shape_labels: Vec<&str> = CompanionShape::ALL.iter().map(|s| s.label_tr()).collect();
+    let shape_dd = DropDown::new(Some(StringList::new(&shape_labels)), None::<gtk4::Expression>);
+    let cur_shape_idx = CompanionShape::ALL
+        .iter()
+        .position(|s| *s == ai_cfg.omnibar.companion_shape)
+        .unwrap_or(1);
+    shape_dd.set_selected(cur_shape_idx as u32);
+    shape_dd.connect_selected_notify(|dd| {
+        if let Some(shape) = CompanionShape::ALL.get(dd.selected() as usize).copied() {
+            let _ = SolarConfig::update(|c| {
+                c.omnibar.companion_shape = shape;
+            });
+        }
+    });
+    shape_row.append(&shape_dd);
+    ai_sec.append(&shape_row);
+
+    // Companion Expression row + live meaning caption
+    let expr_row = GtkBox::new(Orientation::Horizontal, 12);
+    let expr_lbl = Label::new(Some("İfade ve kişilik"));
+    expr_lbl.add_css_class("setting-label");
+    expr_lbl.set_hexpand(true);
+    expr_lbl.set_halign(gtk4::Align::Start);
+    expr_row.append(&expr_lbl);
+
+    let expr_titles: Vec<String> = CompanionExpression::ALL
+        .iter()
+        .map(|e| format!("{} ({})", e.title_tr(), e.default_name()))
+        .collect();
+    let expr_title_refs: Vec<&str> = expr_titles.iter().map(|s| s.as_str()).collect();
+    let expr_dd = DropDown::new(Some(StringList::new(&expr_title_refs)), None::<gtk4::Expression>);
+    let cur_expr_idx = CompanionExpression::ALL
+        .iter()
+        .position(|e| *e == ai_cfg.omnibar.companion_expression)
+        .unwrap_or(1);
+    expr_dd.set_selected(cur_expr_idx as u32);
+    expr_row.append(&expr_dd);
+    ai_sec.append(&expr_row);
+
+    let expr_meaning_lbl = Label::new(Some(ai_cfg.omnibar.companion_expression.meaning_tr()));
+    expr_meaning_lbl.add_css_class("setting-subtext");
+    expr_meaning_lbl.set_wrap(true);
+    expr_meaning_lbl.set_xalign(0.0);
+    expr_meaning_lbl.set_halign(gtk4::Align::Start);
+    ai_sec.append(&expr_meaning_lbl);
+
+    {
+        let sync_flag = syncing_ai_tab.clone();
+        cname_entry.connect_changed(move |e| {
+            if sync_flag.get() {
+                return;
+            }
+            let txt = e.text().to_string();
+            let _ = SolarConfig::update(|c| {
+                c.omnibar.set_custom_companion_name(&txt);
+            });
+        });
+    }
+
+    {
+        let sync_flag = syncing_ai_tab.clone();
+        let entry_c = cname_entry.clone();
+        cname_reset_btn.connect_clicked(move |_| {
+            let mut next_name = String::new();
+            let _ = SolarConfig::update(|c| {
+                c.omnibar.reset_companion_name();
+                next_name = c.omnibar.effective_companion_name();
+            });
+            sync_flag.set(true);
+            entry_c.set_text(&next_name);
+            sync_flag.set(false);
+        });
+    }
+
+    {
+        let sync_flag = syncing_ai_tab.clone();
+        let entry_c = cname_entry.clone();
+        let meaning_c = expr_meaning_lbl.clone();
+        expr_dd.connect_selected_notify(move |dd| {
+            if let Some(expr) = CompanionExpression::ALL.get(dd.selected() as usize).copied() {
+                let mut next_name = String::new();
+                let mut is_custom = false;
+                let _ = SolarConfig::update(|c| {
+                    c.omnibar.set_companion_expression(expr);
+                    next_name = c.omnibar.effective_companion_name();
+                    is_custom = c.omnibar.companion_name_custom;
+                });
+                meaning_c.set_text(expr.meaning_tr());
+                if !is_custom {
+                    sync_flag.set(true);
+                    entry_c.set_text(&next_name);
+                    sync_flag.set(false);
+                }
+            }
+        });
+    }
+
+    ai_sec.append(&Separator::new(Orientation::Horizontal));
+
+    // AI Provider, Model, URL and 0600 Secrets
+    let prov_row = GtkBox::new(Orientation::Horizontal, 12);
+    let prov_lbl = Label::new(Some("BlazeAI sağlayıcısı"));
+    prov_lbl.add_css_class("setting-label");
+    prov_lbl.set_hexpand(true);
+    prov_lbl.set_halign(gtk4::Align::Start);
+    prov_row.append(&prov_lbl);
+
+    let prov_labels: Vec<&str> = BlazeAiProvider::ALL
+        .iter()
+        .map(|p| p.display_name())
+        .collect();
+    let prov_dd = DropDown::new(Some(StringList::new(&prov_labels)), None::<gtk4::Expression>);
+    let cur_prov_idx = BlazeAiProvider::ALL
+        .iter()
+        .position(|p| *p == ai_cfg.omnibar.ai_provider)
+        .unwrap_or(0);
+    prov_dd.set_selected(cur_prov_idx as u32);
+    prov_row.append(&prov_dd);
+    ai_sec.append(&prov_row);
+
+    let model_row = GtkBox::new(Orientation::Horizontal, 12);
+    let model_lbl = Label::new(Some("Model adı"));
+    model_lbl.add_css_class("setting-label");
+    model_lbl.set_hexpand(true);
+    model_lbl.set_halign(gtk4::Align::Start);
+    model_row.append(&model_lbl);
+
+    let model_entry = Entry::new();
+    model_entry.set_width_chars(24);
+    syncing_ai_tab.set(true);
+    model_entry.set_text(&ai_cfg.omnibar.effective_ai_model());
+    syncing_ai_tab.set(false);
+    model_row.append(&model_entry);
+    ai_sec.append(&model_row);
+
+    let url_row = GtkBox::new(Orientation::Horizontal, 12);
+    let url_lbl = Label::new(Some("Özel API veya Ollama adresi"));
+    url_lbl.add_css_class("setting-label");
+    url_lbl.set_hexpand(true);
+    url_lbl.set_halign(gtk4::Align::Start);
+    url_row.append(&url_lbl);
+
+    let url_entry = Entry::new();
+    url_entry.set_width_chars(24);
+    syncing_ai_tab.set(true);
+    url_entry.set_text(&ai_cfg.omnibar.effective_ai_base_url());
+    url_entry.set_sensitive(matches!(
+        ai_cfg.omnibar.ai_provider,
+        BlazeAiProvider::OpenAiCompatible | BlazeAiProvider::Ollama
+    ));
+    syncing_ai_tab.set(false);
+    url_row.append(&url_entry);
+    ai_sec.append(&url_row);
+
+    let key_row = GtkBox::new(Orientation::Horizontal, 12);
+    let key_lbl = Label::new(Some("API anahtarı (0600 yerel kasa)"));
+    key_lbl.add_css_class("setting-label");
+    key_lbl.set_hexpand(true);
+    key_lbl.set_halign(gtk4::Align::Start);
+    key_row.append(&key_lbl);
+
+    let key_entry = PasswordEntry::builder()
+        .placeholder_text("Anahtar girin (Ollama için gerekmez)")
+        .show_peek_icon(true)
+        .build();
+    key_entry.set_width_chars(24);
+    let init_secrets = crate::blazeai::BlazeAiSecrets::load();
+    syncing_ai_tab.set(true);
+    key_entry.set_text(init_secrets.key_for(ai_cfg.omnibar.ai_provider));
+    key_entry.set_sensitive(ai_cfg.omnibar.ai_provider.requires_api_key());
+    syncing_ai_tab.set(false);
+    key_row.append(&key_entry);
+    ai_sec.append(&key_row);
+
+    {
+        let sync_flag = syncing_ai_tab.clone();
+        let m_ent = model_entry.clone();
+        let u_ent = url_entry.clone();
+        let k_ent = key_entry.clone();
+        prov_dd.connect_selected_notify(move |dd| {
+            if sync_flag.get() {
+                return;
+            }
+            if let Some(provider) = BlazeAiProvider::ALL.get(dd.selected() as usize).copied() {
+                sync_flag.set(true);
+                let mut next_model = provider.default_model().to_string();
+                let mut next_url = provider.default_base_url().to_string();
+                let _ = SolarConfig::update(|c| {
+                    c.omnibar.ai_provider = provider;
+                    c.omnibar.ai_model = provider.default_model().to_string();
+                    c.omnibar.ai_custom_base_url = provider.default_base_url().to_string();
+                    next_model = c.omnibar.ai_model.clone();
+                    next_url = c.omnibar.effective_ai_base_url();
+                });
+                let sec = crate::blazeai::BlazeAiSecrets::load();
+                m_ent.set_text(&next_model);
+                u_ent.set_text(&next_url);
+                u_ent.set_sensitive(matches!(
+                    provider,
+                    BlazeAiProvider::OpenAiCompatible | BlazeAiProvider::Ollama
+                ));
+                k_ent.set_text(sec.key_for(provider));
+                k_ent.set_sensitive(provider.requires_api_key());
+                sync_flag.set(false);
+            }
+        });
+    }
+
+    {
+        let sync_flag = syncing_ai_tab.clone();
+        model_entry.connect_changed(move |e| {
+            if sync_flag.get() {
+                return;
+            }
+            let txt = e.text().trim().to_string();
+            let _ = SolarConfig::update(|c| {
+                c.omnibar.ai_model = if txt.is_empty() {
+                    c.omnibar.ai_provider.default_model().to_string()
+                } else {
+                    txt
+                };
+            });
+        });
+    }
+
+    {
+        let sync_flag = syncing_ai_tab.clone();
+        url_entry.connect_changed(move |e| {
+            if sync_flag.get() {
+                return;
+            }
+            let txt = e.text().trim().to_string();
+            let _ = SolarConfig::update(|c| {
+                c.omnibar.ai_custom_base_url = txt;
+            });
+        });
+    }
+
+    {
+        let sync_flag = syncing_ai_tab.clone();
+        key_entry.connect_changed(move |e| {
+            if sync_flag.get() {
+                return;
+            }
+            let cfg_now = SolarConfig::load();
+            if !cfg_now.omnibar.ai_provider.requires_api_key() {
+                return;
+            }
+            let mut sec = crate::blazeai::BlazeAiSecrets::load();
+            sec.set_key_for(cfg_now.omnibar.ai_provider, &e.text());
+            let _ = sec.save();
+        });
+    }
+
+    let chk_ai_persist = CheckButton::with_label("Sohbet geçmişini koru");
+    chk_ai_persist.set_active(ai_cfg.omnibar.ai_persist_chat);
+    chk_ai_persist.connect_toggled(|cb| {
+        let active = cb.is_active();
+        let _ = SolarConfig::update(|c| {
+            c.omnibar.ai_persist_chat = active;
+        });
+    });
+    ai_sec.append(&chk_ai_persist);
+
+    let chk_ai_mem = CheckButton::with_label("Uzun vadeli yerel hafıza");
+    chk_ai_mem.set_active(ai_cfg.omnibar.ai_local_memory_enabled);
+    chk_ai_mem.connect_toggled(|cb| {
+        let active = cb.is_active();
+        let _ = SolarConfig::update(|c| {
+            c.omnibar.ai_local_memory_enabled = active;
+        });
+    });
+    ai_sec.append(&chk_ai_mem);
+
+    let chk_ai_guide = CheckButton::with_label("Yerleşik BlazeOS rehberini bağlama ekle");
+    chk_ai_guide.set_active(ai_cfg.omnibar.ai_include_blazeos_guide);
+    chk_ai_guide.connect_toggled(|cb| {
+        let active = cb.is_active();
+        let _ = SolarConfig::update(|c| {
+            c.omnibar.ai_include_blazeos_guide = active;
+        });
+    });
+    ai_sec.append(&chk_ai_guide);
+
+    let clear_row = GtkBox::new(Orientation::Horizontal, 12);
+    let clear_mem_btn = Button::with_label("Yerel sohbet ve hafıza verilerini temizle");
+    clear_mem_btn.add_css_class("danger-btn");
+    clear_row.append(&clear_mem_btn);
+
+    let clear_status_lbl = Label::new(Some(""));
+    clear_status_lbl.add_css_class("status-text");
+    clear_status_lbl.set_halign(gtk4::Align::Start);
+    clear_row.append(&clear_status_lbl);
+
+    {
+        let status_c = clear_status_lbl.clone();
+        clear_mem_btn.connect_clicked(move |_| {
+            let mut store = crate::blazeai::LocalMemoryStore::load(true);
+            if store.clear_all_memory().is_ok() {
+                status_c.set_text("Yerel veriler temizlendi");
+            } else {
+                status_c.set_text("Temizleme sırasında hata oluştu");
+            }
+        });
+    }
+    ai_sec.append(&clear_row);
+
+    tab.append(&ai_sec);
     tab
 }
 

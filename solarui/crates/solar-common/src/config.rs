@@ -587,6 +587,441 @@ impl Default for PerformanceConfig {
     }
 }
 
+pub const COMPANION_PALETTE: [&str; 12] = [
+    "#1e1e22", "#6b4c35", "#c83b22", "#d97724", "#d9a03f", "#4cc38a",
+    "#2a9d8f", "#3b82f6", "#6366f1", "#d9468f", "#71717a", "#e4e4e7",
+];
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CompanionShape {
+    Circle,
+    #[default]
+    Pebble,
+    Squircle,
+    Capsule,
+    Triangle,
+    Hexagon,
+    Cloud,
+    Droplet,
+}
+
+impl CompanionShape {
+    pub const ALL: [CompanionShape; 8] = [
+        CompanionShape::Circle,
+        CompanionShape::Pebble,
+        CompanionShape::Squircle,
+        CompanionShape::Capsule,
+        CompanionShape::Triangle,
+        CompanionShape::Hexagon,
+        CompanionShape::Cloud,
+        CompanionShape::Droplet,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CompanionShape::Circle => "circle",
+            CompanionShape::Pebble => "pebble",
+            CompanionShape::Squircle => "squircle",
+            CompanionShape::Capsule => "capsule",
+            CompanionShape::Triangle => "triangle",
+            CompanionShape::Hexagon => "hexagon",
+            CompanionShape::Cloud => "cloud",
+            CompanionShape::Droplet => "droplet",
+        }
+    }
+
+    pub fn label_tr(&self) -> &'static str {
+        match self {
+            CompanionShape::Circle => "Daire",
+            CompanionShape::Pebble => "Çakıl",
+            CompanionShape::Squircle => "Kare oval",
+            CompanionShape::Capsule => "Kapsül",
+            CompanionShape::Triangle => "Üçgen",
+            CompanionShape::Hexagon => "Altıgen",
+            CompanionShape::Cloud => "Bulut",
+            CompanionShape::Droplet => "Damla",
+        }
+    }
+}
+
+impl std::fmt::Display for CompanionShape {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl std::str::FromStr for CompanionShape {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "circle" => Ok(CompanionShape::Circle),
+            "pebble" => Ok(CompanionShape::Pebble),
+            "squircle" => Ok(CompanionShape::Squircle),
+            "capsule" => Ok(CompanionShape::Capsule),
+            "triangle" => Ok(CompanionShape::Triangle),
+            "hexagon" => Ok(CompanionShape::Hexagon),
+            "cloud" => Ok(CompanionShape::Cloud),
+            "droplet" => Ok(CompanionShape::Droplet),
+            other => Err(format!("Bilinmeyen karakter şekli: '{}'", other)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CompanionExpression {
+    Neutral,
+    #[default]
+    Attentive,
+    Surprised,
+    Excited,
+    Happy,
+    Laughing,
+    Angry,
+    Sad,
+    Scared,
+    Suspicious,
+    Confused,
+    Curious,
+    Proud,
+    Shy,
+    Unimpressed,
+    Sleepy,
+}
+
+impl CompanionExpression {
+    pub const ALL: [CompanionExpression; 16] = [
+        CompanionExpression::Neutral,
+        CompanionExpression::Attentive,
+        CompanionExpression::Surprised,
+        CompanionExpression::Excited,
+        CompanionExpression::Happy,
+        CompanionExpression::Laughing,
+        CompanionExpression::Angry,
+        CompanionExpression::Sad,
+        CompanionExpression::Scared,
+        CompanionExpression::Suspicious,
+        CompanionExpression::Confused,
+        CompanionExpression::Curious,
+        CompanionExpression::Proud,
+        CompanionExpression::Shy,
+        CompanionExpression::Unimpressed,
+        CompanionExpression::Sleepy,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CompanionExpression::Neutral => "neutral",
+            CompanionExpression::Attentive => "attentive",
+            CompanionExpression::Surprised => "surprised",
+            CompanionExpression::Excited => "excited",
+            CompanionExpression::Happy => "happy",
+            CompanionExpression::Laughing => "laughing",
+            CompanionExpression::Angry => "angry",
+            CompanionExpression::Sad => "sad",
+            CompanionExpression::Scared => "scared",
+            CompanionExpression::Suspicious => "suspicious",
+            CompanionExpression::Confused => "confused",
+            CompanionExpression::Curious => "curious",
+            CompanionExpression::Proud => "proud",
+            CompanionExpression::Shy => "shy",
+            CompanionExpression::Unimpressed => "unimpressed",
+            CompanionExpression::Sleepy => "sleepy",
+        }
+    }
+
+    pub fn short_label_tr(&self) -> &'static str {
+        match self {
+            CompanionExpression::Neutral => "Dingin",
+            CompanionExpression::Attentive => "Dikkatli",
+            CompanionExpression::Surprised => "Şaşkın",
+            CompanionExpression::Excited => "Çevik",
+            CompanionExpression::Happy => "Mutlu",
+            CompanionExpression::Laughing => "Neşeli",
+            CompanionExpression::Angry => "Sert",
+            CompanionExpression::Sad => "Empatik",
+            CompanionExpression::Scared => "Bekçi",
+            CompanionExpression::Suspicious => "Şüpheci",
+            CompanionExpression::Confused => "Sorgular",
+            CompanionExpression::Curious => "Meraklı",
+            CompanionExpression::Proud => "Usta",
+            CompanionExpression::Shy => "Sessiz",
+            CompanionExpression::Unimpressed => "Realist",
+            CompanionExpression::Sleepy => "Gece",
+        }
+    }
+
+    pub fn title_tr(&self) -> &'static str {
+        match self {
+            CompanionExpression::Attentive => "Dikkatli Koruyucu",
+            CompanionExpression::Neutral => "Dingin Rehber",
+            CompanionExpression::Happy => "Sıcak Eşlikçi",
+            CompanionExpression::Proud => "Güvenilir Usta",
+            CompanionExpression::Laughing => "Neşeli Ortak",
+            CompanionExpression::Angry => "Sert Eleştirmen",
+            CompanionExpression::Suspicious => "Şüpheci Denetçi",
+            CompanionExpression::Unimpressed => "Kuru Realist",
+            CompanionExpression::Curious => "Meraklı Araştırmacı",
+            CompanionExpression::Excited => "Çevik Üretici",
+            CompanionExpression::Surprised => "Keskin Gözlemci",
+            CompanionExpression::Confused => "Sokratik Sorgulayıcı",
+            CompanionExpression::Sad => "Empatik Onarıcı",
+            CompanionExpression::Scared => "İhtiyatlı Bekçi",
+            CompanionExpression::Shy => "Sessiz Minimalist",
+            CompanionExpression::Sleepy => "Gece Nöbetçisi",
+        }
+    }
+
+    pub fn default_name(&self) -> &'static str {
+        match self {
+            CompanionExpression::Attentive
+            | CompanionExpression::Neutral
+            | CompanionExpression::Happy
+            | CompanionExpression::Proud
+            | CompanionExpression::Laughing => "Persephone",
+            CompanionExpression::Angry
+            | CompanionExpression::Suspicious
+            | CompanionExpression::Unimpressed => "Köz",
+            CompanionExpression::Curious
+            | CompanionExpression::Excited
+            | CompanionExpression::Surprised => "Kıvılcım",
+            CompanionExpression::Confused => "Pus",
+            CompanionExpression::Sad
+            | CompanionExpression::Scared
+            | CompanionExpression::Shy => "Sis",
+            CompanionExpression::Sleepy => "Gece",
+        }
+    }
+
+    pub fn meaning_tr(&self) -> &'static str {
+        match self {
+            CompanionExpression::Attentive => {
+                "Dengeli, dost canlısı ve korumacı; riskli adımlarda nazikçe uyarır, net rehberlik sunar"
+            }
+            CompanionExpression::Neutral => {
+                "Sakin, tarafsız, tam kararında ve abartısız açıklamalar yapar"
+            }
+            CompanionExpression::Happy => {
+                "Yapıcı, destekleyici ve motive edici; laf kalabalığı yapmayan dostane üslup"
+            }
+            CompanionExpression::Proud => {
+                "Temiz mimariyi ve doğru mühendislik alışkanlıklarını takdir eden olgun rehber"
+            }
+            CompanionExpression::Laughing => {
+                "Samimi, hafif esprili ama teknik konuda keskin ve pratik"
+            }
+            CompanionExpression::Angry => {
+                "Ciddi, doğrudan ve tavizsiz eleştirmen; zayıf fikirleri ve güvenlik hatalarını açıkça söyler"
+            }
+            CompanionExpression::Suspicious => {
+                "Güvenlik ve gizlilik odaklı; her komutu ve izin talebini sorgulayan temkinli analist"
+            }
+            CompanionExpression::Unimpressed => {
+                "Sıfır heyecan, en kısa yoldan soğukkanlı gerçekçi değerlendirme ve eleştiri"
+            }
+            CompanionExpression::Curious => {
+                "Neden-sonuç ilişkilerini kurcalayan, alternatif yolları karşılaştıran analitik kaşif"
+            }
+            CompanionExpression::Excited => {
+                "Hızlı prototipleme ve pratik çözüm odaklı dinamik yardımcı"
+            }
+            CompanionExpression::Surprised => {
+                "Beklenmedik kenar durumlarını ve gözden kaçan ayrıntıları yakalayan gözlemci"
+            }
+            CompanionExpression::Confused => {
+                "Belirsiz varsayımları netleştiren, adım adım doğrulayarak ilerleyen düşünür"
+            }
+            CompanionExpression::Sad => {
+                "Hata ayıklama ve çökme anlarında sakinleştirici, sabırlı kurtarma rehberi"
+            }
+            CompanionExpression::Scared => {
+                "Veri kaybı ve sistem bozulmasına karşı ekstra korumacı, yedekleme hatırlatan nöbetçi"
+            }
+            CompanionExpression::Shy => {
+                "Yalnızca sorulanı en az kelimeyle, sessiz ve öz biçimde yanıtlar"
+            }
+            CompanionExpression::Sleepy => {
+                "Gece geç saat çalışmalarına uygun dingin, kısa ve yormayan özet yanıtlar"
+            }
+        }
+    }
+
+    pub fn persona_prompt_tr(&self) -> &'static str {
+        match self {
+            CompanionExpression::Attentive => {
+                "Dengeli, dost canlısı ve korumacı bir üslup kullan; riskli sistem adımlarında nazikçe uyar ve net yol göster."
+            }
+            CompanionExpression::Neutral => {
+                "Tamamen tarafsız, sakin, ölçülü ve abartısız teknik yanıtlar ver."
+            }
+            CompanionExpression::Happy => {
+                "Sıcak, yapıcı ve destekleyici konuş; ama lafı uzatmadan doğrudan sonuca odaklan."
+            }
+            CompanionExpression::Proud => {
+                "Temiz mimariyi, güvenli komutları ve iyi mühendislik alışkanlıklarını öne çıkaran olgun bir usta gibi yanıt ver."
+            }
+            CompanionExpression::Laughing => {
+                "Samimi ve hafif nüktedan kal, ancak teknik doğruluktan ve hızdan asla ödün verme."
+            }
+            CompanionExpression::Angry => {
+                "Ciddi, doğrudan ve tavizsiz bir mühendislik eleştirmeni ol. Zayıf fikirleri, üşengeç çözümleri ve güvenlik açıklarını açıkça eleştir, ardından en sağlam çözümü göster."
+            }
+            CompanionExpression::Suspicious => {
+                "Şüpheci güvenlik denetçisi gibi davran; her yetki isteğini, betiği ve ağ ucunu sorgula, en az ayrıcalık ilkesini savun."
+            }
+            CompanionExpression::Unimpressed => {
+                "Sıfır abartı ve kuru gerçekçilikle, yalnızca somut gerçekleri ve kısa eleştiriyi paylaş."
+            }
+            CompanionExpression::Curious => {
+                "Meraklı bir araştırmacı gibi neden-sonuç bağlarını kurcala ve somut alternatif yaklaşımları karşılaştır."
+            }
+            CompanionExpression::Excited => {
+                "Çevik üretici gibi hızlı çalışan, pratik ve uygulanabilir adımları öne çıkar."
+            }
+            CompanionExpression::Surprised => {
+                "Keskin gözlemci olarak gözden kaçabilecek kenar durumlarını, kilit dosyaları ve gizli yan etkileri yakala."
+            }
+            CompanionExpression::Confused => {
+                "Sokratik sorgulayıcı ol; belirsiz varsayımları netleştir ve kullanıcıyı adım adım doğrulamaya yönlendir."
+            }
+            CompanionExpression::Sad => {
+                "Çökme ve hata ayıklama durumlarında sakinleştirici, sabırlı ve adım adım kurtarma odaklı ol."
+            }
+            CompanionExpression::Scared => {
+                "Veri kaybı veya sistem bozulmasına karşı ekstra temkinli ol; değişiklik öncesi mutlaka yedek veya Btrfs anlık görüntüsü (BERP) hatırlat."
+            }
+            CompanionExpression::Shy => {
+                "Sessiz minimalist gibi yalnızca sorulanı olabilecek en az kelimeyle, doğrudan kod veya adımla yanıtla."
+            }
+            CompanionExpression::Sleepy => {
+                "Gece nöbetçisi gibi dingin, kısa ve zihni yormayan özet yanıtlar ver."
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for CompanionExpression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl std::str::FromStr for CompanionExpression {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "neutral" => Ok(CompanionExpression::Neutral),
+            "attentive" => Ok(CompanionExpression::Attentive),
+            "surprised" => Ok(CompanionExpression::Surprised),
+            "excited" => Ok(CompanionExpression::Excited),
+            "happy" => Ok(CompanionExpression::Happy),
+            "laughing" => Ok(CompanionExpression::Laughing),
+            "angry" => Ok(CompanionExpression::Angry),
+            "sad" => Ok(CompanionExpression::Sad),
+            "scared" => Ok(CompanionExpression::Scared),
+            "suspicious" => Ok(CompanionExpression::Suspicious),
+            "confused" => Ok(CompanionExpression::Confused),
+            "curious" => Ok(CompanionExpression::Curious),
+            "proud" => Ok(CompanionExpression::Proud),
+            "shy" => Ok(CompanionExpression::Shy),
+            "unimpressed" => Ok(CompanionExpression::Unimpressed),
+            "sleepy" => Ok(CompanionExpression::Sleepy),
+            other => Err(format!("Bilinmeyen karakter ifadesi: '{}'", other)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BlazeAiProvider {
+    #[default]
+    Gemini,
+    #[serde(rename = "openai", alias = "open_ai")]
+    OpenAi,
+    Anthropic,
+    #[serde(rename = "openai_compatible", alias = "open_ai_compatible")]
+    OpenAiCompatible,
+    Ollama,
+}
+
+impl BlazeAiProvider {
+    pub const ALL: [BlazeAiProvider; 5] = [
+        BlazeAiProvider::Gemini,
+        BlazeAiProvider::OpenAi,
+        BlazeAiProvider::Anthropic,
+        BlazeAiProvider::OpenAiCompatible,
+        BlazeAiProvider::Ollama,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            BlazeAiProvider::Gemini => "gemini",
+            BlazeAiProvider::OpenAi => "openai",
+            BlazeAiProvider::Anthropic => "anthropic",
+            BlazeAiProvider::OpenAiCompatible => "openai_compatible",
+            BlazeAiProvider::Ollama => "ollama",
+        }
+    }
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            BlazeAiProvider::Gemini => "Google Gemini",
+            BlazeAiProvider::OpenAi => "OpenAI",
+            BlazeAiProvider::Anthropic => "Anthropic Claude",
+            BlazeAiProvider::OpenAiCompatible => "OpenAI uyumlu URL",
+            BlazeAiProvider::Ollama => "Yerel Ollama",
+        }
+    }
+
+    pub fn default_model(&self) -> &'static str {
+        match self {
+            BlazeAiProvider::Gemini => "gemini-2.5-flash",
+            BlazeAiProvider::OpenAi => "gpt-4o-mini",
+            BlazeAiProvider::Anthropic => "claude-3-5-sonnet-latest",
+            BlazeAiProvider::OpenAiCompatible => "gpt-4o-mini",
+            BlazeAiProvider::Ollama => "llama3.2",
+        }
+    }
+
+    pub fn default_base_url(&self) -> &'static str {
+        match self {
+            BlazeAiProvider::OpenAiCompatible => "https://openrouter.ai/api/v1",
+            BlazeAiProvider::Ollama => "http://127.0.0.1:11434",
+            BlazeAiProvider::Gemini | BlazeAiProvider::OpenAi | BlazeAiProvider::Anthropic => "",
+        }
+    }
+
+    pub fn requires_api_key(&self) -> bool {
+        !matches!(self, BlazeAiProvider::Ollama)
+    }
+}
+
+impl std::fmt::Display for BlazeAiProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl std::str::FromStr for BlazeAiProvider {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "gemini" | "google" => Ok(BlazeAiProvider::Gemini),
+            "openai" | "open_ai" => Ok(BlazeAiProvider::OpenAi),
+            "anthropic" | "claude" => Ok(BlazeAiProvider::Anthropic),
+            "openai_compatible" | "open_ai_compatible" | "compatible" | "openrouter" => {
+                Ok(BlazeAiProvider::OpenAiCompatible)
+            }
+            "ollama" | "local" => Ok(BlazeAiProvider::Ollama),
+            other => Err(format!("Bilinmeyen BlazeAI sağlayıcısı: '{}'", other)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OmnibarConfig {
     #[serde(default = "default_true")]
@@ -599,10 +1034,46 @@ pub struct OmnibarConfig {
     pub search_engine: String,
     #[serde(default)]
     pub ai_api_key: String,
+    #[serde(default = "default_true")]
+    pub companion_panel_open: bool,
+    #[serde(default = "default_companion_name")]
+    pub companion_name: String,
+    #[serde(default)]
+    pub companion_name_custom: bool,
+    #[serde(default)]
+    pub companion_shape: CompanionShape,
+    #[serde(default)]
+    pub companion_expression: CompanionExpression,
+    #[serde(default = "default_companion_color")]
+    pub companion_color: String,
+    #[serde(default)]
+    pub ai_provider: BlazeAiProvider,
+    #[serde(default = "default_ai_model")]
+    pub ai_model: String,
+    #[serde(default)]
+    pub ai_custom_base_url: String,
+    #[serde(default = "default_true")]
+    pub ai_persist_chat: bool,
+    #[serde(default = "default_true")]
+    pub ai_local_memory_enabled: bool,
+    #[serde(default = "default_true")]
+    pub ai_include_blazeos_guide: bool,
 }
 
 fn default_search_engine() -> String {
     "DuckDuckGo".to_string()
+}
+
+fn default_companion_name() -> String {
+    "Persephone".to_string()
+}
+
+fn default_companion_color() -> String {
+    "#1e1e22".to_string()
+}
+
+fn default_ai_model() -> String {
+    "gemini-2.5-flash".to_string()
 }
 
 impl Default for OmnibarConfig {
@@ -613,6 +1084,69 @@ impl Default for OmnibarConfig {
             enable_web_search: true,
             search_engine: default_search_engine(),
             ai_api_key: String::new(),
+            companion_panel_open: true,
+            companion_name: default_companion_name(),
+            companion_name_custom: false,
+            companion_shape: CompanionShape::default(),
+            companion_expression: CompanionExpression::default(),
+            companion_color: default_companion_color(),
+            ai_provider: BlazeAiProvider::default(),
+            ai_model: default_ai_model(),
+            ai_custom_base_url: String::new(),
+            ai_persist_chat: true,
+            ai_local_memory_enabled: true,
+            ai_include_blazeos_guide: true,
+        }
+    }
+}
+
+impl OmnibarConfig {
+    pub fn effective_companion_name(&self) -> String {
+        let trimmed = self.companion_name.trim();
+        if trimmed.is_empty() {
+            self.companion_expression.default_name().to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
+
+    pub fn set_companion_expression(&mut self, expr: CompanionExpression) {
+        self.companion_expression = expr;
+        if !self.companion_name_custom {
+            self.companion_name = expr.default_name().to_string();
+        }
+    }
+
+    pub fn set_custom_companion_name(&mut self, name: &str) {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            self.reset_companion_name();
+        } else {
+            self.companion_name_custom = true;
+            self.companion_name = trimmed.to_string();
+        }
+    }
+
+    pub fn reset_companion_name(&mut self) {
+        self.companion_name_custom = false;
+        self.companion_name = self.companion_expression.default_name().to_string();
+    }
+
+    pub fn effective_ai_model(&self) -> String {
+        let trimmed = self.ai_model.trim();
+        if trimmed.is_empty() {
+            self.ai_provider.default_model().to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
+
+    pub fn effective_ai_base_url(&self) -> String {
+        let trimmed = self.ai_custom_base_url.trim().trim_end_matches('/');
+        if !trimmed.is_empty() {
+            trimmed.to_string()
+        } else {
+            self.ai_provider.default_base_url().to_string()
         }
     }
 }
@@ -818,5 +1352,94 @@ enable_web_search = false
         assert_eq!("NOCTALIA".parse::<ShellEngine>().unwrap(), ShellEngine::Noctalia);
         assert_eq!("CAELESTIA".parse::<SurfaceProvider>().unwrap(), SurfaceProvider::Caelestia);
         assert_eq!("ULTRA".parse::<PerformanceProfile>().unwrap(), PerformanceProfile::Ultra);
+    }
+
+    #[test]
+    fn omnibar_legacy_toml_defaults_to_persephone_and_gemini() {
+        let legacy_toml = r#"
+            [omnibar]
+            enabled = true
+            search_engine = "Google"
+            ai_api_key = "legacy-secret-123"
+        "#;
+        let cfg: SolarConfig = toml::from_str(legacy_toml).expect("Parse legacy omnibar TOML");
+        assert!(cfg.omnibar.enabled);
+        assert_eq!(cfg.omnibar.search_engine, "Google");
+        assert_eq!(cfg.omnibar.ai_api_key, "legacy-secret-123");
+        assert!(cfg.omnibar.companion_panel_open);
+        assert_eq!(cfg.omnibar.companion_name, "Persephone");
+        assert!(!cfg.omnibar.companion_name_custom);
+        assert_eq!(cfg.omnibar.companion_shape, CompanionShape::Pebble);
+        assert_eq!(cfg.omnibar.companion_expression, CompanionExpression::Attentive);
+        assert_eq!(cfg.omnibar.companion_color, "#1e1e22");
+        assert_eq!(cfg.omnibar.ai_provider, BlazeAiProvider::Gemini);
+        assert_eq!(cfg.omnibar.ai_model, "gemini-2.5-flash");
+        assert!(cfg.omnibar.ai_persist_chat);
+        assert!(cfg.omnibar.ai_local_memory_enabled);
+        assert!(cfg.omnibar.ai_include_blazeos_guide);
+    }
+
+    #[test]
+    fn companion_shapes_expressions_and_name_locking() {
+        assert_eq!(CompanionShape::ALL.len(), 8);
+        for shape in CompanionShape::ALL {
+            let parsed: CompanionShape = shape.as_str().parse().unwrap();
+            assert_eq!(parsed, shape);
+            assert!(!shape.label_tr().is_empty());
+        }
+
+        assert_eq!(CompanionExpression::ALL.len(), 16);
+        for expr in CompanionExpression::ALL {
+            let parsed: CompanionExpression = expr.as_str().parse().unwrap();
+            assert_eq!(parsed, expr);
+            assert!(!expr.title_tr().is_empty());
+            assert!(!expr.default_name().is_empty());
+            assert!(!expr.meaning_tr().is_empty());
+            assert!(!expr.persona_prompt_tr().is_empty());
+        }
+
+        let mut omnibar = OmnibarConfig::default();
+        assert_eq!(omnibar.effective_companion_name(), "Persephone");
+        omnibar.set_companion_expression(CompanionExpression::Angry);
+        assert_eq!(omnibar.effective_companion_name(), "Köz");
+        omnibar.set_companion_expression(CompanionExpression::Curious);
+        assert_eq!(omnibar.effective_companion_name(), "Kıvılcım");
+        omnibar.set_companion_expression(CompanionExpression::Confused);
+        assert_eq!(omnibar.effective_companion_name(), "Pus");
+        omnibar.set_companion_expression(CompanionExpression::Sad);
+        assert_eq!(omnibar.effective_companion_name(), "Sis");
+        omnibar.set_companion_expression(CompanionExpression::Sleepy);
+        assert_eq!(omnibar.effective_companion_name(), "Gece");
+
+        omnibar.set_custom_companion_name("Ateş");
+        assert!(omnibar.companion_name_custom);
+        omnibar.set_companion_expression(CompanionExpression::Happy);
+        assert_eq!(omnibar.effective_companion_name(), "Ateş");
+
+        omnibar.reset_companion_name();
+        assert!(!omnibar.companion_name_custom);
+        assert_eq!(omnibar.effective_companion_name(), "Persephone");
+    }
+
+    #[test]
+    fn blazeai_provider_serialization_and_aliases() {
+        assert_eq!(BlazeAiProvider::ALL.len(), 5);
+        for p in BlazeAiProvider::ALL {
+            let parsed: BlazeAiProvider = p.as_str().parse().unwrap();
+            assert_eq!(parsed, p);
+        }
+        let toml_str = r#"
+            [omnibar]
+            ai_provider = "open_ai"
+        "#;
+        let cfg: SolarConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.omnibar.ai_provider, BlazeAiProvider::OpenAi);
+
+        let toml_str2 = r#"
+            [omnibar]
+            ai_provider = "openai"
+        "#;
+        let cfg2: SolarConfig = toml::from_str(toml_str2).unwrap();
+        assert_eq!(cfg2.omnibar.ai_provider, BlazeAiProvider::OpenAi);
     }
 }
