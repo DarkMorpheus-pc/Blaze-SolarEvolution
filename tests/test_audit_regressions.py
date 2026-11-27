@@ -11,6 +11,16 @@ ROOT = Path(__file__).resolve().parents[1]
 OVERLAY = ROOT / 'blazeos_custom_apps'
 
 
+def _load_script_module(mod_name: str, path: Path):
+    import importlib.util
+    from importlib.machinery import SourceFileLoader
+    loader = SourceFileLoader(mod_name, str(path))
+    spec = importlib.util.spec_from_loader(mod_name, loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
 class AuditRegressions(unittest.TestCase):
     def test_installer_starts_with_locale_and_persists_usage_profile(self):
         configs = [
@@ -754,9 +764,7 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
         self.assertIn('collect_admin_hashes_at', berp_rs)
 
         # Functional test of offline shadow hash verification (policy A1)
-        ns = {}
-        from importlib.machinery import SourceFileLoader
-        mod = SourceFileLoader('berp_gui_test', str(OVERLAY / 'usr/bin/berp-recovery-gui')).load_module()
+        mod = _load_script_module('berp_gui_test', OVERLAY / 'usr/bin/berp-recovery-gui')
         with tempfile.TemporaryDirectory() as tmp:
             etc = Path(tmp) / 'etc'
             etc.mkdir()
@@ -945,8 +953,7 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
         self.assertIn('BlazeOS Recovery (BERE Vault)', inst_py)
 
         # Functional test of SHA-256 tamper detection in inspect_blaze_rec_vault
-        from importlib.machinery import SourceFileLoader
-        mod = SourceFileLoader('berp_gui_vault_test', str(OVERLAY / 'usr/bin/berp-recovery-gui')).load_module()
+        mod = _load_script_module('berp_gui_vault_test', OVERLAY / 'usr/bin/berp-recovery-gui')
         with tempfile.TemporaryDirectory() as tmp:
             t = Path(tmp)
             (t / 'LiveOS').mkdir()
@@ -1045,8 +1052,7 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
         self.assertIn('inst_hook pre-pivot 50 "${moddir}/blaze-bere-overlay-mount.sh"', mod_setup)
 
         # 4. Fail-closed bere_overlay SHA-256 verification inside inspect_blaze_rec_vault
-        from importlib.machinery import SourceFileLoader
-        berp_mod = SourceFileLoader('berp_gui_ov_test', str(OVERLAY / 'usr/bin/berp-recovery-gui')).load_module()
+        berp_mod = _load_script_module('berp_gui_ov_test', OVERLAY / 'usr/bin/berp-recovery-gui')
         with tempfile.TemporaryDirectory() as tmp:
             t = Path(tmp)
             (t / 'LiveOS').mkdir()
@@ -1111,10 +1117,7 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
 
         # 5. Functional unit tests for unprivileged blazeos-update-notifier
         notifier_path = OVERLAY / 'usr/libexec/blazeos-update-notifier'
-        loader = SourceFileLoader('blazeos_update_notifier_mod', str(notifier_path))
-        spec = importlib.util.spec_from_loader(loader.name, loader)
-        notif = importlib.util.module_from_spec(spec)
-        loader.exec_module(notif)
+        notif = _load_script_module('blazeos_update_notifier_mod', notifier_path)
 
         # HTTPS enforcement
         self.assertEqual(
@@ -1269,8 +1272,7 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
             self.assertIn('open-focused true', kdl)
 
     def test_gate1_transactional_grub_efi_repair(self):
-        from importlib.machinery import SourceFileLoader
-        mod = SourceFileLoader('berp_gui_g1', str(OVERLAY / 'usr/bin/berp-recovery-gui')).load_module()
+        mod = _load_script_module('berp_gui_g1', OVERLAY / 'usr/bin/berp-recovery-gui')
 
         with tempfile.TemporaryDirectory() as tmp:
             troot = Path(tmp)
@@ -1764,6 +1766,108 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
         self.assertEqual(akrep_pkg['ver'], '1.0.0')
         self.assertIn('/usr/bin/akrep-privd', akrep_pkg['files'])
         self.assertIn('/usr/share/akrep/profiles/public-network.toml', akrep_pkg['files'])
+
+    def test_wallpaper_portal_fusermount_suid_and_async_settings_startup(self):
+        """Native org.freedesktop.impl.portal.Wallpaper, portal/MIME/SUID fixes, and non-blocking solar-settings."""
+        portal_bin = OVERLAY / 'usr/libexec/blazeos-wallpaper-portal'
+        self.assertTrue(portal_bin.is_file() and os.access(portal_bin, os.X_OK))
+        portal_dbus = (OVERLAY / 'usr/share/dbus-1/services/org.blazeos.WallpaperPortal.service').read_text(encoding='utf-8')
+        self.assertIn('Name=org.blazeos.WallpaperPortal', portal_dbus)
+        self.assertIn('Exec=/usr/libexec/blazeos-wallpaper-portal', portal_dbus)
+
+        portal_desc = (OVERLAY / 'usr/share/xdg-desktop-portal/portals/blazeos.portal').read_text(encoding='utf-8')
+        self.assertIn('DBusName=org.blazeos.WallpaperPortal', portal_desc)
+        self.assertIn('org.freedesktop.impl.portal.Wallpaper', portal_desc)
+
+        portals_conf = (OVERLAY / 'usr/share/xdg-desktop-portal/solarui-portals.conf').read_text(encoding='utf-8')
+        self.assertIn('default=gtk;', portals_conf)
+        self.assertIn('org.freedesktop.impl.portal.FileChooser=gtk;', portals_conf)
+        self.assertIn('org.freedesktop.impl.portal.Wallpaper=blazeos;', portals_conf)
+
+        # Functional test of blazeos-wallpaper-portal image validation & ephemeral staging
+        import importlib.util as _ilu
+        from importlib.machinery import SourceFileLoader as _SFL
+        loader = _SFL('blazeos_wp_portal_test', str(portal_bin))
+        spec = _ilu.spec_from_loader('blazeos_wp_portal_test', loader)
+        mod = _ilu.module_from_spec(spec)
+        loader.exec_module(mod)
+        with tempfile.TemporaryDirectory() as td:
+            png_p = Path(td) / 'sample.png'
+            png_p.write_bytes(b'\x89PNG\r\n\x1a\n' + b'\x00' * 32)
+            txt_p = Path(td) / 'evil.sh'
+            txt_p.write_text('#!/bin/sh\necho hi\n', encoding='utf-8')
+            self.assertEqual(mod.detect_image_extension(png_p.read_bytes()), '.png')
+            self.assertIsNone(mod.detect_image_extension(txt_p.read_bytes()))
+            self.assertIsNone(mod.resolve_and_stage_wallpaper(f'file://{txt_p}'))
+            staged = mod.resolve_and_stage_wallpaper(f'file://{png_p}')
+            self.assertIsNotNone(staged)
+            self.assertTrue(Path(staged).is_file())
+            if '/.local/share/blazeos/wallpapers/' in staged:
+                Path(staged).unlink(missing_ok=True)
+
+        # Global forced GDK_BACKEND must not poison portal/Nautilus dialogs
+        sess_wrap = (OVERLAY / 'usr/bin/solar-session-wrapper').read_text(encoding='utf-8')
+        self.assertNotIn('export GDK_BACKEND=', sess_wrap)
+        sess_rs = (ROOT / 'solarui/crates/solar-session/src/main.rs').read_text(encoding='utf-8')
+        self.assertNotIn('set_var("GDK_BACKEND"', sess_rs)
+        self.assertIn('org.freedesktop.impl.portal.Wallpaper=blazeos;', sess_rs)
+
+        # Nautilus default directory handler
+        mimeapps = (OVERLAY / 'etc/xdg/mimeapps.list').read_text(encoding='utf-8')
+        self.assertIn('inode/directory=org.gnome.Nautilus.desktop', mimeapps)
+
+        # SUID fusermount3 + capability-only newuidmap/newgidmap in both ISO builder and blaze-release %posttrans
+        build_sh = (ROOT / 'build_f45_final.sh').read_text(encoding='utf-8')
+        self.assertIn('chmod 4755 "$ROOTFS/usr/bin/fusermount3"', build_sh)
+        self.assertIn('chmod 0755 "$ROOTFS/usr/bin/newuidmap" "$ROOTFS/usr/bin/newgidmap"', build_sh)
+        rel_spec = (ROOT / 'packaging/specs/blaze-release.spec').read_text(encoding='utf-8')
+        self.assertIn('/usr/bin/fusermount3', rel_spec)
+        self.assertIn('chmod 0755 /usr/bin/newuidmap', rel_spec)
+
+        # solar-settings must not decode full-resolution wallpaper files synchronously before present()
+        settings_rs = (ROOT / 'solarui/crates/solar-shell/src/settings_gui.rs').read_text(encoding='utf-8')
+        self.assertNotIn('gtk4::Picture::for_filename(img_path)', settings_rs)
+        self.assertIn('Pixbuf::from_file_at_scale', settings_rs)
+        self.assertIn('wp-thumbs', settings_rs)
+
+    def test_blazeai_gemini_38_migration_and_icon_theme_self_heal(self):
+        """BlazeAI defaults to gemini-3.8-flash with 404 self-heal; GTK apps never strand on uninstalled Papirus-Dark."""
+        cfg_rs = (ROOT / 'solarui/crates/solar-common/src/config.rs').read_text(encoding='utf-8')
+        self.assertIn('BlazeAiProvider::Gemini => "gemini-3.8-flash"', cfg_rs)
+        self.assertIn('"gemini-2.5-flash" | "gemini-2.0-flash"', cfg_rs)
+
+        ai_rs = (ROOT / 'solarui/crates/solar-shell/src/blazeai.rs').read_text(encoding='utf-8')
+        self.assertIn('"gemini-3.8-flash"', ai_rs)
+        self.assertIn('extract_recommended_gemini_model', ai_rs)
+        self.assertIn('probe_provider_models', ai_rs)
+        self.assertIn('pick_preferred_live_model', ai_rs)
+
+        omni_rs = (ROOT / 'solarui/crates/solar-shell/src/omnibar.rs').read_text(encoding='utf-8')
+        self.assertIn('probe_provider_models', omni_rs)
+        self.assertIn('format_model_chip_for_state', omni_rs)
+        self.assertNotIn('curated_models_for_provider', omni_rs)
+        self.assertIn('set_placeholder_text(Some("gemini-3.8-flash"))', omni_rs)
+
+        # Icon theme guards across OOBE, We10X, SolarSession, SolarUI LivingFlow, Akrep UI, and blaze-release %posttrans
+        setup_py = (OVERLAY / 'usr/bin/blaze-setup').read_text(encoding='utf-8')
+        self.assertNotIn('gtk-icon-theme-name=Papirus-Dark', setup_py)
+        self.assertNotIn("icon-theme='Papirus-Dark'", setup_py)
+
+        we10x_rs = (ROOT / 'solarui/crates/solar-shell/src/we10x_profile.rs').read_text(encoding='utf-8')
+        self.assertIn('default_installed_icon_theme', we10x_rs)
+
+        sess_rs = (ROOT / 'solarui/crates/solar-session/src/main.rs').read_text(encoding='utf-8')
+        self.assertIn('reconcile_gtk_icon_theme()', sess_rs)
+
+        lf_rs = (ROOT / 'solarui/crates/solar-shell/src/living_flow.rs').read_text(encoding='utf-8')
+        self.assertIn('set_gtk_icon_theme_name(Some("Adwaita"))', lf_rs)
+
+        akrep_theme_rs = (ROOT / 'solarui/crates/blaze-akrep-ui/src/themes/solarui.rs').read_text(encoding='utf-8')
+        self.assertIn('set_gtk_icon_theme_name(Some("Adwaita"))', akrep_theme_rs)
+
+        rel_spec = (ROOT / 'packaging/specs/blaze-release.spec').read_text(encoding='utf-8')
+        self.assertIn("00-blaze-theme", rel_spec)
+        self.assertIn("dconf update", rel_spec)
 
 
 if __name__ == '__main__':

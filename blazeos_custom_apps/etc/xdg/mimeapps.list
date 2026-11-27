@@ -1,4 +1,5 @@
 [Default Applications]
+inode/directory=org.gnome.Nautilus.desktop
 text/plain=org.gnome.TextEditor.desktop
 text/markdown=org.gnome.TextEditor.desktop
 application/json=org.gnome.TextEditor.desktop
@@ -6,6 +7,7 @@ application/xml=org.gnome.TextEditor.desktop
 application/x-shellscript=org.gnome.TextEditor.desktop
 
 [Added Associations]
+inode/directory=org.gnome.Nautilus.desktop;
 text/plain=org.gnome.TextEditor.desktop;
 text/markdown=org.gnome.TextEditor.desktop;
 application/json=org.gnome.TextEditor.desktop;

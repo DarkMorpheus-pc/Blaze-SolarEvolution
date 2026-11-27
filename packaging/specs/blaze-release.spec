@@ -1,6 +1,6 @@
 Name:           blaze-release
 Version:        5.05.1
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        Blaze repository definition, GPG key and OS identity guard
 License:        GPL-3.0-or-later
 URL:            https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
@@ -47,6 +47,29 @@ if [ -x /usr/bin/blazeos-sync-identity ]; then
 fi
 
 %posttrans
+# Heal SUID/SGID permissions on FUSE & system helpers if stripped by older ISO installs
+for suid_bin in /usr/bin/fusermount3 /usr/bin/fusermount /usr/bin/fusermount-glusterfs /usr/bin/mount.nfs; do
+    if [ -f "$suid_bin" ] && [ ! -u "$suid_bin" ]; then
+        chmod 4755 "$suid_bin" 2>/dev/null || :
+    fi
+done
+# Ensure newuidmap/newgidmap use file capabilities ONLY (0755 + cap_setuid/cap_setgid)
+# because combining SUID 4755 with file caps drops cap_dac_override and breaks rootless podman!
+if [ -f /usr/bin/newuidmap ] && [ -u /usr/bin/newuidmap ] && command -v setcap >/dev/null 2>&1; then
+    chmod 0755 /usr/bin/newuidmap 2>/dev/null || :
+    setcap cap_setuid+ep /usr/bin/newuidmap 2>/dev/null || chmod 4755 /usr/bin/newuidmap 2>/dev/null || :
+fi
+if [ -f /usr/bin/newgidmap ] && [ -u /usr/bin/newgidmap ] && command -v setcap >/dev/null 2>&1; then
+    chmod 0755 /usr/bin/newgidmap 2>/dev/null || :
+    setcap cap_setgid+ep /usr/bin/newgidmap 2>/dev/null || chmod 4755 /usr/bin/newgidmap 2>/dev/null || :
+fi
+# Heal dconf baseline icon-theme when Papirus-Dark is not installed so GTK4 symbolic icons resolve via Adwaita
+if [ -f /etc/dconf/db/local.d/00-blaze-theme ] && [ ! -f /usr/share/icons/Papirus-Dark/index.theme ]; then
+    if grep -q "icon-theme='Papirus-Dark'" /etc/dconf/db/local.d/00-blaze-theme 2>/dev/null; then
+        sed -i "s/icon-theme='Papirus-Dark'/icon-theme='Adwaita'/g" /etc/dconf/db/local.d/00-blaze-theme 2>/dev/null || :
+        dconf update 2>/dev/null || :
+    fi
+fi
 if [ -x /usr/bin/blazeos-sync-identity ]; then
     /usr/bin/blazeos-sync-identity --quiet || :
 fi
@@ -82,6 +105,9 @@ fi
 /etc/blazeos/update-channel.conf
 
 %changelog
+* Fri Nov 27 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-3
+- Heal missing fusermount3/FUSE SUID bits, capability-only newuidmap/newgidmap permissions, and uninstalled Papirus-Dark dconf icon theme baseline in %%posttrans
+
 * Thu Nov 26 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-2
 - Recommend blaze-akrep, solarui-config, and blaze-scap-compat for seamless in-place upgrades from 5.05
 

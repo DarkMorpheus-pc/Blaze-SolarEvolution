@@ -1029,9 +1029,15 @@ fn build_health_tab() -> GtkBox {
     stat_desc.set_halign(gtk4::Align::Start);
     stat_sec.append(&stat_desc);
 
-    let components = probe_live_health_components();
+    let placeholder_names = [
+        "SolarCore servisi",
+        "Masaüstü kabuğu",
+        "Pencere yöneticisi",
+        "Blaze Sentinel",
+    ];
+    let mut status_widgets: Vec<(GtkBox, Label)> = Vec::new();
 
-    for (comp, status, dot_cls) in components {
+    for comp in placeholder_names {
         let row = GtkBox::new(Orientation::Horizontal, 12);
         row.set_margin_top(4);
         row.set_margin_bottom(4);
@@ -1048,7 +1054,7 @@ fn build_health_tab() -> GtkBox {
 
         let dot = GtkBox::new(Orientation::Horizontal, 0);
         dot.add_css_class("status-dot");
-        dot.add_css_class(dot_cls);
+        dot.add_css_class("status-dot-muted");
         dot.set_size_request(8, 8);
         dot.set_halign(gtk4::Align::Center);
         dot.set_valign(gtk4::Align::Center);
@@ -1056,14 +1062,39 @@ fn build_health_tab() -> GtkBox {
         dot.set_vexpand(false);
         state_box.append(&dot);
 
-        let s_lbl = Label::new(Some(&status));
+        let s_lbl = Label::new(Some("Kontrol ediliyor..."));
         s_lbl.add_css_class("status-text");
         s_lbl.set_halign(gtk4::Align::End);
         state_box.append(&s_lbl);
 
         row.append(&state_box);
         stat_sec.append(&row);
+        status_widgets.push((dot, s_lbl));
     }
+
+    // Run subprocess health checks off the GTK startup thread so window.present() is instant
+    let (health_tx, health_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = health_tx.send(probe_live_health_components());
+    });
+    glib::timeout_add_local(std::time::Duration::from_millis(30), move || {
+        match health_rx.try_recv() {
+            Ok(results) => {
+                for ((dot, s_lbl), (_comp, status, dot_cls)) in
+                    status_widgets.iter().zip(results.into_iter())
+                {
+                    dot.remove_css_class("status-dot-muted");
+                    dot.remove_css_class("status-dot-ok");
+                    dot.remove_css_class("status-dot-warn");
+                    dot.add_css_class(dot_cls);
+                    s_lbl.set_text(&status);
+                }
+                glib::ControlFlow::Break
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        }
+    });
 
     tab.append(&stat_sec);
 
@@ -2237,8 +2268,10 @@ fn build_personalize_tab() -> GtkBox {
 
     let mut wp_cards: Vec<(String, GtkBox)> = Vec::new();
     let mut wp_apply_btns: Vec<(String, Button)> = Vec::new();
+    let mut wp_pics: Vec<gtk4::Picture> = Vec::new();
+    let mut thumb_jobs: Vec<(usize, String)> = Vec::new();
     let wallpapers = crate::wallpaper::discover_available_wallpapers();
-    for (title_txt, img_path) in &wallpapers {
+    for (idx, (title_txt, img_path)) in wallpapers.iter().enumerate() {
         let card = GtkBox::new(Orientation::Vertical, 0);
         card.add_css_class("wp-card");
         card.set_overflow(gtk4::Overflow::Hidden);
@@ -2246,7 +2279,9 @@ fn build_personalize_tab() -> GtkBox {
             card.add_css_class("wp-active");
         }
 
-        let pic = gtk4::Picture::for_filename(img_path);
+        // Never decode full-resolution 4K/16MB wallpapers synchronously before window.present().
+        // Populate lightweight scaled thumbnails asynchronously via ~/.cache/solarui/wp-thumbs/.
+        let pic = gtk4::Picture::new();
         pic.set_can_shrink(true);
         pic.set_content_fit(gtk4::ContentFit::Cover);
         pic.set_size_request(180, 100);
@@ -2272,6 +2307,65 @@ fn build_personalize_tab() -> GtkBox {
         gallery.insert(&card, -1);
         wp_cards.push((img_path.clone(), card));
         wp_apply_btns.push((img_path.clone(), use_btn));
+        wp_pics.push(pic);
+        thumb_jobs.push((idx, img_path.clone()));
+    }
+
+    if !thumb_jobs.is_empty() {
+        let (thumb_tx, thumb_rx) = std::sync::mpsc::channel::<(usize, PathBuf)>();
+        std::thread::spawn(move || {
+            let cache_dir = std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/tmp"))
+                .join(".cache/solarui/wp-thumbs");
+            let _ = std::fs::create_dir_all(&cache_dir);
+
+            for (idx, src_path) in thumb_jobs {
+                let meta = std::fs::metadata(&src_path).ok();
+                let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+                let mtime = meta
+                    .as_ref()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let mut hash: u64 = 14695981039346656037;
+                for b in format!("{}:{}:{}", src_path, size, mtime).bytes() {
+                    hash ^= b as u64;
+                    hash = hash.wrapping_mul(1099511628211);
+                }
+                let thumb_path = cache_dir.join(format!("wp_{:016x}.jpg", hash));
+                if thumb_path.is_file() {
+                    let _ = thumb_tx.send((idx, thumb_path));
+                    continue;
+                }
+                if let Ok(pb) = gdk_pixbuf::Pixbuf::from_file_at_scale(&src_path, 360, 200, true) {
+                    let tmp_path = cache_dir.join(format!("wp_{:016x}.tmp.{}.jpg", hash, std::process::id()));
+                    if pb.savev(&tmp_path, "jpeg", &[("quality", "82")]).is_ok() {
+                        if std::fs::rename(&tmp_path, &thumb_path).is_ok() {
+                            let _ = thumb_tx.send((idx, thumb_path));
+                            continue;
+                        }
+                        let _ = std::fs::remove_file(&tmp_path);
+                    }
+                }
+                let _ = thumb_tx.send((idx, PathBuf::from(src_path)));
+            }
+        });
+
+        glib::timeout_add_local(std::time::Duration::from_millis(20), move || {
+            loop {
+                match thumb_rx.try_recv() {
+                    Ok((idx, path)) => {
+                        if let Some(pic) = wp_pics.get(idx) {
+                            pic.set_filename(Some(&path));
+                        }
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => return glib::ControlFlow::Break,
+                }
+            }
+        });
     }
 
     let wp_cards_rc = Rc::new(wp_cards);

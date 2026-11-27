@@ -1,0 +1,229 @@
+#!/usr/bin/python3
+"""BlazeOS native XDG Desktop Portal backend for org.freedesktop.impl.portal.Wallpaper.
+
+Routes Nautilus ("Arka Plan Olarak Ayarla"), Loupe, Firefox, and Flatpak
+org.freedesktop.portal.Wallpaper requests straight to `solar-shell wallpaper set`,
+updating Noctalia, We10X, Caelestia, end4-pC, SolarConfig, and GSettings live.
+"""
+import hashlib
+import os
+import shutil
+import subprocess
+import sys
+import urllib.parse
+
+import gi
+
+gi.require_version("Gio", "2.0")
+gi.require_version("GLib", "2.0")
+from gi.repository import Gio, GLib  # noqa: E402
+
+BUS_NAME = "org.blazeos.WallpaperPortal"
+OBJ_PATH = "/org/freedesktop/portal/desktop"
+IFACE_NAME = "org.freedesktop.impl.portal.Wallpaper"
+MAX_IMAGE_BYTES = 50 * 1024 * 1024  # 50 MiB safety ceiling
+
+INTROSPECTION_XML = """
+<node>
+  <interface name="org.freedesktop.impl.portal.Wallpaper">
+    <method name="SetWallpaperURI">
+      <arg type="o" name="handle" direction="in"/>
+      <arg type="s" name="app_id" direction="in"/>
+      <arg type="s" name="parent_window" direction="in"/>
+      <arg type="s" name="uri" direction="in"/>
+      <arg type="a{sv}" name="options" direction="in"/>
+      <arg type="u" name="response" direction="out"/>
+    </method>
+    <property name="version" type="u" access="read"/>
+  </interface>
+</node>
+"""
+
+EPHEMERAL_PREFIXES = ("/tmp/", "/var/tmp/", "/run/", "/dev/shm/")
+
+
+def detect_image_extension(head: bytes) -> str | None:
+    if len(head) >= 8 and head[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+    if len(head) >= 3 and head[:3] == b"\xff\xd8\xff":
+        return ".jpg"
+    if len(head) >= 12 and head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return ".webp"
+    if len(head) >= 6 and head[:6] in (b"GIF87a", b"GIF89a"):
+        return ".gif"
+    if len(head) >= 2 and head[:2] == b"BM":
+        return ".bmp"
+    if len(head) >= 12 and head[4:8] == b"ftyp" and head[8:12] in (
+        b"avif",
+        b"avis",
+        b"heic",
+        b"heix",
+        b"mif1",
+    ):
+        return ".avif"
+    return None
+
+
+def resolve_and_stage_wallpaper(uri: str) -> str | None:
+    if not isinstance(uri, str) or not uri.strip():
+        return None
+    raw = uri.strip()
+    if raw.startswith("file://"):
+        parsed = urllib.parse.urlparse(raw)
+        if parsed.netloc not in ("", "localhost"):
+            return None
+        path = urllib.parse.unquote(parsed.path)
+    elif raw.startswith("/"):
+        path = raw
+    else:
+        return None
+
+    real = os.path.realpath(path)
+    if not os.path.isfile(real):
+        return None
+
+    try:
+        st = os.stat(real)
+        if st.st_size <= 0 or st.st_size > MAX_IMAGE_BYTES:
+            return None
+        with open(real, "rb") as fh:
+            head = fh.read(32)
+    except OSError:
+        return None
+
+    detected_ext = detect_image_extension(head)
+    if not detected_ext:
+        return None
+
+    # If the source lives on ephemeral storage (Flatpak doc portal /run/user/.../doc,
+    # /tmp, or removable media under /run/media), persist a verified copy into
+    # ~/.local/share/blazeos/wallpapers/ so the wallpaper survives reboots and unplugs.
+    if real.startswith(EPHEMERAL_PREFIXES):
+        home = os.path.expanduser("~")
+        dest_dir = os.path.join(home, ".local", "share", "blazeos", "wallpapers")
+        os.makedirs(dest_dir, exist_ok=True)
+        h = hashlib.sha256()
+        with open(real, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                h.update(chunk)
+        ext = os.path.splitext(real)[1].lower()
+        if ext not in (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif"):
+            ext = detected_ext
+        dst = os.path.join(dest_dir, f"wallpaper-{h.hexdigest()[:16]}{ext}")
+        if not os.path.isfile(dst):
+            tmp = f"{dst}.tmp.{os.getpid()}"
+            shutil.copyfile(real, tmp)
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, dst)
+        return dst
+
+    return real
+
+
+def apply_wallpaper(uri: str) -> int:
+    target = resolve_and_stage_wallpaper(uri)
+    if not target:
+        return 2
+
+    solar_bin = "/usr/bin/solar-shell"
+    if not os.path.isfile(solar_bin):
+        solar_bin = shutil.which("solar-shell") or solar_bin
+
+    try:
+        proc = subprocess.run(
+            [solar_bin, "wallpaper", "set", target],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=20,
+        )
+    except Exception:
+        return 2
+
+    if proc.returncode != 0:
+        return 2
+
+    notify_bin = shutil.which("notify-send")
+    if notify_bin:
+        try:
+            subprocess.Popen(
+                [
+                    notify_bin,
+                    "-a",
+                    "SolarUI",
+                    "-i",
+                    "preferences-desktop-wallpaper-symbolic",
+                    "Duvar kağıdı güncellendi",
+                    os.path.basename(target),
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            pass
+    return 0
+
+
+def on_method_call(
+    _connection,
+    _sender,
+    _object_path,
+    _interface_name,
+    method_name,
+    parameters,
+    invocation,
+):
+    if method_name == "SetWallpaperURI":
+        _handle, _app_id, _parent_window, uri, _options = parameters.unpack()
+        code = apply_wallpaper(uri)
+        invocation.return_value(GLib.Variant("(u)", (code,)))
+        return
+    invocation.return_dbus_error(
+        "org.freedesktop.DBus.Error.UnknownMethod",
+        f"Unknown method: {method_name}",
+    )
+
+
+def on_get_property(_connection, _sender, _object_path, _interface_name, property_name):
+    if property_name == "version":
+        return GLib.Variant("u", 1)
+    return None
+
+
+def main() -> int:
+    if len(sys.argv) >= 3 and sys.argv[1] == "--apply-uri":
+        return 0 if apply_wallpaper(sys.argv[2]) == 0 else 1
+
+    node_info = Gio.DBusNodeInfo.new_for_xml(INTROSPECTION_XML)
+    iface_info = node_info.interfaces[0]
+    loop = GLib.MainLoop()
+
+    def on_bus_acquired(connection, _name):
+        connection.register_object(
+            OBJ_PATH,
+            iface_info,
+            on_method_call,
+            on_get_property,
+            None,
+        )
+
+    def on_name_lost(_connection, _name):
+        loop.quit()
+
+    owner_id = Gio.bus_own_name(
+        Gio.BusType.SESSION,
+        BUS_NAME,
+        Gio.BusNameOwnerFlags.NONE,
+        on_bus_acquired,
+        None,
+        on_name_lost,
+    )
+    try:
+        loop.run()
+    finally:
+        Gio.bus_unown_name(owner_id)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

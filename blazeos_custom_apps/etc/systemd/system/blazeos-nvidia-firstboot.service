@@ -9,7 +9,8 @@ ConditionKernelCommandLine=!rd.live.image
 
 [Service]
 Type=oneshot
-ExecCondition=/usr/bin/sh -c '/usr/bin/lspci 2>/dev/null | /usr/bin/grep -iq nvidia'
+Environment=LC_ALL=C.UTF-8
+ExecCondition=/usr/bin/sh -c 'LC_ALL=C.UTF-8 /usr/bin/lspci 2>/dev/null | LC_ALL=C.UTF-8 /usr/bin/grep -iq nvidia'
 ExecStart=/usr/bin/blazeos-nvidia-setup
 StandardOutput=journal
 StandardError=journal

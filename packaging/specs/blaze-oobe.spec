@@ -4,7 +4,7 @@
 # Binary repack of artefacts built from the repositories listed in SOURCES.md
 Name:           blaze-oobe
 Version:        5.05.1
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        BlazeOS Out-Of-Box Experience first-boot wizard
 License:        GPL-3.0-or-later
 URL:            https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
@@ -35,6 +35,8 @@ rm -f %{buildroot}/%{name}-%{version}.tar
 %config(missingok) %attr(0440,root,root) /etc/sudoers.d/99-blaze-setup
 
 %changelog
+* Fri Nov 27 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-2
+- Use Adwaita icon theme fallback in OOBE GTK/dconf baseline when Papirus-Dark is not installed
 * Tue Nov 24 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-1
 - Track one-shot OOBE SDDM/sudoers drop-ins with missingok and harden post-OOBE transition
 * Wed Nov 18 2026 Blaze Release <release@blazeos.com.tr> - 5.05-1

@@ -23,7 +23,6 @@ fn main() -> Result<()> {
     std::env::set_var("DESKTOP_SESSION", "SolarUI");
     std::env::set_var("MOZ_ENABLE_WAYLAND", "1");
     std::env::set_var("QT_QPA_PLATFORM", "wayland;xcb");
-    std::env::set_var("GDK_BACKEND", "wayland,x11");
     std::env::set_var("CLUTTER_BACKEND", "wayland");
 
     // ChromeOS Ash Performance & Low-Power Idle Optimizations
@@ -51,6 +50,7 @@ fn main() -> Result<()> {
 
     // Initialize portal configs & systemd graphical session target for PipeWire / OBS screencast
     setup_desktop_portals();
+    reconcile_gtk_icon_theme();
 
     // Branding belongs in shell assets; do not inject GTK/Pango overrides into
     // every application launched by this session.
@@ -300,13 +300,20 @@ fn setup_desktop_portals() {
     if let Ok(home) = std::env::var("HOME") {
         let home_path = PathBuf::from(home);
 
-        // 1. Ensure ~/.config/xdg-desktop-portal/solarui-portals.conf exists
+        // 1. Ensure ~/.config/xdg-desktop-portal/solarui-portals.conf uses gtk + blazeos wallpaper portal
         let portal_dir = home_path.join(".config/xdg-desktop-portal");
         let _ = std::fs::create_dir_all(&portal_dir);
         let portal_conf = portal_dir.join("solarui-portals.conf");
-        if !portal_conf.exists() {
-            let content = "[preferred]\ndefault=gnome;gtk;\norg.freedesktop.impl.portal.Access=gtk;\norg.freedesktop.impl.portal.Notification=gtk;\norg.freedesktop.impl.portal.Secret=gnome-keyring;\n";
-            let _ = std::fs::write(&portal_conf, content);
+        let desired_portals = "[preferred]\ndefault=gtk;\norg.freedesktop.impl.portal.FileChooser=gtk;\norg.freedesktop.impl.portal.AppChooser=gtk;\norg.freedesktop.impl.portal.Print=gtk;\norg.freedesktop.impl.portal.Access=gtk;\norg.freedesktop.impl.portal.Notification=gtk;\norg.freedesktop.impl.portal.Secret=gnome-keyring;\norg.freedesktop.impl.portal.ScreenCast=gnome;\norg.freedesktop.impl.portal.Screenshot=gnome;\norg.freedesktop.impl.portal.Wallpaper=blazeos;\n";
+        let should_update = if !portal_conf.exists() {
+            true
+        } else if let Ok(existing) = std::fs::read_to_string(&portal_conf) {
+            existing.contains("default=gnome;gtk;") && !existing.contains("org.freedesktop.impl.portal.Wallpaper=")
+        } else {
+            false
+        };
+        if should_update {
+            let _ = std::fs::write(&portal_conf, desired_portals);
         }
 
         // 2. Ensure ~/.config/systemd/user/solarui-session.service exists
@@ -346,4 +353,82 @@ fn setup_desktop_portals() {
     let _ = Command::new("systemctl")
         .args(["--user", "start", "solarui-session.service"])
         .status();
+}
+
+fn is_icon_theme_installed(theme_name: &str) -> bool {
+    let clean = theme_name.trim().trim_matches('\'').trim_matches('"');
+    if clean.is_empty() {
+        return false;
+    }
+    let mut dirs = vec![
+        PathBuf::from("/usr/share/icons"),
+        PathBuf::from("/usr/local/share/icons"),
+    ];
+    if let Ok(home) = std::env::var("HOME") {
+        let hp = PathBuf::from(home);
+        dirs.push(hp.join(".local/share/icons"));
+        dirs.push(hp.join(".icons"));
+    }
+    dirs.into_iter()
+        .any(|base| base.join(clean).join("index.theme").is_file())
+}
+
+fn reconcile_gtk_icon_theme() {
+    let fallback_theme = if is_icon_theme_installed("Papirus-Dark") {
+        "Papirus-Dark"
+    } else {
+        "Adwaita"
+    };
+
+    if let Ok(out) = Command::new("gsettings")
+        .args(["get", "org.gnome.desktop.interface", "icon-theme"])
+        .output()
+    {
+        if out.status.success() {
+            let raw = String::from_utf8_lossy(&out.stdout);
+            let current = raw.trim().trim_matches('\'').trim_matches('"');
+            if !is_icon_theme_installed(current) {
+                info!(
+                    "Configured GTK icon theme '{}' is not installed; switching to '{}'",
+                    current, fallback_theme
+                );
+                let _ = Command::new("gsettings")
+                    .args([
+                        "set",
+                        "org.gnome.desktop.interface",
+                        "icon-theme",
+                        fallback_theme,
+                    ])
+                    .status();
+            }
+        }
+    }
+
+    if let Ok(home) = std::env::var("HOME") {
+        let hp = PathBuf::from(home);
+        for rel in [".config/gtk-3.0/settings.ini", ".config/gtk-4.0/settings.ini"] {
+            let ini_path = hp.join(rel);
+            let Ok(content) = std::fs::read_to_string(&ini_path) else {
+                continue;
+            };
+            let mut changed = false;
+            let mut out_lines: Vec<String> = Vec::new();
+            for line in content.lines() {
+                if let Some(rest) = line.strip_prefix("gtk-icon-theme-name=") {
+                    let theme_val = rest.trim();
+                    if !is_icon_theme_installed(theme_val) {
+                        out_lines.push(format!("gtk-icon-theme-name={}", fallback_theme));
+                        changed = true;
+                        continue;
+                    }
+                }
+                out_lines.push(line.to_string());
+            }
+            if changed {
+                let mut rebuilt = out_lines.join("\n");
+                rebuilt.push('\n');
+                let _ = std::fs::write(&ini_path, rebuilt);
+            }
+        }
+    }
 }

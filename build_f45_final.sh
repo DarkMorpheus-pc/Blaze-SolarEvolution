@@ -96,6 +96,7 @@ grep -q 'spawn-at-startup "/usr/libexec/blazeos-wayland-session-ready"' "$OVERLA
 grep -q 'spawn-at-startup "/usr/libexec/blazeos-wayland-session-ready"' "$OVERLAY/usr/share/solarui/niri.kdl"
 python3 -c 'compile(open("'"$OVERLAY/usr/bin/blaze-setup"'", encoding="utf-8").read(), "blaze-setup", "exec")'
 python3 -c 'compile(open("'"$OVERLAY/usr/libexec/blazeos-update-notifier"'", encoding="utf-8").read(), "blazeos-update-notifier", "exec")'
+python3 -c 'compile(open("'"$OVERLAY/usr/libexec/blazeos-wallpaper-portal"'", encoding="utf-8").read(), "blazeos-wallpaper-portal", "exec")'
 python3 -c 'compile(open("'"$OVERLAY/usr/bin/berp-recovery-gui"'", encoding="utf-8").read(), "berp-recovery-gui", "exec")'
 python3 -c 'compile(open("'"$OVERLAY/usr/bin/blaze-style-center"'", encoding="utf-8").read(), "blaze-style-center", "exec")'
 python3 -c 'compile(open("'"$OVERLAY/usr/bin/blaze-gamezone-browser"'", encoding="utf-8").read(), "blaze-gamezone-browser", "exec")'
@@ -445,6 +446,11 @@ chmod 4755 "$ROOTFS/usr/bin/chsh" 2>/dev/null || true
 chmod 4755 "$ROOTFS/usr/bin/chfn" 2>/dev/null || true
 chmod 4755 "$ROOTFS/usr/bin/newgrp" 2>/dev/null || true
 chmod 4755 "$ROOTFS/usr/bin/userhelper" 2>/dev/null || true
+chmod 4755 "$ROOTFS/usr/bin/fusermount3" 2>/dev/null || true
+chmod 4755 "$ROOTFS/usr/bin/fusermount" 2>/dev/null || true
+chmod 4755 "$ROOTFS/usr/bin/fusermount-glusterfs" 2>/dev/null || true
+chmod 4755 "$ROOTFS/usr/bin/mount.nfs" 2>/dev/null || true
+chmod 4755 "$ROOTFS/usr/libexec/spice-gtk-x86_64/spice-client-glib-usb-acl-helper" 2>/dev/null || true
 chmod 4755 "$ROOTFS/usr/lib/polkit-1/polkit-agent-helper-1" 2>/dev/null || true
 DBUS_GID=$(grep "^dbus:" "$ROOTFS/etc/group" 2>/dev/null | cut -d: -f3 | head -n1 || true)
 chown "0:${DBUS_GID:-81}" "$ROOTFS/usr/libexec/dbus-1/dbus-daemon-launch-helper" 2>/dev/null || true
@@ -455,6 +461,7 @@ if [ -n "$POLKIT_UID" ] && [ -d "$ROOTFS/etc/polkit-1/rules.d" ]; then
     chown "${POLKIT_UID}:${POLKIT_GID:-$POLKIT_UID}" "$ROOTFS/etc/polkit-1/rules.d" 2>/dev/null || true
     chmod 0750 "$ROOTFS/etc/polkit-1/rules.d" 2>/dev/null || true
 fi
+chmod 0755 "$ROOTFS/usr/bin/newuidmap" "$ROOTFS/usr/bin/newgidmap" 2>/dev/null || true
 setcap cap_setuid+ep "$ROOTFS/usr/bin/newuidmap" 2>/dev/null || chmod 4755 "$ROOTFS/usr/bin/newuidmap" 2>/dev/null || true
 setcap cap_setgid+ep "$ROOTFS/usr/bin/newgidmap" 2>/dev/null || chmod 4755 "$ROOTFS/usr/bin/newgidmap" 2>/dev/null || true
 chmod 4755 "$ROOTFS/opt/FireHub/chrome-sandbox" 2>/dev/null || true
@@ -464,6 +471,8 @@ chmod 2755 "$ROOTFS/usr/bin/crontab" 2>/dev/null || true
 chmod 2755 "$ROOTFS/usr/bin/at" 2>/dev/null || true
 chmod 2755 "$ROOTFS/usr/bin/chage" 2>/dev/null || true
 chmod 2755 "$ROOTFS/usr/libexec/utempter/utempter" 2>/dev/null || true
+chmod 2755 "$ROOTFS/usr/bin/plocate" 2>/dev/null || true
+chmod 2755 "$ROOTFS/usr/bin/lockdev" 2>/dev/null || true
 echo "  -> Enforcing OOBE blaze-setup & sddm account / shadow / group / home integrity..."
 grep -q "^sddm:" "$ROOTFS/etc/passwd" || echo "sddm:x:962:962:SDDM Greeter Account:/var/lib/sddm:/usr/sbin/nologin" >> "$ROOTFS/etc/passwd"
 grep -q "^blaze-setup:" "$ROOTFS/etc/passwd" || echo "blaze-setup:x:961:961:BlazeOS Setup Assistant:/var/lib/blaze-setup:/bin/bash" >> "$ROOTFS/etc/passwd"
@@ -717,6 +726,7 @@ for bin_path in \
     "$ROOTFS/etc/kernel/install.d/99-zz-blaze-identity.install" \
     "$ROOTFS/usr/libexec/blazeos-provision-bere-vault" \
     "$ROOTFS/usr/libexec/blazeos-update-notifier" \
+    "$ROOTFS/usr/libexec/blazeos-wallpaper-portal" \
     "$ROOTFS/usr/libexec/blaze-oobe-session" \
     "$ROOTFS/usr/lib/dracut/modules.d/99blaze-bere/module-setup.sh" \
     "$ROOTFS/usr/lib/dracut/modules.d/99blaze-bere/blaze-emergency-hook.sh" \

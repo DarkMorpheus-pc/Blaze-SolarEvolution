@@ -521,6 +521,44 @@ fn remove_if_we10x_managed_css(path: &Path) {
     }
 }
 
+fn is_icon_theme_installed(theme_name: &str) -> bool {
+    let clean = theme_name.trim().trim_matches('\'').trim_matches('"');
+    if clean.is_empty() {
+        return false;
+    }
+    let mut dirs = vec![
+        PathBuf::from("/usr/share/icons"),
+        PathBuf::from("/usr/local/share/icons"),
+    ];
+    if let Ok(home) = std::env::var("HOME") {
+        let hp = PathBuf::from(home);
+        dirs.push(hp.join(".local/share/icons"));
+        dirs.push(hp.join(".icons"));
+    }
+    dirs.into_iter()
+        .any(|base| base.join(clean).join("index.theme").is_file())
+}
+
+pub fn default_installed_icon_theme() -> &'static str {
+    if is_icon_theme_installed("Papirus-Dark") {
+        "Papirus-Dark"
+    } else {
+        "Adwaita"
+    }
+}
+
+fn clean_icon_theme_setting(raw: Option<String>) -> Option<String> {
+    let fallback = format!("'{}'", default_installed_icon_theme());
+    raw.map(|v| {
+        let bare = v.trim().trim_matches('\'');
+        if bare.eq_ignore_ascii_case("We10X") || !is_icon_theme_installed(bare) {
+            fallback.clone()
+        } else {
+            v
+        }
+    })
+}
+
 pub fn enter_we10x_profile_in_paths(
     home: &Path,
     niri_cfg_path: &Path,
@@ -571,13 +609,7 @@ pub fn enter_we10x_profile_in_paths_with_options(
         } else {
             None
         };
-        let clean_icon_theme = raw_icon_theme.map(|v| {
-            if v.trim_matches('\'').eq_ignore_ascii_case("We10X") {
-                "'Papirus-Dark'".to_string()
-            } else {
-                v
-            }
-        });
+        let clean_icon_theme = clean_icon_theme_setting(raw_icon_theme);
 
         let raw_btn_layout = if apply_system_side_effects {
             read_gsetting("org.gnome.desktop.wm.preferences", "button-layout")
@@ -806,11 +838,13 @@ pub fn leave_we10x_profile_in_paths(
                     });
                 }
             }
-            if let Some(ref v) = snap.gtk_icon_theme {
-                set_gsetting("org.gnome.desktop.interface", "icon-theme", v);
-            } else {
-                set_gsetting("org.gnome.desktop.interface", "icon-theme", "'Papirus-Dark'");
-            }
+            let restored_icon_theme = snap
+                .gtk_icon_theme
+                .as_deref()
+                .filter(|v| is_icon_theme_installed(v))
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| format!("'{}'", default_installed_icon_theme()));
+            set_gsetting("org.gnome.desktop.interface", "icon-theme", &restored_icon_theme);
             if let Some(ref v) = snap.gtk_theme {
                 set_gsetting("org.gnome.desktop.interface", "gtk-theme", v);
             }
@@ -848,7 +882,7 @@ pub fn leave_we10x_profile_in_paths(
                     "set",
                     "org.gnome.desktop.interface",
                     "icon-theme",
-                    "Papirus-Dark",
+                    default_installed_icon_theme(),
                 ])
                 .status();
             let _ = std::process::Command::new("gsettings")

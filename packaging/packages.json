@@ -228,7 +228,10 @@
    "/usr/share/pixmaps/blaze-logo.png",
    "/usr/share/pixmaps/solar-logo.png",
    "/usr/share/plymouth/themes/blazeos",
+   "/usr/libexec/blazeos-wallpaper-portal",
+   "/usr/share/dbus-1/services/org.blazeos.WallpaperPortal.service",
    "/usr/share/wayland-sessions/solarui.desktop",
+   "/usr/share/xdg-desktop-portal/portals/blazeos.portal",
    "/usr/share/xdg-desktop-portal/solarui-portals.conf"
   ],
   "req": [

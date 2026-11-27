@@ -1,0 +1,4 @@
+[portal]
+DBusName=org.blazeos.WallpaperPortal
+Interfaces=org.freedesktop.impl.portal.Wallpaper;
+UseIn=SolarUI;niri;

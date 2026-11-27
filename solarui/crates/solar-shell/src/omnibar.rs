@@ -15,14 +15,15 @@ use gtk4::{
 };
 use solar_common::{BlazeAiProvider, CompanionExpression, OmnibarConfig, SolarConfig};
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::process::Command;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use crate::apps::{scan_desktop_applications, AppInfo};
 use crate::blazeai::{
-    build_web_search_url, curated_models_for_provider, execute_suggested_action,
-    extract_user_memory_command, migrate_legacy_api_key_if_needed, probe_ollama_models,
+    build_web_search_url, execute_suggested_action, extract_user_memory_command,
+    migrate_legacy_api_key_if_needed, pick_preferred_live_model, probe_provider_models,
     resolve_dispatch_mode, send_chat_completion, AiDispatchMode, BlazeAiSecrets,
     ChatCompletionOutcome, ChatMessage, ChatRole, LocalMemoryStore,
 };
@@ -534,6 +535,14 @@ pub fn format_model_chip_label(cfg: &OmnibarConfig) -> String {
     }
 }
 
+pub fn format_model_chip_for_state(cfg: &OmnibarConfig, secrets: &BlazeAiSecrets) -> String {
+    if cfg.ai_provider.requires_api_key() && !secrets.has_key_for(cfg.ai_provider) {
+        "API anahtarı ekle".to_string()
+    } else {
+        format_model_chip_label(cfg)
+    }
+}
+
 pub fn blazeai_placeholder_text(cfg: &OmnibarConfig, secrets: &BlazeAiSecrets) -> &'static str {
     if !cfg.ai_provider.requires_api_key() || secrets.has_key_for(cfg.ai_provider) {
         "BlazeAI'a sor veya hatırla: not yaz"
@@ -961,9 +970,13 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
 
     let model_btn = Button::new();
     model_btn.add_css_class("model-pill-btn");
-    model_btn.set_tooltip_text(Some("Sağlayıcı ve model seç"));
+    model_btn.set_tooltip_text(Some("Desteklenen modelleri seç"));
     let model_btn_box = GtkBox::new(Orientation::Horizontal, 4);
-    let model_btn_lbl = Label::new(Some(&format_model_chip_label(&initial_cfg.omnibar)));
+    let initial_secrets = BlazeAiSecrets::load();
+    let model_btn_lbl = Label::new(Some(&format_model_chip_for_state(
+        &initial_cfg.omnibar,
+        &initial_secrets,
+    )));
     model_btn_lbl.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     model_btn_lbl.set_max_width_chars(18);
     model_btn_box.append(&model_btn_lbl);
@@ -1132,7 +1145,7 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
         Rc::new(move || {
             let cfg = SolarConfig::load();
             let secrets = BlazeAiSecrets::load();
-            model_lbl.set_text(&format_model_chip_label(&cfg.omnibar));
+            model_lbl.set_text(&format_model_chip_for_state(&cfg.omnibar, &secrets));
             b_entry.set_placeholder_text(Some(blazeai_placeholder_text(&cfg.omnibar, &secrets)));
             rebuild_chat_view(
                 &chat_b,
@@ -1227,7 +1240,7 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
     gear_box.append(&gear_model_lbl);
 
     let gear_model_entry = Entry::new();
-    gear_model_entry.set_placeholder_text(Some("gemini-2.5-flash"));
+    gear_model_entry.set_placeholder_text(Some("gemini-3.8-flash"));
     gear_box.append(&gear_model_entry);
 
     let gear_url_lbl = Label::new(Some("Özel API veya Ollama adresi"));
@@ -1249,6 +1262,19 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
         .show_peek_icon(true)
         .build();
     gear_box.append(&gear_key_entry);
+
+    let gear_probe_status_lbl = Label::new(Some(
+        "API anahtarı girildiğinde destekli modeller otomatik listelenir",
+    ));
+    gear_probe_status_lbl.add_css_class("blazeai-msg-note");
+    gear_probe_status_lbl.set_wrap(true);
+    gear_probe_status_lbl.set_xalign(0.0);
+    gear_probe_status_lbl.set_halign(gtk4::Align::Start);
+    gear_box.append(&gear_probe_status_lbl);
+
+    let discovered_models: Rc<RefCell<HashMap<BlazeAiProvider, Result<Vec<String>, String>>>> =
+        Rc::new(RefCell::new(HashMap::new()));
+    let probe_generation = Rc::new(Cell::new(0u64));
 
     let chk_persist = CheckButton::with_label("Sohbet geçmişini koru");
     let chk_local_mem = CheckButton::with_label("Uzun vadeli yerel hafıza");
@@ -1376,12 +1402,321 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
     };
     sync_gear_fields();
 
+    // Model Selector Popover (strictly lists live supported models for configured keys / running Ollama)
+    let model_popover = Popover::new();
+    model_popover.set_parent(&model_btn);
+    model_popover.set_has_arrow(true);
+    model_popover.add_css_class("companion-popover");
+    {
+        let pop_clean = model_popover.downgrade();
+        model_btn.connect_destroy(move |_| {
+            if let Some(p) = pop_clean.upgrade() {
+                p.unparent();
+            }
+        });
+    }
+
+    let model_list_wrap = GtkBox::new(Orientation::Vertical, 4);
+    model_list_wrap.add_css_class("companion-popover-box");
+    model_list_wrap.set_size_request(272, -1);
+    let model_scroll = ScrolledWindow::builder()
+        .hscrollbar_policy(gtk4::PolicyType::Never)
+        .vscrollbar_policy(gtk4::PolicyType::Automatic)
+        .propagate_natural_height(true)
+        .max_content_height(360)
+        .build();
+    model_scroll.set_child(Some(&model_list_wrap));
+    model_popover.set_child(Some(&model_scroll));
+
+    let populate_model_popover: Rc<dyn Fn(bool)> = {
+        let wrap = model_list_wrap.clone();
+        let pop = model_popover.clone();
+        let gear_pop = gear_popover.clone();
+        let refresh_c = refresh_ui_state.clone();
+        let sync_g = sync_gear_fields.clone();
+        let cache_rc = discovered_models.clone();
+        Rc::new(move |is_loading: bool| {
+            while let Some(ch) = wrap.first_child() {
+                wrap.remove(&ch);
+            }
+            let cfg = SolarConfig::load();
+            let secrets = BlazeAiSecrets::load();
+            let active_p = cfg.omnibar.ai_provider;
+            let active_m = cfg.omnibar.effective_ai_model();
+            let cache = cache_rc.borrow();
+
+            let mut visible_providers: Vec<BlazeAiProvider> = BlazeAiProvider::ALL
+                .into_iter()
+                .filter(|p| p.requires_api_key() && secrets.has_key_for(*p))
+                .collect();
+
+            let ollama_live_has_models = matches!(
+                cache.get(&BlazeAiProvider::Ollama),
+                Some(Ok(list)) if !list.is_empty()
+            );
+            if ollama_live_has_models || active_p == BlazeAiProvider::Ollama {
+                visible_providers.push(BlazeAiProvider::Ollama);
+            }
+
+            if visible_providers.is_empty() {
+                let title = Label::new(Some(if is_loading {
+                    "Modeller kontrol ediliyor..."
+                } else {
+                    "Henüz API anahtarı eklenmedi"
+                }));
+                title.add_css_class("companion-section-lbl");
+                title.set_halign(gtk4::Align::Start);
+                wrap.append(&title);
+
+                let note = Label::new(Some(
+                    "Desteklenen modeller, API anahtarını girdiğinde veya yerel Ollama çalıştırdığında burada otomatik listelenir.",
+                ));
+                note.add_css_class("blazeai-msg-note");
+                note.set_wrap(true);
+                note.set_xalign(0.0);
+                note.set_halign(gtk4::Align::Start);
+                wrap.append(&note);
+
+                let open_gear_btn = Button::with_label("API anahtarı gir");
+                open_gear_btn.add_css_class("companion-reset-btn");
+                open_gear_btn.set_margin_top(6);
+                let pop_c = pop.clone();
+                let gpop_c = gear_pop.clone();
+                let sync_c = sync_g.clone();
+                open_gear_btn.connect_clicked(move |_| {
+                    pop_c.popdown();
+                    sync_c();
+                    gpop_c.popup();
+                });
+                wrap.append(&open_gear_btn);
+                return;
+            }
+
+            for provider in visible_providers {
+                let hdr = Label::new(Some(provider.display_name()));
+                hdr.add_css_class("companion-section-lbl");
+                hdr.set_halign(gtk4::Align::Start);
+                hdr.set_margin_top(4);
+                wrap.append(&hdr);
+
+                match cache.get(&provider) {
+                    None => {
+                        let loading_lbl = Label::new(Some(if is_loading {
+                            "Desteklenen modeller yükleniyor..."
+                        } else {
+                            "Liste hazırlanıyor..."
+                        }));
+                        loading_lbl.add_css_class("blazeai-msg-note");
+                        loading_lbl.set_halign(gtk4::Align::Start);
+                        wrap.append(&loading_lbl);
+                    }
+                    Some(Err(err_msg)) => {
+                        let err_lbl = Label::new(Some(&format!(
+                            "Modeller alınamadı: {}",
+                            truncate_chars(err_msg, 110)
+                        )));
+                        err_lbl.add_css_class("blazeai-msg-note");
+                        err_lbl.set_wrap(true);
+                        err_lbl.set_xalign(0.0);
+                        err_lbl.set_halign(gtk4::Align::Start);
+                        wrap.append(&err_lbl);
+                    }
+                    Some(Ok(models)) if models.is_empty() => {
+                        let empty_lbl = Label::new(Some(if provider == BlazeAiProvider::Ollama {
+                            "Yerel Ollama modeli bulunamadı"
+                        } else {
+                            "Bu anahtar için uyumlu sohbet modeli bulunamadı"
+                        }));
+                        empty_lbl.add_css_class("blazeai-msg-note");
+                        empty_lbl.set_wrap(true);
+                        empty_lbl.set_xalign(0.0);
+                        empty_lbl.set_halign(gtk4::Align::Start);
+                        wrap.append(&empty_lbl);
+                    }
+                    Some(Ok(models)) => {
+                        for model_name in models {
+                            let is_cur = active_p == provider && active_m == *model_name;
+                            let btn = Button::new();
+                            btn.add_css_class("companion-opt-btn");
+                            if is_cur {
+                                btn.add_css_class("companion-opt-active");
+                            }
+                            let row = GtkBox::new(Orientation::Horizontal, 8);
+                            let lbl = Label::new(Some(model_name));
+                            lbl.add_css_class("companion-banner-desc");
+                            lbl.set_hexpand(true);
+                            lbl.set_halign(gtk4::Align::Start);
+                            row.append(&lbl);
+                            if is_cur {
+                                row.append(&build_symbolic_icon(
+                                    &["object-select-symbolic"],
+                                    "omnibar-header-icon",
+                                ));
+                            }
+                            btn.set_child(Some(&row));
+
+                            let pop_c = pop.clone();
+                            let refresh_in = refresh_c.clone();
+                            let sync_in = sync_g.clone();
+                            let m_owned = model_name.clone();
+                            btn.connect_clicked(move |_| {
+                                let _ = SolarConfig::update(|c| {
+                                    let switched_provider = c.omnibar.ai_provider != provider;
+                                    c.omnibar.ai_provider = provider;
+                                    c.omnibar.ai_model = m_owned.clone();
+                                    if switched_provider {
+                                        c.omnibar.ai_custom_base_url =
+                                            provider.default_base_url().to_string();
+                                    }
+                                });
+                                sync_in();
+                                refresh_in();
+                                pop_c.popdown();
+                            });
+                            wrap.append(&btn);
+                        }
+                    }
+                }
+            }
+        })
+    };
+
+    let schedule_active_provider_probe: Rc<dyn Fn(u64)> = {
+        let gen_rc = probe_generation.clone();
+        let cache_rc = discovered_models.clone();
+        let status_lbl = gear_probe_status_lbl.clone();
+        let sync_flag = syncing_gear.clone();
+        let m_entry = gear_model_entry.clone();
+        let refresh_c = refresh_ui_state.clone();
+        let pop_fill = populate_model_popover.clone();
+        let pop_w = model_popover.downgrade();
+        let cloud_c = fluid_cloud.clone();
+
+        Rc::new(move |delay_ms: u64| {
+            let my_gen = gen_rc.get().wrapping_add(1);
+            gen_rc.set(my_gen);
+
+            let gen_in = gen_rc.clone();
+            let cache_in = cache_rc.clone();
+            let status_in = status_lbl.clone();
+            let sync_in = sync_flag.clone();
+            let m_entry_in = m_entry.clone();
+            let refresh_in = refresh_c.clone();
+            let pop_fill_in = pop_fill.clone();
+            let pop_w_in = pop_w.clone();
+            let cloud_in = cloud_c.clone();
+
+            glib::timeout_add_local_once(std::time::Duration::from_millis(delay_ms), move || {
+                if gen_in.get() != my_gen {
+                    return;
+                }
+                let cfg = SolarConfig::load();
+                let secrets = BlazeAiSecrets::load();
+                let provider = cfg.omnibar.ai_provider;
+                let key = secrets.key_for(provider).trim().to_string();
+
+                if provider.requires_api_key() && key.is_empty() {
+                    cache_in.borrow_mut().remove(&provider);
+                    status_in.set_text(
+                        "API anahtarı girildiğinde destekli modeller otomatik listelenir",
+                    );
+                    refresh_in();
+                    if pop_w_in.upgrade().is_some_and(|p| p.is_visible()) {
+                        pop_fill_in(false);
+                    }
+                    return;
+                }
+                if provider.requires_api_key() && key.len() < 8 {
+                    status_in.set_text("Anahtar tamamlandığında modeller sorgulanacak...");
+                    return;
+                }
+
+                let base_url = cfg.omnibar.effective_ai_base_url();
+                status_in.set_text(&format!(
+                    "{} destekli modelleri sorgulanıyor...",
+                    provider.display_name()
+                ));
+
+                let (tx, rx) = async_channel::bounded::<Result<Vec<String>, String>>(1);
+                std::thread::spawn(move || {
+                    let res = probe_provider_models(provider, &key, &base_url);
+                    let _ = tx.send_blocking(res);
+                });
+
+                glib::spawn_future_local(async move {
+                    if let Ok(res) = rx.recv().await {
+                        if gen_in.get() != my_gen {
+                            return;
+                        }
+                        match &res {
+                            Ok(models) if !models.is_empty() => {
+                                let cur_cfg = SolarConfig::load();
+                                if cur_cfg.omnibar.ai_provider == provider {
+                                    if let Some(chosen) = pick_preferred_live_model(
+                                        provider,
+                                        &cur_cfg.omnibar.effective_ai_model(),
+                                        models,
+                                    ) {
+                                        if chosen != cur_cfg.omnibar.ai_model {
+                                            let _ = SolarConfig::update(|c| {
+                                                if c.omnibar.ai_provider == provider {
+                                                    c.omnibar.ai_model = chosen.clone();
+                                                }
+                                            });
+                                            sync_in.set(true);
+                                            m_entry_in.set_text(&chosen);
+                                            sync_in.set(false);
+                                        }
+                                        status_in.set_text(&format!(
+                                            "{} destekli model bulundu ({})",
+                                            models.len(),
+                                            chosen
+                                        ));
+                                    } else {
+                                        status_in.set_text(&format!(
+                                            "{} destekli model bulundu",
+                                            models.len()
+                                        ));
+                                    }
+                                }
+                                cloud_in.pulse(
+                                    "Destekli modeller yüklendi",
+                                    FluidCloudTone::Success,
+                                    false,
+                                );
+                            }
+                            Ok(_) => {
+                                status_in.set_text(if provider == BlazeAiProvider::Ollama {
+                                    "Yerel Ollama modeli bulunamadı"
+                                } else {
+                                    "Bu anahtar için destekli sohbet modeli bulunamadı"
+                                });
+                            }
+                            Err(err) => {
+                                status_in.set_text(&format!(
+                                    "Modeller alınamadı: {}",
+                                    truncate_chars(err, 90)
+                                ));
+                            }
+                        }
+                        cache_in.borrow_mut().insert(provider, res);
+                        refresh_in();
+                        if pop_w_in.upgrade().is_some_and(|p| p.is_visible()) {
+                            pop_fill_in(false);
+                        }
+                    }
+                });
+            });
+        })
+    };
+
     {
         let sync_flag = syncing_gear.clone();
         let m_entry = gear_model_entry.clone();
         let u_entry = gear_url_entry.clone();
         let k_entry = gear_key_entry.clone();
         let refresh_c = refresh_ui_state.clone();
+        let probe_fn = schedule_active_provider_probe.clone();
         provider_dropdown.connect_selected_notify(move |dd| {
             if sync_flag.get() {
                 return;
@@ -1409,6 +1744,7 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
                 k_entry.set_sensitive(provider.requires_api_key());
                 sync_flag.set(false);
                 refresh_c();
+                probe_fn(120);
             }
         });
     }
@@ -1434,6 +1770,7 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
 
     {
         let sync_flag = syncing_gear.clone();
+        let probe_fn = schedule_active_provider_probe.clone();
         gear_url_entry.connect_changed(move |e| {
             if sync_flag.get() {
                 return;
@@ -1442,12 +1779,14 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
             let _ = SolarConfig::update(|c| {
                 c.omnibar.ai_custom_base_url = txt;
             });
+            probe_fn(500);
         });
     }
 
     {
         let sync_flag = syncing_gear.clone();
         let refresh_c = refresh_ui_state.clone();
+        let probe_fn = schedule_active_provider_probe.clone();
         gear_key_entry.connect_changed(move |e| {
             if sync_flag.get() {
                 return;
@@ -1460,6 +1799,7 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
             secrets.set_key_for(cfg.omnibar.ai_provider, &e.text());
             let _ = secrets.save();
             refresh_c();
+            probe_fn(450);
         });
     }
 
@@ -1556,114 +1896,33 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
         });
     }
 
-    // Model Selector Popover
-    let model_popover = Popover::new();
-    model_popover.set_parent(&model_btn);
-    model_popover.set_has_arrow(true);
-    model_popover.add_css_class("companion-popover");
-    {
-        let pop_clean = model_popover.downgrade();
-        model_btn.connect_destroy(move |_| {
-            if let Some(p) = pop_clean.upgrade() {
-                p.unparent();
-            }
-        });
-    }
-
-    let model_list_wrap = GtkBox::new(Orientation::Vertical, 4);
-    model_list_wrap.add_css_class("companion-popover-box");
-    model_list_wrap.set_size_request(260, -1);
-    let model_scroll = ScrolledWindow::builder()
-        .hscrollbar_policy(gtk4::PolicyType::Never)
-        .vscrollbar_policy(gtk4::PolicyType::Automatic)
-        .propagate_natural_height(true)
-        .max_content_height(360)
-        .build();
-    model_scroll.set_child(Some(&model_list_wrap));
-    model_popover.set_child(Some(&model_scroll));
-
-    let populate_model_popover = {
-        let wrap = model_list_wrap.clone();
-        let pop = model_popover.clone();
-        let refresh_c = refresh_ui_state.clone();
-        let sync_g = sync_gear_fields.clone();
-        Rc::new(move |extra_ollama: Vec<String>| {
-            while let Some(ch) = wrap.first_child() {
-                wrap.remove(&ch);
-            }
-            let cfg = SolarConfig::load();
-            let active_p = cfg.omnibar.ai_provider;
-            let active_m = cfg.omnibar.effective_ai_model();
-
-            for provider in BlazeAiProvider::ALL {
-                let hdr = Label::new(Some(provider.display_name()));
-                hdr.add_css_class("companion-section-lbl");
-                hdr.set_halign(gtk4::Align::Start);
-                hdr.set_margin_top(4);
-                wrap.append(&hdr);
-
-                let mut models: Vec<String> = curated_models_for_provider(provider)
-                    .iter()
-                    .map(|m| (*m).to_string())
-                    .collect();
-                if provider == BlazeAiProvider::Ollama {
-                    for om in &extra_ollama {
-                        if !models.contains(om) {
-                            models.push(om.clone());
-                        }
-                    }
-                }
-
-                for model_name in models {
-                    let is_cur = active_p == provider && active_m == model_name;
-                    let btn = Button::new();
-                    btn.add_css_class("companion-opt-btn");
-                    if is_cur {
-                        btn.add_css_class("companion-opt-active");
-                    }
-                    let row = GtkBox::new(Orientation::Horizontal, 8);
-                    let lbl = Label::new(Some(&model_name));
-                    lbl.add_css_class("companion-banner-desc");
-                    lbl.set_hexpand(true);
-                    lbl.set_halign(gtk4::Align::Start);
-                    row.append(&lbl);
-                    if is_cur {
-                        row.append(&build_symbolic_icon(
-                            &["object-select-symbolic"],
-                            "omnibar-header-icon",
-                        ));
-                    }
-                    btn.set_child(Some(&row));
-
-                    let pop_c = pop.clone();
-                    let refresh_in = refresh_c.clone();
-                    let sync_in = sync_g.clone();
-                    let m_owned = model_name.clone();
-                    btn.connect_clicked(move |_| {
-                        let _ = SolarConfig::update(|c| {
-                            c.omnibar.ai_provider = provider;
-                            c.omnibar.ai_model = m_owned.clone();
-                            c.omnibar.ai_custom_base_url = provider.default_base_url().to_string();
-                        });
-                        sync_in();
-                        refresh_in();
-                        pop_c.popdown();
-                    });
-                    wrap.append(&btn);
-                }
-            }
-        })
-    };
-
     {
         let pop = model_popover.clone();
         let pop_fill = populate_model_popover.clone();
+        let cache_rc = discovered_models.clone();
+        let refresh_c = refresh_ui_state.clone();
+        let sync_g = sync_gear_fields.clone();
         model_btn.connect_clicked(move |_| {
-            pop_fill(Vec::new());
-            pop.popup();
-
-            // Probe local Ollama models asynchronously without blocking UI
             let cfg = SolarConfig::load();
+            let secrets = BlazeAiSecrets::load();
+
+            // Build targets strictly for providers with configured API keys (+ Ollama auto-detection)
+            let mut targets: Vec<(BlazeAiProvider, String, String)> = Vec::new();
+            for p in BlazeAiProvider::ALL {
+                if p.requires_api_key() {
+                    let key = secrets.key_for(p).trim().to_string();
+                    if !key.is_empty() {
+                        let base = if cfg.omnibar.ai_provider == p {
+                            cfg.omnibar.effective_ai_base_url()
+                        } else {
+                            p.default_base_url().to_string()
+                        };
+                        targets.push((p, key, base));
+                    } else {
+                        cache_rc.borrow_mut().remove(&p);
+                    }
+                }
+            }
             let ollama_url = if cfg.omnibar.ai_provider == BlazeAiProvider::Ollama
                 && !cfg.omnibar.ai_custom_base_url.trim().is_empty()
             {
@@ -1671,21 +1930,85 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
             } else {
                 BlazeAiProvider::Ollama.default_base_url().to_string()
             };
-            let (tx, rx) = async_channel::bounded::<Vec<String>>(1);
+            targets.push((BlazeAiProvider::Ollama, String::new(), ollama_url));
+
+            // Always refresh any uncached or previously errored configured provider
+            let pending_targets: Vec<(BlazeAiProvider, String, String)> = {
+                let cache = cache_rc.borrow();
+                targets
+                    .into_iter()
+                    .filter(|(p, _, _)| !matches!(cache.get(p), Some(Ok(v)) if !v.is_empty()))
+                    .collect()
+            };
+
+            pop_fill(!pending_targets.is_empty());
+            pop.popup();
+
+            if pending_targets.is_empty() {
+                return;
+            }
+
+            let (tx, rx) =
+                async_channel::bounded::<Vec<(BlazeAiProvider, Result<Vec<String>, String>)>>(1);
             std::thread::spawn(move || {
-                let models = probe_ollama_models(&ollama_url).unwrap_or_default();
-                let _ = tx.send_blocking(models);
+                let mut results = Vec::with_capacity(pending_targets.len());
+                for (p, key, base) in pending_targets {
+                    let res = probe_provider_models(p, &key, &base);
+                    results.push((p, res));
+                }
+                let _ = tx.send_blocking(results);
             });
-            let pop_fill_async = pop_fill.clone();
+
+            let cache_done = cache_rc.clone();
+            let pop_fill_done = pop_fill.clone();
             let pop_weak = pop.downgrade();
+            let refresh_done = refresh_c.clone();
+            let sync_done = sync_g.clone();
             glib::spawn_future_local(async move {
-                if let Ok(models) = rx.recv().await {
-                    if !models.is_empty() && pop_weak.upgrade().is_some_and(|p| p.is_visible()) {
-                        pop_fill_async(models);
+                if let Ok(results) = rx.recv().await {
+                    let cur_cfg = SolarConfig::load();
+                    let mut model_upgraded = false;
+                    {
+                        let mut cache = cache_done.borrow_mut();
+                        for (p, res) in results {
+                            if p == cur_cfg.omnibar.ai_provider {
+                                if let Ok(ref models) = res {
+                                    if let Some(chosen) = pick_preferred_live_model(
+                                        p,
+                                        &cur_cfg.omnibar.effective_ai_model(),
+                                        models,
+                                    ) {
+                                        if chosen != cur_cfg.omnibar.ai_model {
+                                            let _ = SolarConfig::update(|c| {
+                                                if c.omnibar.ai_provider == p {
+                                                    c.omnibar.ai_model = chosen.clone();
+                                                }
+                                            });
+                                            model_upgraded = true;
+                                        }
+                                    }
+                                }
+                            }
+                            cache.insert(p, res);
+                        }
+                    }
+                    if model_upgraded {
+                        sync_done();
+                        refresh_done();
+                    }
+                    if pop_weak.upgrade().is_some_and(|p| p.is_visible()) {
+                        pop_fill_done(false);
                     }
                 }
             });
         });
+    }
+
+    // Quietly warm up live supported models on startup when a key is already saved
+    if !initial_cfg.omnibar.ai_provider.requires_api_key()
+        || initial_secrets.has_key_for(initial_cfg.omnibar.ai_provider)
+    {
+        schedule_active_provider_probe(150);
     }
 
     // =========================================================================
@@ -1869,8 +2192,16 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
                         cleaned_text,
                         extracted_facts,
                         suggested_actions,
+                        upgraded_model,
                         ..
                     })) => {
+                        if let Some(new_model) = upgraded_model {
+                            let _ = SolarConfig::update(|c| {
+                                if c.omnibar.ai_provider == BlazeAiProvider::Gemini {
+                                    c.omnibar.ai_model = new_model.clone();
+                                }
+                            });
+                        }
                         {
                             let mut st = st_done.borrow_mut();
                             if latest_cfg.omnibar.ai_local_memory_enabled {
@@ -3031,7 +3362,17 @@ mod tests {
             OmnibarItemType::SystemAction(_, _, cmd) if cmd == "akrep-ui"
         )));
 
-        // Without API key on Gemini, web search shows up while AiQuery does not
+        // Without API key on Gemini, web search shows up, model chip prompts for key, and AiQuery does not
+        assert_eq!(
+            format_model_chip_for_state(&cfg.omnibar, &secrets),
+            "API anahtarı ekle"
+        );
+        let mut with_key = BlazeAiSecrets::default();
+        with_key.set_key_for(BlazeAiProvider::Gemini, "AIza-test-key");
+        assert_eq!(
+            format_model_chip_for_state(&cfg.omnibar, &with_key),
+            "gemini-3.8-flash"
+        );
         let no_key_items = generate_omnibar_items_with_cfg("niri klavye", &[], &cfg, &secrets);
         assert!(no_key_items
             .iter()

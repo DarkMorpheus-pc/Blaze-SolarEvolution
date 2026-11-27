@@ -524,9 +524,14 @@ volume = 0.6
 
 
                 # 2. GTK 3 & GTK 4 Configuration + We10X Initial Profile Provisioning
+                default_icon_theme = (
+                    "Papirus-Dark"
+                    if os.path.isfile("/usr/share/icons/Papirus-Dark/index.theme")
+                    else "Adwaita"
+                )
                 if layout == "we10x":
                     # Provision clean stock PreWe10xSnapshot + We10X niri.kdl + sharp GTK CSS + We10X settings.ini
-                    # so first login boots straight into We10X AND switching later restores stock Papirus-Dark/SolarUI!
+                    # so first login boots straight into We10X AND switching later restores stock icon theme/SolarUI!
                     privileged_run(["/usr/bin/solar-shell", "we10x-config", "provision-user", user_home, we10x_mode])
                 else:
                     for gtk_ver in ["gtk-3.0", "gtk-4.0"]:
@@ -535,7 +540,7 @@ volume = 0.6
                         gtk_ini = f"""[Settings]
 gtk-theme-name={gtk_theme}
 gtk-application-prefer-dark-theme={'false' if appearance == 'light' else 'true'}
-gtk-icon-theme-name=Papirus-Dark
+gtk-icon-theme-name={default_icon_theme}
 gtk-font-name=Inter 10
 """
                         privileged_write(os.path.join(gtk_dir, "settings.ini"), gtk_ini)
@@ -550,12 +555,17 @@ gtk-font-name=Inter 10
                 privileged_run(["chown", "-R", f"{username}:{username}", user_home])
 
             # 4. System-wide dconf stock baseline (per-user We10X overrides are managed & reverted by SolarUI)
+            dconf_icon_theme = (
+                "Papirus-Dark"
+                if os.path.isfile("/usr/share/icons/Papirus-Dark/index.theme")
+                else "Adwaita"
+            )
             dconf_dir = "/etc/dconf/db/local.d"
             privileged_run(["mkdir", "-p", dconf_dir])
             dconf_content = f"""[org/gnome/desktop/interface]
 color-scheme='{color_scheme}'
 gtk-theme='{gtk_theme}'
-icon-theme='Papirus-Dark'
+icon-theme='{dconf_icon_theme}'
 """
             privileged_write(os.path.join(dconf_dir, "00-blaze-theme"), dconf_content)
             privileged_run(["dconf", "update"])

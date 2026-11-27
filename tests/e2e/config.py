@@ -95,20 +95,20 @@ def get_niri_validate_binary() -> str | None:
 
 # R1: First-party signed RPM packages in packaging/out/repo/
 EXPECTED_CORE_RPMS = (
-    "blaze-akrep-1.0.0-2.blaze.x86_64.rpm",
-    "blaze-akrep-daemon-1.0.0-2.blaze.x86_64.rpm",
-    "blaze-akrep-ui-1.0.0-2.blaze.x86_64.rpm",
+    "blaze-akrep-1.0.0-3.blaze.x86_64.rpm",
+    "blaze-akrep-daemon-1.0.0-3.blaze.x86_64.rpm",
+    "blaze-akrep-ui-1.0.0-3.blaze.x86_64.rpm",
     "blaze-continuum-0.1.0-1.blaze.x86_64.rpm",
-    "blaze-firehub-5.05.1-1.blaze.x86_64.rpm",
+    "blaze-firehub-5.05.1-2.blaze.x86_64.rpm",
     "blaze-house-2.1.0-1.blaze.x86_64.rpm",
-    "blaze-oobe-5.05.1-1.blaze.noarch.rpm",
+    "blaze-oobe-5.05.1-2.blaze.noarch.rpm",
     "blaze-recovery-5.05.1-2.blaze.x86_64.rpm",
-    "blaze-release-5.05.1-2.blaze.noarch.rpm",
+    "blaze-release-5.05.1-3.blaze.noarch.rpm",
     "blaze-scap-compat-5.05.1-1.blaze.noarch.rpm",
     "blaze-sentinel-0.3.1-3.blaze.x86_64.rpm",
     "blaze-tools-5.05.1-2.blaze.noarch.rpm",
-    "solarui-5.05.1-2.blaze.x86_64.rpm",
-    "solarui-config-5.05.1-2.blaze.noarch.rpm",
+    "solarui-5.05.1-3.blaze.x86_64.rpm",
+    "solarui-config-5.05.1-3.blaze.noarch.rpm",
 )
 EXPECTED_8_RPMS = EXPECTED_CORE_RPMS
 

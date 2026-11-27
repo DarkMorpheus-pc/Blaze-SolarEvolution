@@ -147,7 +147,12 @@ def apply_gnome(preset: dict) -> None:
         gset("org.gnome.shell.extensions.dash-to-dock", "intellihide", "false" if layout == "left" else "true")
         gset("org.gnome.shell.extensions.dash-to-dock", "dash-max-icon-size", "48" if preset["id"] != "focus" else "36")
     if preset["id"] == "blaze":
-        gset("org.gnome.desktop.interface", "icon-theme", "'Papirus-Dark'")
+        icon_theme = (
+            "'Papirus-Dark'"
+            if Path("/usr/share/icons/Papirus-Dark/index.theme").is_file()
+            else "'Adwaita'"
+        )
+        gset("org.gnome.desktop.interface", "icon-theme", icon_theme)
         gset("org.gnome.desktop.interface", "accent-color", "'red'")
 
 

@@ -4,7 +4,7 @@
 
 Name:           blaze-akrep
 Version:        1.0.0
-Release:        2.blaze
+Release:        3.blaze
 Summary:        BlazeOS Akrep Security Center
 License:        GPL-3.0-or-later
 URL:            https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
@@ -98,6 +98,8 @@ fi
 %attr(0644,root,root) /usr/share/applications/tr.com.blazeos.Akrep.desktop
 
 %changelog
+* Fri Nov 27 2026 BlazeOS Team <contact@blazeos.org> - 1.0.0-3.blaze
+- Guard GTK4 icon theme resolution in akrep-ui so symbolic navigation icons fall back to Adwaita when configured theme is not installed
 * Thu Nov 26 2026 BlazeOS Team <contact@blazeos.org> - 1.0.0-2.blaze
 - Add timed and persistent flexible protection overrides, Android ROM/gaming compatibility helpers, Secure Boot/MOK card, and UI unslop polish
 * Wed Nov 25 2026 BlazeOS Team <contact@blazeos.org> - 1.0.0-1.blaze

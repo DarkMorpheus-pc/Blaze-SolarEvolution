@@ -6,7 +6,7 @@
 
 Name:           blaze-firehub
 Version:        5.05.1
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        FireHub unified application store and update companion for BlazeOS
 License:        GPL-3.0-or-later
 URL:            https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
@@ -42,5 +42,8 @@ chmod 4755 %{buildroot}/opt/FireHub/chrome-sandbox 2>/dev/null || :
 /usr/share/icons/hicolor/512x512/apps/firehub.png
 
 %changelog
+* Fri Nov 27 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-2
+- Eliminate all synchronous spawnSync calls in FireHub Electron main process, add single-flight Flatpak cache and batch checkInstalled IPC, and use fast esbuild production minification
+
 * Tue Nov 24 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-1
 - Initial clean RPM packaging of FireHub without secrets or dev caches

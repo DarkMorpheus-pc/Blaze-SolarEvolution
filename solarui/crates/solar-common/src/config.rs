@@ -934,7 +934,7 @@ impl std::str::FromStr for CompanionExpression {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum BlazeAiProvider {
     #[default]
@@ -978,7 +978,7 @@ impl BlazeAiProvider {
 
     pub fn default_model(&self) -> &'static str {
         match self {
-            BlazeAiProvider::Gemini => "gemini-2.5-flash",
+            BlazeAiProvider::Gemini => "gemini-3.8-flash",
             BlazeAiProvider::OpenAi => "gpt-4o-mini",
             BlazeAiProvider::Anthropic => "claude-3-5-sonnet-latest",
             BlazeAiProvider::OpenAiCompatible => "gpt-4o-mini",
@@ -1073,7 +1073,7 @@ fn default_companion_color() -> String {
 }
 
 fn default_ai_model() -> String {
-    "gemini-2.5-flash".to_string()
+    "gemini-3.8-flash".to_string()
 }
 
 impl Default for OmnibarConfig {
@@ -1134,10 +1134,19 @@ impl OmnibarConfig {
 
     pub fn effective_ai_model(&self) -> String {
         let trimmed = self.ai_model.trim();
-        if trimmed.is_empty() {
+        let normalized = if self.ai_provider == BlazeAiProvider::Gemini {
+            trimmed.strip_prefix("models/").unwrap_or(trimmed)
+        } else {
+            trimmed
+        };
+        if normalized.is_empty() {
+            self.ai_provider.default_model().to_string()
+        } else if self.ai_provider == BlazeAiProvider::Gemini
+            && matches!(normalized, "gemini-2.5-flash" | "gemini-2.0-flash")
+        {
             self.ai_provider.default_model().to_string()
         } else {
-            trimmed.to_string()
+            normalized.to_string()
         }
     }
 
@@ -1373,10 +1382,20 @@ enable_web_search = false
         assert_eq!(cfg.omnibar.companion_expression, CompanionExpression::Attentive);
         assert_eq!(cfg.omnibar.companion_color, "#1e1e22");
         assert_eq!(cfg.omnibar.ai_provider, BlazeAiProvider::Gemini);
-        assert_eq!(cfg.omnibar.ai_model, "gemini-2.5-flash");
+        assert_eq!(cfg.omnibar.ai_model, "gemini-3.8-flash");
+        assert_eq!(cfg.omnibar.effective_ai_model(), "gemini-3.8-flash");
         assert!(cfg.omnibar.ai_persist_chat);
         assert!(cfg.omnibar.ai_local_memory_enabled);
         assert!(cfg.omnibar.ai_include_blazeos_guide);
+
+        // Deprecated persisted Gemini 2.5/2.0 Flash defaults auto-upgrade to gemini-3.8-flash
+        let mut legacy_gemini = cfg.omnibar.clone();
+        legacy_gemini.ai_model = "gemini-2.5-flash".to_string();
+        assert_eq!(legacy_gemini.effective_ai_model(), "gemini-3.8-flash");
+        legacy_gemini.ai_model = "models/gemini-2.0-flash".to_string();
+        assert_eq!(legacy_gemini.effective_ai_model(), "gemini-3.8-flash");
+        legacy_gemini.ai_model = "models/gemini-3.8-pro".to_string();
+        assert_eq!(legacy_gemini.effective_ai_model(), "gemini-3.8-pro");
     }
 
     #[test]

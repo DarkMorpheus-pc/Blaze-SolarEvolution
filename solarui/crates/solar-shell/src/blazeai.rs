@@ -630,9 +630,10 @@ pub fn resolve_dispatch_mode(
 pub fn curated_models_for_provider(provider: BlazeAiProvider) -> &'static [&'static str] {
     match provider {
         BlazeAiProvider::Gemini => &[
-            "gemini-2.5-flash",
+            "gemini-3.8-flash",
+            "gemini-3.8-pro",
+            "gemini-3.5-flash",
             "gemini-2.5-pro",
-            "gemini-2.0-flash",
         ],
         BlazeAiProvider::OpenAi => &["gpt-4o-mini", "gpt-4o", "o4-mini"],
         BlazeAiProvider::Anthropic => &[
@@ -646,6 +647,361 @@ pub fn curated_models_for_provider(provider: BlazeAiProvider) -> &'static [&'sta
             "meta-llama/llama-3.3-70b-instruct",
         ],
         BlazeAiProvider::Ollama => &["llama3.2", "qwen2.5:7b", "mistral"],
+    }
+}
+
+/// Extracts a recommended replacement model ID from Gemini HTTP 404 deprecation errors,
+/// e.g. `"Please update your code to use models/gemini-3.8-flash for the latest features"`.
+pub fn extract_recommended_gemini_model(err_msg: &str) -> Option<String> {
+    let lower = err_msg.to_ascii_lowercase();
+    let needle = "use models/";
+    let idx = lower.find(needle)?;
+    let tail = &err_msg[idx + needle.len()..];
+    let raw: String = tail
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        .collect();
+    let cleaned = raw.trim_end_matches('.');
+    if cleaned.starts_with("gemini-") && cleaned.len() >= 9 {
+        Some(cleaned.to_string())
+    } else {
+        None
+    }
+}
+
+/// Parses Google AI Studio `/v1beta/models` JSON and returns chat-capable Gemini models
+/// supporting `generateContent`, excluding embedding/media/specialized endpoints.
+pub fn parse_gemini_models_list(raw_body: &str) -> Vec<String> {
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(raw_body) else {
+        return Vec::new();
+    };
+    let Some(arr) = val.get("models").and_then(|m| m.as_array()) else {
+        return Vec::new();
+    };
+    let mut models: Vec<String> = Vec::new();
+    for item in arr {
+        let supports_generate = item
+            .get("supportedGenerationMethods")
+            .and_then(|m| m.as_array())
+            .is_some_and(|methods| {
+                methods
+                    .iter()
+                    .any(|m| m.as_str() == Some("generateContent"))
+            });
+        if !supports_generate {
+            continue;
+        }
+        let Some(full_name) = item.get("name").and_then(|n| n.as_str()) else {
+            continue;
+        };
+        let short = full_name.strip_prefix("models/").unwrap_or(full_name).trim();
+        let lower = short.to_ascii_lowercase();
+        if !lower.starts_with("gemini-") {
+            continue;
+        }
+        if lower.contains("embedding")
+            || lower.contains("imagen")
+            || lower.contains("veo")
+            || lower.contains("tts")
+            || lower.contains("audio")
+            || lower.contains("robotics")
+            || lower.contains("lyria")
+            || lower.contains("aqa")
+            || lower.contains("bisect")
+        {
+            continue;
+        }
+        if !models.iter().any(|existing| existing == short) {
+            models.push(short.to_string());
+        }
+    }
+    models.sort_by(|a, b| b.cmp(a));
+    models.truncate(12);
+    models
+}
+
+/// Parses OpenAI or OpenAI-compatible `/models` JSON (`{"data": [{"id": "..."}]}`).
+pub fn parse_openai_models_list(raw_body: &str, strict_openai_filter: bool) -> Vec<String> {
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(raw_body) else {
+        return Vec::new();
+    };
+    let Some(arr) = val.get("data").and_then(|d| d.as_array()) else {
+        return Vec::new();
+    };
+    let mut models: Vec<String> = Vec::new();
+    for item in arr {
+        let Some(id) = item.get("id").and_then(|s| s.as_str()).map(str::trim) else {
+            continue;
+        };
+        if id.is_empty() {
+            continue;
+        }
+        let lower = id.to_ascii_lowercase();
+        if lower.contains("embedding")
+            || lower.contains("tts")
+            || lower.contains("whisper")
+            || lower.contains("dall-e")
+            || lower.contains("moderation")
+            || lower.contains("transcribe")
+            || lower.contains("realtime")
+            || lower.contains("audio")
+            || lower.contains("image")
+            || lower.contains("sora")
+            || lower.contains("rerank")
+            || lower.contains("davinci")
+            || lower.contains("babbage")
+            || lower.contains("veo")
+        {
+            continue;
+        }
+        if strict_openai_filter {
+            let is_chat = lower.starts_with("gpt-")
+                || lower.starts_with("chatgpt-")
+                || lower.starts_with("o1")
+                || lower.starts_with("o3")
+                || lower.starts_with("o4")
+                || lower.starts_with("o5");
+            if !is_chat || lower.contains("-search") {
+                continue;
+            }
+        }
+        if !models.iter().any(|existing| existing == id) {
+            models.push(id.to_string());
+        }
+    }
+    if strict_openai_filter {
+        models.sort_by(|a, b| b.cmp(a));
+    }
+    models.truncate(24);
+    models
+}
+
+/// Parses Anthropic `/v1/models` JSON (`{"data": [{"id": "claude-..."}]}`).
+pub fn parse_anthropic_models_list(raw_body: &str) -> Vec<String> {
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(raw_body) else {
+        return Vec::new();
+    };
+    let Some(arr) = val.get("data").and_then(|d| d.as_array()) else {
+        return Vec::new();
+    };
+    let mut models: Vec<String> = Vec::new();
+    for item in arr {
+        let Some(id) = item.get("id").and_then(|s| s.as_str()).map(str::trim) else {
+            continue;
+        };
+        if !id.is_empty() && !models.iter().any(|existing| existing == id) {
+            models.push(id.to_string());
+        }
+    }
+    models.truncate(20);
+    models
+}
+
+fn execute_get_with_status(
+    url: &str,
+    headers: &[(&str, String)],
+    timeout_secs: &str,
+) -> Result<(u16, String), String> {
+    let mut cfg_stdin = format!("url = \"{}\"\n", escape_curl_config_value(url));
+    for (name, val) in headers {
+        let header_line = format!("{}: {}", name.trim(), val);
+        cfg_stdin.push_str(&format!(
+            "header = \"{}\"\n",
+            escape_curl_config_value(&header_line)
+        ));
+    }
+    cfg_stdin.push_str("write-out = \"\\n__BLAZEAI_HTTP_STATUS:%{http_code}\"\n");
+
+    let mut child = Command::new("/usr/bin/curl")
+        .args(["-sS", "--max-time", timeout_secs, "-K", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("curl başlatılamadı: {}", e))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(cfg_stdin.as_bytes());
+    }
+    let out = child
+        .wait_with_output()
+        .map_err(|e| format!("Model listesi isteği başarısız: {}", e))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "Sağlayıcıya bağlanılamadı".to_string()
+        } else {
+            format!("Ağ hatası: {}", stderr)
+        });
+    }
+    let full_stdout = String::from_utf8_lossy(&out.stdout);
+    let (raw_body, http_code) =
+        if let Some((body_part, code_part)) = full_stdout.rsplit_once("\n__BLAZEAI_HTTP_STATUS:") {
+            (
+                body_part.trim().to_string(),
+                code_part.trim().parse::<u16>().unwrap_or(0),
+            )
+        } else {
+            (full_stdout.trim().to_string(), 0)
+        };
+    Ok((http_code, raw_body))
+}
+
+/// Probes available Google AI Studio models for the configured API key via stdin curl config.
+pub fn probe_gemini_models(api_key: &str) -> Result<Vec<String>, String> {
+    let clean_key = api_key.trim().replace(['\r', '\n'], "");
+    if clean_key.is_empty() {
+        return Ok(Vec::new());
+    }
+    let url = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=100";
+    let (http_code, body) =
+        execute_get_with_status(url, &[("x-goog-api-key", clean_key)], "6")?;
+    if http_code >= 400 {
+        let api_err = parse_provider_response(BlazeAiProvider::Gemini, &body)
+            .err()
+            .unwrap_or_else(|| format!("HTTP {} hatası", http_code));
+        return Err(format!("HTTP {}: {}", http_code, api_err));
+    }
+    Ok(parse_gemini_models_list(&body))
+}
+
+/// Probes live supported models for any configured provider using its real `/models` or `/api/tags` endpoint.
+pub fn probe_provider_models(
+    provider: BlazeAiProvider,
+    api_key: &str,
+    base_url: &str,
+) -> Result<Vec<String>, String> {
+    let clean_key = api_key.trim().replace(['\r', '\n'], "");
+    match provider {
+        BlazeAiProvider::Gemini => probe_gemini_models(&clean_key),
+        BlazeAiProvider::OpenAi => {
+            if clean_key.is_empty() {
+                return Ok(Vec::new());
+            }
+            let (http_code, body) = execute_get_with_status(
+                "https://api.openai.com/v1/models",
+                &[("Authorization", format!("Bearer {}", clean_key))],
+                "6",
+            )?;
+            if http_code >= 400 {
+                let api_err = parse_provider_response(BlazeAiProvider::OpenAi, &body)
+                    .err()
+                    .unwrap_or_else(|| format!("HTTP {} hatası", http_code));
+                return Err(format!("HTTP {}: {}", http_code, api_err));
+            }
+            Ok(parse_openai_models_list(&body, true))
+        }
+        BlazeAiProvider::Anthropic => {
+            if clean_key.is_empty() {
+                return Ok(Vec::new());
+            }
+            let (http_code, body) = execute_get_with_status(
+                "https://api.anthropic.com/v1/models?limit=100",
+                &[
+                    ("x-api-key", clean_key),
+                    ("anthropic-version", "2023-06-01".to_string()),
+                ],
+                "6",
+            )?;
+            if http_code >= 400 {
+                let api_err = parse_provider_response(BlazeAiProvider::Anthropic, &body)
+                    .err()
+                    .unwrap_or_else(|| format!("HTTP {} hatası", http_code));
+                return Err(format!("HTTP {}: {}", http_code, api_err));
+            }
+            Ok(parse_anthropic_models_list(&body))
+        }
+        BlazeAiProvider::OpenAiCompatible => {
+            if clean_key.is_empty() {
+                return Ok(Vec::new());
+            }
+            let raw_base = if base_url.trim().is_empty() {
+                provider.default_base_url()
+            } else {
+                base_url.trim()
+            };
+            let valid_base = validate_http_url(raw_base)?;
+            let trimmed = valid_base.trim_end_matches('/');
+            let root = trimmed
+                .strip_suffix("/chat/completions")
+                .unwrap_or(trimmed)
+                .trim_end_matches('/');
+            let url = if root.ends_with("/models") {
+                root.to_string()
+            } else {
+                format!("{}/models", root)
+            };
+            let (http_code, body) = execute_get_with_status(
+                &url,
+                &[("Authorization", format!("Bearer {}", clean_key))],
+                "6",
+            )?;
+            if http_code >= 400 {
+                let api_err = parse_provider_response(BlazeAiProvider::OpenAiCompatible, &body)
+                    .err()
+                    .unwrap_or_else(|| format!("HTTP {} hatası", http_code));
+                return Err(format!("HTTP {}: {}", http_code, api_err));
+            }
+            Ok(parse_openai_models_list(&body, false))
+        }
+        BlazeAiProvider::Ollama => {
+            let raw_base = if base_url.trim().is_empty() {
+                provider.default_base_url()
+            } else {
+                base_url.trim()
+            };
+            probe_ollama_models(raw_base)
+        }
+    }
+}
+
+/// Picks the best model from a live-discovered list while preserving the user's current choice if still valid.
+pub fn pick_preferred_live_model(
+    provider: BlazeAiProvider,
+    current_model: &str,
+    live_models: &[String],
+) -> Option<String> {
+    if live_models.is_empty() {
+        return None;
+    }
+    let cur = current_model.trim();
+    if !cur.is_empty() && live_models.iter().any(|m| m == cur) {
+        return Some(cur.to_string());
+    }
+    match provider {
+        BlazeAiProvider::Gemini => live_models
+            .iter()
+            .find(|m| {
+                let l = m.to_ascii_lowercase();
+                l.contains("flash")
+                    && !l.contains("lite")
+                    && !l.contains("preview")
+                    && !l.contains("exp")
+            })
+            .or_else(|| {
+                live_models
+                    .iter()
+                    .find(|m| m.to_ascii_lowercase().contains("flash"))
+            })
+            .or_else(|| live_models.first())
+            .cloned(),
+        BlazeAiProvider::OpenAi => live_models
+            .iter()
+            .find(|m| {
+                let l = m.to_ascii_lowercase();
+                l.starts_with("gpt-4o-mini") || l.starts_with("gpt-4.1-mini") || l.starts_with("gpt-5-mini")
+            })
+            .or_else(|| live_models.iter().find(|m| m.to_ascii_lowercase().starts_with("gpt-")))
+            .or_else(|| live_models.first())
+            .cloned(),
+        BlazeAiProvider::Anthropic => live_models
+            .iter()
+            .find(|m| m.to_ascii_lowercase().contains("sonnet"))
+            .or_else(|| live_models.first())
+            .cloned(),
+        BlazeAiProvider::OpenAiCompatible | BlazeAiProvider::Ollama => {
+            live_models.first().cloned()
+        }
     }
 }
 
@@ -948,6 +1304,7 @@ pub enum ChatCompletionOutcome {
         cleaned_text: String,
         extracted_facts: Vec<String>,
         suggested_actions: Vec<SuggestedAction>,
+        upgraded_model: Option<String>,
     },
     FallbackToWebSearch {
         url: String,
@@ -1008,39 +1365,14 @@ pub fn probe_ollama_models(base_url: &str) -> Result<Vec<String>, String> {
     Ok(models)
 }
 
-/// Executes a non-blocking HTTP request (intended to run inside a background thread)
-/// via `/usr/bin/curl -sS --max-time 45 -K -`, keeping API keys out of argv/disk.
-pub fn send_chat_completion(
+fn execute_provider_http(
     cfg: &OmnibarConfig,
-    secrets: &BlazeAiSecrets,
-    memory_facts: &[MemoryFact],
+    api_key: &str,
+    system_prompt: &str,
     history: &[ChatMessage],
-    latest_prompt: &str,
-) -> Result<ChatCompletionOutcome, String> {
-    match resolve_dispatch_mode(cfg, secrets, latest_prompt) {
-        AiDispatchMode::FallbackToWebSearch { url, engine } => {
-            return Ok(ChatCompletionOutcome::FallbackToWebSearch { url, engine });
-        }
-        AiDispatchMode::ApiCall => {}
-    }
-
-    // If Ollama is selected, verify reachability; if unreachable and web search is enabled, fall back cleanly
-    if cfg.ai_provider == BlazeAiProvider::Ollama {
-        if probe_ollama_models(&cfg.effective_ai_base_url()).is_err() {
-            if cfg.enable_web_search {
-                return Ok(ChatCompletionOutcome::FallbackToWebSearch {
-                    url: build_web_search_url(&cfg.search_engine, latest_prompt),
-                    engine: cfg.search_engine.clone(),
-                });
-            }
-            return Err("Yerel Ollama servisi çalışmıyor (127.0.0.1:11434)".to_string());
-        }
-    }
-
-    let api_key = secrets.key_for(cfg.ai_provider);
+) -> Result<(u16, String), String> {
     let endpoint = build_provider_endpoint(cfg, api_key)?;
-    let system_prompt = build_system_prompt(cfg, memory_facts);
-    let payload = build_provider_request_payload(cfg, &system_prompt, history);
+    let payload = build_provider_request_payload(cfg, system_prompt, history);
     let payload_bytes = serde_json::to_vec(&payload)
         .map_err(|e| format!("İstek JSON hazırlanamadı: {}", e))?;
 
@@ -1085,19 +1417,82 @@ pub fn send_chat_completion(
     let full_stdout = String::from_utf8_lossy(&output.stdout);
     let (raw_body, http_code) =
         if let Some((body_part, code_part)) = full_stdout.rsplit_once("\n__BLAZEAI_HTTP_STATUS:") {
-            (body_part.trim(), code_part.trim().parse::<u16>().unwrap_or(0))
+            (
+                body_part.trim().to_string(),
+                code_part.trim().parse::<u16>().unwrap_or(0),
+            )
         } else {
-            (full_stdout.trim(), 0)
+            (full_stdout.trim().to_string(), 0)
         };
+    Ok((http_code, raw_body))
+}
+
+/// Executes a non-blocking HTTP request (intended to run inside a background thread)
+/// via `/usr/bin/curl -sS --max-time 45 -K -`, keeping API keys out of argv/disk.
+pub fn send_chat_completion(
+    cfg: &OmnibarConfig,
+    secrets: &BlazeAiSecrets,
+    memory_facts: &[MemoryFact],
+    history: &[ChatMessage],
+    latest_prompt: &str,
+) -> Result<ChatCompletionOutcome, String> {
+    match resolve_dispatch_mode(cfg, secrets, latest_prompt) {
+        AiDispatchMode::FallbackToWebSearch { url, engine } => {
+            return Ok(ChatCompletionOutcome::FallbackToWebSearch { url, engine });
+        }
+        AiDispatchMode::ApiCall => {}
+    }
+
+    // If Ollama is selected, verify reachability; if unreachable and web search is enabled, fall back cleanly
+    if cfg.ai_provider == BlazeAiProvider::Ollama {
+        if probe_ollama_models(&cfg.effective_ai_base_url()).is_err() {
+            if cfg.enable_web_search {
+                return Ok(ChatCompletionOutcome::FallbackToWebSearch {
+                    url: build_web_search_url(&cfg.search_engine, latest_prompt),
+                    engine: cfg.search_engine.clone(),
+                });
+            }
+            return Err("Yerel Ollama servisi çalışmıyor (127.0.0.1:11434)".to_string());
+        }
+    }
+
+    let api_key = secrets.key_for(cfg.ai_provider);
+    let system_prompt = build_system_prompt(cfg, memory_facts);
+    let (mut http_code, mut raw_body) =
+        execute_provider_http(cfg, api_key, &system_prompt, history)?;
+    let mut upgraded_model: Option<String> = None;
+
+    // If Google AI Studio reports HTTP 404 for a deprecated Gemini model and suggests a replacement,
+    // automatically retry once with the recommended model so chat never silently breaks on deprecation.
+    if http_code == 404 && cfg.ai_provider == BlazeAiProvider::Gemini {
+        let first_err = parse_provider_response(cfg.ai_provider, &raw_body)
+            .err()
+            .unwrap_or_default();
+        if let Some(recommended) = extract_recommended_gemini_model(&first_err) {
+            if recommended != cfg.effective_ai_model() {
+                let mut retry_cfg = cfg.clone();
+                retry_cfg.ai_model = recommended.clone();
+                if let Ok((retry_code, retry_body)) =
+                    execute_provider_http(&retry_cfg, api_key, &system_prompt, history)
+                {
+                    http_code = retry_code;
+                    raw_body = retry_body;
+                    if retry_code < 400 {
+                        upgraded_model = Some(recommended);
+                    }
+                }
+            }
+        }
+    }
 
     if http_code >= 400 {
-        let api_err = parse_provider_response(cfg.ai_provider, raw_body)
+        let api_err = parse_provider_response(cfg.ai_provider, &raw_body)
             .err()
             .unwrap_or_else(|| format!("HTTP {} hatası", http_code));
         return Err(format!("HTTP {}: {}", http_code, api_err));
     }
 
-    let raw_reply = parse_provider_response(cfg.ai_provider, raw_body)?;
+    let raw_reply = parse_provider_response(cfg.ai_provider, &raw_body)?;
     let (cleaned_text, extracted_facts) = extract_memory_tags_from_reply(&raw_reply);
     let final_reply = if cleaned_text.is_empty() {
         raw_reply.clone()
@@ -1111,6 +1506,7 @@ pub fn send_chat_completion(
         cleaned_text: final_reply,
         extracted_facts,
         suggested_actions,
+        upgraded_model,
     })
 }
 
@@ -1564,5 +1960,66 @@ mod tests {
             }
             ChatCompletionOutcome::Reply { .. } => panic!("Expected fallback when Ollama is offline"),
         }
+    }
+
+    #[test]
+    fn gemini_deprecation_extractor_and_models_list_parser_work() {
+        let err = "This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini-3.8-flash for the latest features and improvements.";
+        assert_eq!(
+            extract_recommended_gemini_model(err),
+            Some("gemini-3.8-flash".to_string())
+        );
+        assert_eq!(extract_recommended_gemini_model("API key not valid"), None);
+
+        let raw_models = r#"{
+            "models": [
+                {"name": "models/gemini-3.8-flash", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-3.8-pro", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/text-embedding-004", "supportedGenerationMethods": ["embedContent"]},
+                {"name": "models/gemini-embedding-001", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-2.5-flash-tts", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-3.5-flash", "supportedGenerationMethods": ["generateContent"]}
+            ]
+        }"#;
+        let parsed = parse_gemini_models_list(raw_models);
+        assert_eq!(
+            parsed,
+            vec![
+                "gemini-3.8-pro".to_string(),
+                "gemini-3.8-flash".to_string(),
+                "gemini-3.5-flash".to_string(),
+            ]
+        );
+        assert_eq!(
+            pick_preferred_live_model(BlazeAiProvider::Gemini, "gemini-2.5-flash", &parsed),
+            Some("gemini-3.8-flash".to_string())
+        );
+        assert_eq!(
+            pick_preferred_live_model(BlazeAiProvider::Gemini, "gemini-3.8-pro", &parsed),
+            Some("gemini-3.8-pro".to_string())
+        );
+
+        let openai_json = r#"{"data":[
+            {"id":"gpt-4o-mini"},
+            {"id":"gpt-4o"},
+            {"id":"text-embedding-3-large"},
+            {"id":"whisper-1"},
+            {"id":"o4-mini"}
+        ]}"#;
+        let o_models = parse_openai_models_list(openai_json, true);
+        assert!(o_models.contains(&"gpt-4o-mini".to_string()));
+        assert!(o_models.contains(&"o4-mini".to_string()));
+        assert!(!o_models.iter().any(|m| m.contains("embedding") || m.contains("whisper")));
+
+        let anthropic_json = r#"{"data":[
+            {"id":"claude-sonnet-4-5"},
+            {"id":"claude-haiku-4-5"}
+        ]}"#;
+        let a_models = parse_anthropic_models_list(anthropic_json);
+        assert_eq!(a_models, vec!["claude-sonnet-4-5".to_string(), "claude-haiku-4-5".to_string()]);
+        assert_eq!(
+            pick_preferred_live_model(BlazeAiProvider::Anthropic, "", &a_models),
+            Some("claude-sonnet-4-5".to_string())
+        );
     }
 }

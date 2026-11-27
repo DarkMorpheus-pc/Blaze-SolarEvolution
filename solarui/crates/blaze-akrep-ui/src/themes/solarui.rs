@@ -596,7 +596,35 @@ expander title:hover {
 }
 "#;
 
+fn icon_theme_dir_exists(theme_name: &str) -> bool {
+    let clean = theme_name.trim();
+    if clean.is_empty() {
+        return false;
+    }
+    let mut dirs = vec![
+        std::path::PathBuf::from("/usr/share/icons"),
+        std::path::PathBuf::from("/usr/local/share/icons"),
+    ];
+    if let Ok(home) = std::env::var("HOME") {
+        let hp = std::path::PathBuf::from(home);
+        dirs.push(hp.join(".local/share/icons"));
+        dirs.push(hp.join(".icons"));
+    }
+    dirs.into_iter()
+        .any(|base| base.join(clean).join("index.theme").is_file())
+}
+
 pub fn apply_solarui_theme() {
+    if let Some(settings) = gtk4::Settings::default() {
+        settings.set_gtk_application_prefer_dark_theme(true);
+        let cur_theme = settings
+            .gtk_icon_theme_name()
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        if !icon_theme_dir_exists(&cur_theme) {
+            settings.set_gtk_icon_theme_name(Some("Adwaita"));
+        }
+    }
     let Some(display) = gdk4::Display::default() else {
         return;
     };

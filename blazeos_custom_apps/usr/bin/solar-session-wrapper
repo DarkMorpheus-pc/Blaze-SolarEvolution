@@ -6,7 +6,6 @@ export XDG_SESSION_DESKTOP="SolarUI"
 export DESKTOP_SESSION="SolarUI"
 export MOZ_ENABLE_WAYLAND="1"
 export QT_QPA_PLATFORM="wayland;xcb"
-export GDK_BACKEND="wayland,x11"
 export CLUTTER_BACKEND="wayland"
 # Let wlroots use the real cursor/GPU on physical systems.  The old global
 # WLR_NO_HARDWARE_CURSORS=1 forced a CPU cursor composition path and made the
@@ -47,7 +46,7 @@ if command -v systemctl >/dev/null 2>&1; then
     systemctl --user import-environment \
         XDG_SESSION_TYPE XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP \
         XDG_RUNTIME_DIR XDG_DATA_DIRS MOZ_ENABLE_WAYLAND QT_QPA_PLATFORM \
-        GDK_BACKEND ELECTRON_OZONE_PLATFORM_HINT \
+        ELECTRON_OZONE_PLATFORM_HINT \
         2>>"$LOG_FILE" || :
 fi
 if command -v dbus-update-activation-environment >/dev/null 2>&1; then

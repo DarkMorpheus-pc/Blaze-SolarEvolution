@@ -5,7 +5,7 @@
 
 Name:           solarui-config
 Version:        5.05.1
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        SolarUI and BlazeOS system, compositor, skeleton, and service configurations
 License:        GPL-3.0-or-later
 URL:            https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
@@ -140,10 +140,21 @@ PY
 /usr/share/pixmaps/blaze-logo.png
 /usr/share/pixmaps/solar-logo.png
 /usr/share/plymouth/themes/blazeos
+%attr(0755,root,root) /usr/libexec/blazeos-wallpaper-portal
+/usr/share/dbus-1/services/org.blazeos.WallpaperPortal.service
 /usr/share/wayland-sessions/solarui.desktop
+/usr/share/xdg-desktop-portal/portals/blazeos.portal
 /usr/share/xdg-desktop-portal/solarui-portals.conf
 
+%posttrans
+# Ensure existing systems have Nautilus registered for inode/directory
+if [ -f /etc/xdg/mimeapps.list ] && ! grep -q '^inode/directory=' /etc/xdg/mimeapps.list 2>/dev/null; then
+    sed -i '/^\[Default Applications\]/a inode/directory=org.gnome.Nautilus.desktop' /etc/xdg/mimeapps.list 2>/dev/null || :
+fi
+
 %changelog
+* Fri Nov 27 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-3
+- Add native blazeos-wallpaper-portal backend for org.freedesktop.impl.portal.Wallpaper, fix solarui-portals.conf FileChooser/GTK routing, and set Nautilus as default inode/directory handler
 * Thu Nov 26 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-2
 - Enable dynamic Omnibar sizing in Niri config and ship unprivileged BlazeHouse update notifier user timer
 * Tue Nov 24 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-1
