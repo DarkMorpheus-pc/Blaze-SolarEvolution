@@ -8,6 +8,13 @@
 // - Allowlisted 1-click desktop app suggestions (never arbitrary shell)
 // ==============================================================================
 
+use crate::agent_tools::{
+    execute_web_research, extract_file_proposals_from_reply, extract_web_search_tag,
+    format_web_research_context, PendingFileProposal,
+};
+use crate::brain_store::BrainStore;
+use crate::local_ai::{ensure_ollama_serving, model_supports_thinking};
+use crate::voice_pipeline::VisionAttachment;
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use solar_common::{BlazeAiProvider, CompanionExpression, OmnibarConfig, SolarConfig};
@@ -167,6 +174,10 @@ pub struct ChatMessage {
     pub speaker_name: String,
     #[serde(default)]
     pub suggested_actions: Vec<SuggestedAction>,
+    #[serde(default)]
+    pub thinking_text: String,
+    #[serde(default)]
+    pub file_proposals: Vec<PendingFileProposal>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -229,11 +240,14 @@ impl LocalMemoryStore {
             Vec::new()
         };
 
-        Self {
-            data_dir,
+        let store = Self {
+            data_dir: data_dir.clone(),
             messages,
             memory_facts,
-        }
+        };
+        let brain = BrainStore::open_in_dir(data_dir.join("brain"));
+        let _ = brain.sync_with_memory_facts(&store.memory_facts);
+        store
     }
 
     pub fn session_path(&self) -> PathBuf {
@@ -297,6 +311,8 @@ impl LocalMemoryStore {
             self.memory_facts.drain(0..drop_count);
         }
         self.save_memory()?;
+        let brain = BrainStore::open_in_dir(self.data_dir.join("brain"));
+        let _ = brain.append_memory_note(&self.memory_facts.last().map(|f| f.text.as_str()).unwrap_or(""));
         Ok(true)
     }
 
@@ -350,6 +366,8 @@ impl LocalMemoryStore {
                 timestamp: Local::now().to_rfc3339(),
                 speaker_name: to_name.trim().to_string(),
                 suggested_actions: Vec::new(),
+                thinking_text: String::new(),
+                file_proposals: Vec::new(),
             },
             persist_chat,
         )?;
@@ -424,8 +442,16 @@ pub fn extract_memory_tags_from_reply(reply: &str) -> (String, Vec<String>) {
 }
 
 /// Builds the 2-layer system prompt combining immutable technical grounding,
-/// optional BlazeOS guide + local memory facts, and the active character persona.
+/// optional BlazeOS guide + local Brain memory + safe tool instructions, and active persona.
 pub fn build_system_prompt(cfg: &OmnibarConfig, memory_facts: &[MemoryFact]) -> String {
+    build_system_prompt_with_brain(cfg, memory_facts, "")
+}
+
+pub fn build_system_prompt_with_brain(
+    cfg: &OmnibarConfig,
+    memory_facts: &[MemoryFact],
+    brain_context: &str,
+) -> String {
     let mut parts = Vec::new();
 
     // Layer 1: Immutable technical & safety core
@@ -446,6 +472,24 @@ en fazla bir adet [HAFIZA: kısa gerçek] etiketi ekleyebilirsin; gerekmiyorsa e
         );
     }
 
+    if cfg.ai_web_research_enabled {
+        parts.push(
+            "Güncel internet bilgisi (haber, hava durumu, yeni yazılım sürümü vb.) gerektiren sorularda \
+tahmin yürütmek yerine yalnızca şu tek etiketi üret: [WEB_ARA: kısa arama sorgusu]. Sistem aramayı \
+yapıp sonuçları sana geri verecektir."
+                .to_string(),
+        );
+    }
+
+    if cfg.ai_agent_tools_enabled {
+        parts.push(
+            "Kullanıcı senden bilgisayarında bir metin/kod/belge dosyası oluşturmanı açıkça isterse \
+dosya içeriğini şu blokla öner (kullanıcı onaylamadan diske yazılmaz): \
+[DOSYA_ONER: ~/Documents/dosya.md]\\niçerik\\n[/DOSYA_ONER]"
+                .to_string(),
+        );
+    }
+
     if cfg.ai_include_blazeos_guide {
         parts.push(BLAZEOS_SYSTEM_GUIDE.to_string());
     }
@@ -457,6 +501,10 @@ en fazla bir adet [HAFIZA: kısa gerçek] etiketi ekleyebilirsin; gerekmiyorsa e
             mem_block.push_str(&fact.text);
         }
         parts.push(mem_block);
+    }
+
+    if cfg.ai_local_memory_enabled && !brain_context.trim().is_empty() {
+        parts.push(brain_context.trim().to_string());
     }
 
     // Layer 2: Dynamic persona based on character name + expression archetype
@@ -1117,23 +1165,74 @@ fn normalized_dialogue_turns(history: &[ChatMessage]) -> Vec<(&'static str, Stri
     turns
 }
 
+pub fn extract_thinking_tags(raw: &str) -> (String, String) {
+    let mut cleaned = String::with_capacity(raw.len());
+    let mut thoughts = Vec::new();
+    let mut cursor = 0;
+
+    while let Some(open_rel) = raw[cursor..].find("<think>") {
+        let open_idx = cursor + open_rel;
+        cleaned.push_str(&raw[cursor..open_idx]);
+        let body_start = open_idx + "<think>".len();
+        if let Some(close_rel) = raw[body_start..].find("</think>") {
+            let close_idx = body_start + close_rel;
+            let t = raw[body_start..close_idx].trim();
+            if !t.is_empty() {
+                thoughts.push(t.to_string());
+            }
+            cursor = close_idx + "</think>".len();
+        } else {
+            let t = raw[body_start..].trim();
+            if !t.is_empty() {
+                thoughts.push(t.to_string());
+            }
+            cursor = raw.len();
+            break;
+        }
+    }
+    cleaned.push_str(&raw[cursor..]);
+    (cleaned.trim().to_string(), thoughts.join("\n\n"))
+}
+
 pub fn build_provider_request_payload(
     cfg: &OmnibarConfig,
     system_prompt: &str,
     history: &[ChatMessage],
 ) -> serde_json::Value {
+    build_provider_request_payload_with_vision(cfg, system_prompt, history, None)
+}
+
+pub fn build_provider_request_payload_with_vision(
+    cfg: &OmnibarConfig,
+    system_prompt: &str,
+    history: &[ChatMessage],
+    vision: Option<&VisionAttachment>,
+) -> serde_json::Value {
     let model = cfg.effective_ai_model();
     let turns = normalized_dialogue_turns(history);
+    let last_user_idx = turns.iter().rposition(|(role, _)| *role == "user");
 
     match cfg.ai_provider {
         BlazeAiProvider::Gemini => {
             let contents: Vec<serde_json::Value> = turns
                 .into_iter()
-                .map(|(role, text)| {
+                .enumerate()
+                .map(|(idx, (role, text))| {
                     let g_role = if role == "assistant" { "model" } else { "user" };
+                    let mut parts = vec![serde_json::json!({ "text": text })];
+                    if Some(idx) == last_user_idx {
+                        if let Some(img) = vision {
+                            parts.push(serde_json::json!({
+                                "inline_data": {
+                                    "mime_type": img.mime_type,
+                                    "data": img.base64_data
+                                }
+                            }));
+                        }
+                    }
                     serde_json::json!({
                         "role": g_role,
-                        "parts": [{ "text": text }]
+                        "parts": parts
                     })
                 })
                 .collect();
@@ -1152,7 +1251,24 @@ pub fn build_provider_request_payload(
                 "role": "system",
                 "content": system_prompt
             })];
-            for (role, text) in turns {
+            for (idx, (role, text)) in turns.into_iter().enumerate() {
+                if Some(idx) == last_user_idx {
+                    if let Some(img) = vision {
+                        msgs.push(serde_json::json!({
+                            "role": role,
+                            "content": [
+                                { "type": "text", "text": text },
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": format!("data:{};base64,{}", img.mime_type, img.base64_data)
+                                    }
+                                }
+                            ]
+                        }));
+                        continue;
+                    }
+                }
                 msgs.push(serde_json::json!({
                     "role": role,
                     "content": text
@@ -1165,9 +1281,28 @@ pub fn build_provider_request_payload(
         }
         BlazeAiProvider::Anthropic => {
             let mut msgs = Vec::new();
-            for (role, text) in turns {
+            for (idx, (role, text)) in turns.into_iter().enumerate() {
                 if msgs.is_empty() && role != "user" {
                     continue;
+                }
+                if Some(idx) == last_user_idx {
+                    if let Some(img) = vision {
+                        msgs.push(serde_json::json!({
+                            "role": role,
+                            "content": [
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": img.mime_type,
+                                        "data": img.base64_data
+                                    }
+                                },
+                                { "type": "text", "text": text }
+                            ]
+                        }));
+                        continue;
+                    }
                 }
                 msgs.push(serde_json::json!({
                     "role": role,
@@ -1186,22 +1321,44 @@ pub fn build_provider_request_payload(
                 "role": "system",
                 "content": system_prompt
             })];
-            for (role, text) in turns {
+            for (idx, (role, text)) in turns.into_iter().enumerate() {
+                if Some(idx) == last_user_idx {
+                    if let Some(img) = vision {
+                        msgs.push(serde_json::json!({
+                            "role": role,
+                            "content": text,
+                            "images": [img.base64_data]
+                        }));
+                        continue;
+                    }
+                }
                 msgs.push(serde_json::json!({
                     "role": role,
                     "content": text
                 }));
             }
-            serde_json::json!({
+            let mut body = serde_json::json!({
                 "model": model,
                 "stream": false,
+                "keep_alive": cfg.effective_local_keep_alive(),
                 "messages": msgs
-            })
+            });
+            if model_supports_thinking(&model) {
+                body["think"] = serde_json::Value::Bool(cfg.ai_thinking_mode);
+            }
+            body
         }
     }
 }
 
 pub fn parse_provider_response(provider: BlazeAiProvider, raw_body: &str) -> Result<String, String> {
+    parse_provider_response_with_thinking(provider, raw_body).map(|(text, _)| text)
+}
+
+pub fn parse_provider_response_with_thinking(
+    provider: BlazeAiProvider,
+    raw_body: &str,
+) -> Result<(String, String), String> {
     let val: serde_json::Value = serde_json::from_str(raw_body)
         .map_err(|e| format!("Geçersiz JSON yanıtı: {}", e))?;
 
@@ -1215,6 +1372,7 @@ pub fn parse_provider_response(provider: BlazeAiProvider, raw_body: &str) -> Res
         }
     }
 
+    let mut native_thinking = String::new();
     let extracted = match provider {
         BlazeAiProvider::Gemini => val
             .get("candidates")
@@ -1235,7 +1393,12 @@ pub fn parse_provider_response(provider: BlazeAiProvider, raw_body: &str) -> Res
             .and_then(|c| c.as_array())
             .and_then(|arr| arr.first())
             .and_then(|choice| choice.get("message"))
-            .and_then(|m| m.get("content"))
+            .and_then(|m| {
+                if let Some(r) = m.get("reasoning_content").and_then(|t| t.as_str()) {
+                    native_thinking = r.trim().to_string();
+                }
+                m.get("content")
+            })
             .and_then(|t| t.as_str())
             .map(|s| s.to_string()),
         BlazeAiProvider::Anthropic => val
@@ -1249,16 +1412,37 @@ pub fn parse_provider_response(provider: BlazeAiProvider, raw_body: &str) -> Res
                     .collect::<Vec<_>>()
                     .join("\n")
             }),
-        BlazeAiProvider::Ollama => val
-            .get("message")
-            .and_then(|m| m.get("content"))
-            .and_then(|t| t.as_str())
-            .or_else(|| val.get("response").and_then(|t| t.as_str()))
-            .map(|s| s.to_string()),
+        BlazeAiProvider::Ollama => {
+            if let Some(t) = val
+                .get("message")
+                .and_then(|m| m.get("thinking"))
+                .and_then(|t| t.as_str())
+            {
+                native_thinking = t.trim().to_string();
+            }
+            val.get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|t| t.as_str())
+                .or_else(|| val.get("response").and_then(|t| t.as_str()))
+                .map(|s| s.to_string())
+        }
     };
 
     match extracted {
-        Some(text) if !text.trim().is_empty() => Ok(text.trim().to_string()),
+        Some(text) if !text.trim().is_empty() => {
+            let (clean_text, inline_think) = extract_thinking_tags(text.trim());
+            let final_think = if !native_thinking.is_empty() {
+                native_thinking
+            } else {
+                inline_think
+            };
+            let final_text = if clean_text.is_empty() {
+                text.trim().to_string()
+            } else {
+                clean_text
+            };
+            Ok((final_text, final_think))
+        }
         _ => Err("Sağlayıcı boş veya beklenmeyen formatta yanıt döndürdü".to_string()),
     }
 }
@@ -1302,8 +1486,10 @@ pub enum ChatCompletionOutcome {
     Reply {
         raw_text: String,
         cleaned_text: String,
+        thinking_text: String,
         extracted_facts: Vec<String>,
         suggested_actions: Vec<SuggestedAction>,
+        file_proposals: Vec<PendingFileProposal>,
         upgraded_model: Option<String>,
     },
     FallbackToWebSearch {
@@ -1370,9 +1556,10 @@ fn execute_provider_http(
     api_key: &str,
     system_prompt: &str,
     history: &[ChatMessage],
+    vision: Option<&VisionAttachment>,
 ) -> Result<(u16, String), String> {
     let endpoint = build_provider_endpoint(cfg, api_key)?;
-    let payload = build_provider_request_payload(cfg, system_prompt, history);
+    let payload = build_provider_request_payload_with_vision(cfg, system_prompt, history, vision);
     let payload_bytes = serde_json::to_vec(&payload)
         .map_err(|e| format!("İstek JSON hazırlanamadı: {}", e))?;
 
@@ -1387,9 +1574,14 @@ fn execute_provider_http(
         path: payload_path.clone(),
     };
 
+    let timeout_secs = if cfg.ai_provider == BlazeAiProvider::Ollama {
+        "120"
+    } else {
+        "45"
+    };
     let stdin_cfg = format_curl_stdin_config(&endpoint, &payload_path);
     let mut child = Command::new("/usr/bin/curl")
-        .args(["-sS", "--max-time", "45", "-K", "-"])
+        .args(["-sS", "--max-time", timeout_secs, "-K", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1428,13 +1620,33 @@ fn execute_provider_http(
 }
 
 /// Executes a non-blocking HTTP request (intended to run inside a background thread)
-/// via `/usr/bin/curl -sS --max-time 45 -K -`, keeping API keys out of argv/disk.
+/// via `/usr/bin/curl -sS -K -`, keeping API keys out of argv/disk.
 pub fn send_chat_completion(
     cfg: &OmnibarConfig,
     secrets: &BlazeAiSecrets,
     memory_facts: &[MemoryFact],
     history: &[ChatMessage],
     latest_prompt: &str,
+) -> Result<ChatCompletionOutcome, String> {
+    send_chat_completion_with_options(
+        cfg,
+        secrets,
+        memory_facts,
+        history,
+        latest_prompt,
+        None,
+        false,
+    )
+}
+
+pub fn send_chat_completion_with_options(
+    cfg: &OmnibarConfig,
+    secrets: &BlazeAiSecrets,
+    memory_facts: &[MemoryFact],
+    history: &[ChatMessage],
+    latest_prompt: &str,
+    vision: Option<&VisionAttachment>,
+    force_web_research: bool,
 ) -> Result<ChatCompletionOutcome, String> {
     match resolve_dispatch_mode(cfg, secrets, latest_prompt) {
         AiDispatchMode::FallbackToWebSearch { url, engine } => {
@@ -1443,9 +1655,10 @@ pub fn send_chat_completion(
         AiDispatchMode::ApiCall => {}
     }
 
-    // If Ollama is selected, verify reachability; if unreachable and web search is enabled, fall back cleanly
+    // If Ollama is selected, auto-start user-space Ollama if installed; otherwise fall back cleanly
     if cfg.ai_provider == BlazeAiProvider::Ollama {
-        if probe_ollama_models(&cfg.effective_ai_base_url()).is_err() {
+        let base_url = cfg.effective_ai_base_url();
+        if probe_ollama_models(&base_url).is_err() && ensure_ollama_serving(&base_url).is_err() {
             if cfg.enable_web_search {
                 return Ok(ChatCompletionOutcome::FallbackToWebSearch {
                     url: build_web_search_url(&cfg.search_engine, latest_prompt),
@@ -1457,9 +1670,27 @@ pub fn send_chat_completion(
     }
 
     let api_key = secrets.key_for(cfg.ai_provider);
-    let system_prompt = build_system_prompt(cfg, memory_facts);
+    let mut extra_context = if cfg.ai_local_memory_enabled {
+        BrainStore::open_default().build_brain_context_block(latest_prompt)
+    } else {
+        String::new()
+    };
+
+    if force_web_research && cfg.ai_web_research_enabled {
+        if let Ok(results) = execute_web_research(latest_prompt, 4) {
+            let web_block = format_web_research_context(latest_prompt, &results);
+            if !web_block.is_empty() {
+                if !extra_context.is_empty() {
+                    extra_context.push_str("\n\n");
+                }
+                extra_context.push_str(&web_block);
+            }
+        }
+    }
+
+    let system_prompt = build_system_prompt_with_brain(cfg, memory_facts, &extra_context);
     let (mut http_code, mut raw_body) =
-        execute_provider_http(cfg, api_key, &system_prompt, history)?;
+        execute_provider_http(cfg, api_key, &system_prompt, history, vision)?;
     let mut upgraded_model: Option<String> = None;
 
     // If Google AI Studio reports HTTP 404 for a deprecated Gemini model and suggests a replacement,
@@ -1473,7 +1704,7 @@ pub fn send_chat_completion(
                 let mut retry_cfg = cfg.clone();
                 retry_cfg.ai_model = recommended.clone();
                 if let Ok((retry_code, retry_body)) =
-                    execute_provider_http(&retry_cfg, api_key, &system_prompt, history)
+                    execute_provider_http(&retry_cfg, api_key, &system_prompt, history, vision)
                 {
                     http_code = retry_code;
                     raw_body = retry_body;
@@ -1492,9 +1723,42 @@ pub fn send_chat_completion(
         return Err(format!("HTTP {}: {}", http_code, api_err));
     }
 
-    let raw_reply = parse_provider_response(cfg.ai_provider, &raw_body)?;
-    let (cleaned_text, extracted_facts) = extract_memory_tags_from_reply(&raw_reply);
-    let final_reply = if cleaned_text.is_empty() {
+    let (mut raw_reply, mut thinking_text) =
+        parse_provider_response_with_thinking(cfg.ai_provider, &raw_body)?;
+
+    // Single grounded web-research follow-up when model explicitly emits [WEB_ARA: query]
+    if cfg.ai_web_research_enabled && !force_web_research {
+        if let Some(web_query) = extract_web_search_tag(&raw_reply) {
+            if let Ok(results) = execute_web_research(&web_query, 4) {
+                let web_block = format_web_research_context(&web_query, &results);
+                if !web_block.is_empty() {
+                    let grounded_prompt = format!("{}\n\n{}", system_prompt, web_block);
+                    if let Ok((code2, body2)) =
+                        execute_provider_http(cfg, api_key, &grounded_prompt, history, vision)
+                    {
+                        if code2 < 400 {
+                            if let Ok((reply2, think2)) =
+                                parse_provider_response_with_thinking(cfg.ai_provider, &body2)
+                            {
+                                raw_reply = reply2;
+                                if !think2.is_empty() {
+                                    thinking_text = think2;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let (no_mem_text, extracted_facts) = extract_memory_tags_from_reply(&raw_reply);
+    let (cleaned_text, file_proposals) = if cfg.ai_agent_tools_enabled {
+        extract_file_proposals_from_reply(&no_mem_text)
+    } else {
+        (no_mem_text, Vec::new())
+    };
+    let final_reply = if cleaned_text.is_empty() && file_proposals.is_empty() {
         raw_reply.clone()
     } else {
         cleaned_text
@@ -1504,8 +1768,10 @@ pub fn send_chat_completion(
     Ok(ChatCompletionOutcome::Reply {
         raw_text: raw_reply,
         cleaned_text: final_reply,
+        thinking_text,
         extracted_facts,
         suggested_actions,
+        file_proposals,
         upgraded_model,
     })
 }
@@ -1668,6 +1934,8 @@ mod tests {
                         timestamp: "2026-11-26T18:00:00Z".to_string(),
                         speaker_name: "Kullanıcı".to_string(),
                         suggested_actions: Vec::new(),
+                        thinking_text: String::new(),
+                        file_proposals: Vec::new(),
                     },
                     true,
                 )
@@ -1767,6 +2035,8 @@ mod tests {
                 timestamp: "t1".to_string(),
                 speaker_name: "Kullanıcı".to_string(),
                 suggested_actions: Vec::new(),
+                thinking_text: String::new(),
+                file_proposals: Vec::new(),
             },
             ChatMessage {
                 role: ChatRole::Assistant,
@@ -1774,6 +2044,8 @@ mod tests {
                 timestamp: "t2".to_string(),
                 speaker_name: "Persephone".to_string(),
                 suggested_actions: Vec::new(),
+                thinking_text: String::new(),
+                file_proposals: Vec::new(),
             },
             ChatMessage {
                 role: ChatRole::User,
@@ -1781,6 +2053,8 @@ mod tests {
                 timestamp: "t3".to_string(),
                 speaker_name: "Kullanıcı".to_string(),
                 suggested_actions: Vec::new(),
+                thinking_text: String::new(),
+                file_proposals: Vec::new(),
             },
         ];
 
@@ -1911,6 +2185,8 @@ mod tests {
             timestamp: "t1".to_string(),
             speaker_name: "Sen".to_string(),
             suggested_actions: Vec::new(),
+            thinking_text: String::new(),
+            file_proposals: Vec::new(),
         }];
 
         let outcome =
@@ -2021,5 +2297,48 @@ mod tests {
             pick_preferred_live_model(BlazeAiProvider::Anthropic, "", &a_models),
             Some("claude-sonnet-4-5".to_string())
         );
+
+        // Thinking tag extraction + Ollama native thinking + Vision multimodal payloads
+        let (clean_t, thought) =
+            extract_thinking_tags("<think>Adım 1 analiz</think>\nSonuç hazır.");
+        assert_eq!(clean_t, "Sonuç hazır.");
+        assert_eq!(thought, "Adım 1 analiz");
+
+        let (ollama_text, ollama_think) = parse_provider_response_with_thinking(
+            BlazeAiProvider::Ollama,
+            r#"{"message":{"role":"assistant","thinking":"İç akıl yürütme","content":"Kısa yanıt"}}"#,
+        )
+        .unwrap();
+        assert_eq!(ollama_text, "Kısa yanıt");
+        assert_eq!(ollama_think, "İç akıl yürütme");
+
+        let vis = VisionAttachment {
+            mime_type: "image/jpeg".to_string(),
+            base64_data: "AQID".to_string(),
+            width: 1280,
+            height: 720,
+        };
+        let hist = vec![ChatMessage {
+            role: ChatRole::User,
+            content: "Ekranda ne var?".to_string(),
+            timestamp: "t1".to_string(),
+            speaker_name: "Sen".to_string(),
+            suggested_actions: Vec::new(),
+            thinking_text: String::new(),
+            file_proposals: Vec::new(),
+        }];
+        let mut o_cfg = OmnibarConfig::default();
+        o_cfg.ai_provider = BlazeAiProvider::Ollama;
+        o_cfg.ai_model = "qwen3.5:9b".to_string();
+        o_cfg.ai_thinking_mode = true;
+        let o_pay = build_provider_request_payload_with_vision(&o_cfg, "sys", &hist, Some(&vis));
+        assert_eq!(o_pay["think"], true);
+        assert_eq!(o_pay["keep_alive"], "5m");
+        assert_eq!(o_pay["messages"][1]["images"][0], "AQID");
+
+        let mut g_cfg = OmnibarConfig::default();
+        g_cfg.ai_provider = BlazeAiProvider::Gemini;
+        let g_pay = build_provider_request_payload_with_vision(&g_cfg, "sys", &hist, Some(&vis));
+        assert_eq!(g_pay["contents"][0]["parts"][1]["inline_data"]["data"], "AQID");
     }
 }

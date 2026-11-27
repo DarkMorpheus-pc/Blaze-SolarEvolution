@@ -1058,6 +1058,22 @@ pub struct OmnibarConfig {
     pub ai_local_memory_enabled: bool,
     #[serde(default = "default_true")]
     pub ai_include_blazeos_guide: bool,
+    #[serde(default)]
+    pub ai_thinking_mode: bool,
+    #[serde(default = "default_ai_local_keep_alive")]
+    pub ai_local_keep_alive: String,
+    #[serde(default = "default_true")]
+    pub ai_web_research_enabled: bool,
+    #[serde(default = "default_true")]
+    pub ai_agent_tools_enabled: bool,
+    #[serde(default = "default_true")]
+    pub ai_voice_enabled: bool,
+    #[serde(default)]
+    pub ai_voice_tts_auto: bool,
+    #[serde(default = "default_ai_voice_stt_model")]
+    pub ai_voice_stt_model: String,
+    #[serde(default)]
+    pub ai_voice_tts_voice: String,
 }
 
 fn default_search_engine() -> String {
@@ -1074,6 +1090,14 @@ fn default_companion_color() -> String {
 
 fn default_ai_model() -> String {
     "gemini-3.8-flash".to_string()
+}
+
+fn default_ai_local_keep_alive() -> String {
+    "5m".to_string()
+}
+
+fn default_ai_voice_stt_model() -> String {
+    "ggml-base.bin".to_string()
 }
 
 impl Default for OmnibarConfig {
@@ -1096,6 +1120,14 @@ impl Default for OmnibarConfig {
             ai_persist_chat: true,
             ai_local_memory_enabled: true,
             ai_include_blazeos_guide: true,
+            ai_thinking_mode: false,
+            ai_local_keep_alive: default_ai_local_keep_alive(),
+            ai_web_research_enabled: true,
+            ai_agent_tools_enabled: true,
+            ai_voice_enabled: true,
+            ai_voice_tts_auto: false,
+            ai_voice_stt_model: default_ai_voice_stt_model(),
+            ai_voice_tts_voice: String::new(),
         }
     }
 }
@@ -1156,6 +1188,39 @@ impl OmnibarConfig {
             trimmed.to_string()
         } else {
             self.ai_provider.default_base_url().to_string()
+        }
+    }
+
+    pub fn effective_local_keep_alive(&self) -> String {
+        let trimmed = self.ai_local_keep_alive.trim();
+        if trimmed.is_empty() {
+            "5m".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
+
+    /// Resolves the active Piper Turkish voice model ID, defaulting to
+    /// `tr_TR-dfki-medium` for Persephone / balanced personas and
+    /// `tr_TR-fahrettin-medium` for Köz / stern personas unless overridden.
+    pub fn effective_tts_voice(&self) -> String {
+        let custom = self.ai_voice_tts_voice.trim();
+        if !custom.is_empty() {
+            return custom.to_string();
+        }
+        let name = self.effective_companion_name().to_lowercase();
+        if name == "köz"
+            || name == "koz"
+            || matches!(
+                self.companion_expression,
+                CompanionExpression::Angry
+                    | CompanionExpression::Suspicious
+                    | CompanionExpression::Unimpressed
+            )
+        {
+            "tr_TR-fahrettin-medium".to_string()
+        } else {
+            "tr_TR-dfki-medium".to_string()
         }
     }
 }

@@ -1,6 +1,6 @@
 Name:           blaze-release
 Version:        5.05.1
-Release:        3%{?dist}
+Release:        4%{?dist}
 Summary:        Blaze repository definition, GPG key and OS identity guard
 License:        GPL-3.0-or-later
 URL:            https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
@@ -105,6 +105,8 @@ fi
 /etc/blazeos/update-channel.conf
 
 %changelog
+* Fri Nov 27 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-4
+- Shorten blaze.repo metadata_expire to 15m so new BlazeHouse OTA releases appear promptly
 * Fri Nov 27 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-3
 - Heal missing fusermount3/FUSE SUID bits, capability-only newuidmap/newgidmap permissions, and uninstalled Papirus-Dark dconf icon theme baseline in %%posttrans
 

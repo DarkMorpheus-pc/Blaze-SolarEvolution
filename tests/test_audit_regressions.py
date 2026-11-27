@@ -1869,6 +1869,41 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
         self.assertIn("00-blaze-theme", rel_spec)
         self.assertIn("dconf update", rel_spec)
 
+    def test_blazehouse_assumeyes_refresh_and_local_ai_hub_voice_brain_vision(self):
+        """Faz 0-4: BlazeHouse repo_gpgcheck --assumeyes/--refresh, Local AI Hub, Brain, Safe Tools, Voice, Vision."""
+        # Faz 0: blaze.repo fast metadata expiry + BlazeHouse --assumeyes / --refresh
+        for repo_p in (ROOT / 'packaging/blaze.repo', OVERLAY / 'usr/share/dnf5/repos.d/blaze.repo'):
+            self.assertIn('metadata_expire=15m', repo_p.read_text(encoding='utf-8'))
+        bh_root = Path(os.environ.get('BLAZE_HOUSE_SRC') or (ROOT.parent / 'blaze-house/modern-ui'))
+        if bh_root.is_dir():
+            upd_rs = (bh_root / 'src-tauri/src/commands/updates.rs').read_text(encoding='utf-8')
+            self.assertIn('--assumeyes', upd_rs)
+            self.assertIn('--refresh', upd_rs)
+            self.assertIn('blaze_channel_has_unseen_updates', upd_rs)
+            bridge_ts = (bh_root / 'src/services/tauriBridge.ts').read_text(encoding='utf-8')
+            self.assertIn("invoke<PackageUpdate[]>('check_system_updates', { distro, force })", bridge_ts)
+
+        # Faz 1-4: Local AI Hub, Brain Store, Safe Agent Tools, Turkish Voice & Explicit Vision modules
+        local_rs = (ROOT / 'solarui/crates/solar-shell/src/local_ai.rs').read_text(encoding='utf-8')
+        for sym in ('LOCAL_MODEL_TIERS', 'qwen3.5:2b', 'qwen3.5:9b', 'gemma4:12b', 'qwen3:14b', 'OLLAMA_HOST', '127.0.0.1:11434'):
+            self.assertIn(sym, local_rs)
+
+        brain_rs = (ROOT / 'solarui/crates/solar-shell/src/brain_store.rs').read_text(encoding='utf-8')
+        for sym in ('memory.md', 'record_task_summary', 'search_brain', 'O_NOFOLLOW'):
+            self.assertIn(sym, brain_rs)
+
+        tools_rs = (ROOT / 'solarui/crates/solar-shell/src/agent_tools.rs').read_text(encoding='utf-8')
+        for sym in ('execute_web_research', 'extract_file_proposals_from_reply', 'validate_safe_user_path', '.blaze-signing', 'blazeai_secrets.json'):
+            self.assertIn(sym, tools_rs)
+
+        voice_rs = (ROOT / 'solarui/crates/solar-shell/src/voice_pipeline.rs').read_text(encoding='utf-8')
+        for sym in ('tr_TR-dfki-medium', 'tr_TR-fahrettin-medium', '/usr/bin/pw-record', '/usr/bin/pw-play', '/usr/bin/grim', 'VoiceSpeaker'):
+            self.assertIn(sym, voice_rs)
+
+        omni_rs = (ROOT / 'solarui/crates/solar-shell/src/omnibar.rs').read_text(encoding='utf-8')
+        for sym in ('Yerel Modeller', 'Ses & Beyin', 'Onayla ve Oluştur', 'Düşünme süreci', 'capture_wayland_screen_for_vision', 'install_turkish_tts_pack'):
+            self.assertIn(sym, omni_rs)
+
 
 if __name__ == '__main__':
     unittest.main()

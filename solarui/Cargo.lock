@@ -1507,6 +1507,7 @@ dependencies = [
  "serde_json",
  "solar-common",
  "solar-niri",
+ "tempfile",
  "thiserror",
  "tokio",
  "toml 0.8.23",

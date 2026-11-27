@@ -4,7 +4,7 @@
 # Binary repack of artefacts built from the repositories listed in SOURCES.md
 Name:           blaze-house
 Version:        2.1.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        BlazeHouse system control center
 License:        GPL-3.0-or-later
 URL:            https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
@@ -30,6 +30,8 @@ rm -f %{buildroot}/%{name}-%{version}.tar
 /usr/share/icons/hicolor/*/apps/blaze-house.png
 
 %changelog
+* Fri Nov 27 2026 Blaze Release <release@blazeos.com.tr> - 2.1.0-2
+- Pass --assumeyes and --refresh on Fedora DNF5 check-upgrade so repo_gpgcheck=1 imports local Blaze GPG keys cleanly for unprivileged users and forces fresh metadata when channel.json has newer packages
 * Mon Nov 23 2026 Blaze Release <release@blazeos.com.tr> - 2.1.0-1
 - Add GitHub update channel integration and major Fedora release upgrade workflow
 * Mon Oct 26 2026 Blaze Release <release@blazeos.com.tr> - 2.0.0-1

@@ -10,27 +10,41 @@ use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
     Box as GtkBox, Button, CheckButton, DropDown, Entry, EventControllerKey,
-    EventControllerMotion, IconTheme, Image, Label, ListBox, ListBoxRow, Orientation,
-    PasswordEntry, Popover, ScrolledWindow, Separator, StringList, Window,
+    EventControllerMotion, Expander, IconTheme, Image, Label, ListBox, ListBoxRow, Orientation,
+    PasswordEntry, Popover, ProgressBar, ScrolledWindow, Separator, Stack, StringList,
+    ToggleButton, Window,
 };
 use solar_common::{BlazeAiProvider, CompanionExpression, OmnibarConfig, SolarConfig};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::process::Command;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use crate::agent_tools::apply_approved_file_proposal;
 use crate::apps::{scan_desktop_applications, AppInfo};
 use crate::blazeai::{
     build_web_search_url, execute_suggested_action, extract_user_memory_command,
-    migrate_legacy_api_key_if_needed, pick_preferred_live_model, probe_provider_models,
-    resolve_dispatch_mode, send_chat_completion, AiDispatchMode, BlazeAiSecrets,
-    ChatCompletionOutcome, ChatMessage, ChatRole, LocalMemoryStore,
+    migrate_legacy_api_key_if_needed, pick_preferred_live_model, probe_ollama_models,
+    probe_provider_models, resolve_dispatch_mode, send_chat_completion_with_options,
+    AiDispatchMode, BlazeAiSecrets, ChatCompletionOutcome, ChatMessage, ChatRole,
+    LocalMemoryStore,
 };
+use crate::brain_store::BrainStore;
 use crate::companion_avatar::{
     build_companion_customizer_popover, CompanionAvatarWidget, CompanionCustomizerCallbacks,
 };
 use crate::living_flow::{apply_living_flow_theme, FluidCloud, FluidCloudTone};
+use crate::local_ai::{
+    delete_ollama_model, ensure_ollama_serving, find_ollama_binary, install_userspace_ollama,
+    is_ollama_serving, pull_ollama_model, HardwareProfile, PullProgress, LOCAL_MODEL_TIERS,
+};
+use crate::voice_pipeline::{
+    capture_wayland_screen_for_vision, install_turkish_tts_pack, install_whisper_stt_model,
+    ActiveRecording, VisionAttachment, VoicePackStatus, VoiceSpeaker, PIPER_VOICE_KOZ,
+    PIPER_VOICE_PERSEPHONE,
+};
 
 pub const OMNIBAR_OPEN_WIDTH: i32 = 1040;
 pub const OMNIBAR_OPEN_HEIGHT: i32 = 520;
@@ -278,6 +292,91 @@ pub const OMNIBAR_EXTRA_CSS: &str = r#"
         min-height: 24px;
         padding: 0px;
         box-shadow: none;
+    }
+
+    .blazeai-tool-bar {
+        padding: 2px 0px;
+    }
+
+    .blazeai-chip-toggle {
+        background-color: #19191b;
+        background-image: none;
+        color: #a1a1a6;
+        border: 1px solid rgba(237, 237, 237, 0.10);
+        border-radius: 7px;
+        padding: 2px 8px;
+        min-height: 26px;
+        font-size: 11px;
+        font-weight: 500;
+        box-shadow: none;
+    }
+
+    .blazeai-chip-toggle:hover {
+        background-color: #232325;
+        color: #ededed;
+    }
+
+    .blazeai-chip-toggle:checked,
+    .blazeai-mic-active {
+        background-color: rgba(224, 87, 60, 0.22);
+        border-color: rgba(224, 87, 60, 0.85);
+        color: #ededed;
+    }
+
+    .blazeai-vision-badge {
+        background-color: #19191b;
+        border: 1px solid rgba(224, 87, 60, 0.45);
+        border-radius: 8px;
+        padding: 4px 8px;
+    }
+
+    .blazeai-proposal-card {
+        background-color: #141415;
+        border: 1px solid rgba(224, 87, 60, 0.40);
+        border-radius: 8px;
+        padding: 8px;
+        margin-top: 4px;
+    }
+
+    .blazeai-proposal-code {
+        color: #a1a1a6;
+        font-family: monospace;
+        font-size: 11px;
+    }
+
+    .blazeai-local-card {
+        background-color: #19191b;
+        border: 1px solid rgba(237, 237, 237, 0.08);
+        border-radius: 10px;
+        padding: 8px 10px;
+    }
+
+    .blazeai-local-rec-badge {
+        background-color: rgba(224, 87, 60, 0.20);
+        color: #ff9c85;
+        border-radius: 6px;
+        padding: 2px 6px;
+        font-size: 10px;
+        font-weight: 600;
+    }
+
+    .blazeai-tab-btn {
+        background-color: #19191b;
+        background-image: none;
+        color: #a1a1a6;
+        border: 1px solid rgba(237, 237, 237, 0.08);
+        border-radius: 8px;
+        padding: 4px 8px;
+        min-height: 28px;
+        font-size: 11px;
+        font-weight: 500;
+        box-shadow: none;
+    }
+
+    .blazeai-tab-btn.blazeai-tab-active {
+        background-color: #232325;
+        border-color: rgba(224, 87, 60, 0.80);
+        color: #ededed;
     }
 
     .blazeai-copy-btn:hover {
@@ -709,6 +808,8 @@ fn rebuild_chat_view(
     cfg: &OmnibarConfig,
     secrets: &BlazeAiSecrets,
     fluid_cloud: &FluidCloud,
+    voice_speaker: &VoiceSpeaker,
+    stop_speak_btn: &Button,
     pending_wait: bool,
 ) {
     while let Some(child) = chat_box.first_child() {
@@ -736,9 +837,9 @@ fn rebuild_chat_view(
         card.append(&desc);
 
         let mode_note = if !cfg.ai_provider.requires_api_key() || secrets.has_key_for(cfg.ai_provider) {
-            "Yerel hafıza için \"hatırla: not\" yazabilir veya BlazeOS hakkında sorabilirsin"
+            "Yerel beyin hafızası için \"hatırla: not\" yazabilir, ekran veya web araştırması ekleyebilirsin"
         } else {
-            "API anahtarı girilmemiş; dişli simgesinden ekleyebilir veya doğrudan web araması başlatabilirsin"
+            "Dişli simgesinden API anahtarı girebilir, Yerel Modeller sekmesinden çevrimdışı model indirebilir veya doğrudan web araması başlatabilirsin"
         };
         let hint = Label::new(Some(mode_note));
         hint.add_css_class("blazeai-msg-note");
@@ -803,6 +904,43 @@ fn rebuild_chat_view(
                 speaker.set_halign(gtk4::Align::Start);
                 head.append(&speaker);
 
+                // Inline speak aloud button (Piper Turkish TTS)
+                let speak_btn = Button::new();
+                speak_btn.add_css_class("blazeai-copy-btn");
+                speak_btn.set_tooltip_text(Some("Türkçe sesli oku (Piper TTS)"));
+                speak_btn.set_child(Some(&build_symbolic_icon(
+                    &["audio-speakers-symbolic"],
+                    "omnibar-header-icon",
+                )));
+                let content_to_speak = msg.content.clone();
+                let voice_id = cfg.effective_tts_voice();
+                let spk_clone = voice_speaker.clone();
+                let stop_btn_ref = stop_speak_btn.clone();
+                let cloud_spk = fluid_cloud.clone();
+                speak_btn.connect_clicked(move |_| {
+                    let (tx, rx) = async_channel::bounded::<()>(1);
+                    match spk_clone.speak_async(
+                        content_to_speak.clone(),
+                        voice_id.clone(),
+                        move || {
+                            let _ = tx.send_blocking(());
+                        },
+                    ) {
+                        Ok(()) => {
+                            stop_btn_ref.set_visible(true);
+                            let sb = stop_btn_ref.clone();
+                            glib::spawn_future_local(async move {
+                                let _ = rx.recv().await;
+                                sb.set_visible(false);
+                            });
+                        }
+                        Err(err) => {
+                            cloud_spk.pulse(&truncate_chars(&err, 42), FluidCloudTone::Warning, false);
+                        }
+                    }
+                });
+                head.append(&speak_btn);
+
                 let copy_btn = Button::new();
                 copy_btn.add_css_class("blazeai-copy-btn");
                 copy_btn.set_tooltip_text(Some("Yanıtı panoya kopyala"));
@@ -817,6 +955,17 @@ fn rebuild_chat_view(
                 head.append(&copy_btn);
                 card.append(&head);
 
+                if !msg.thinking_text.trim().is_empty() {
+                    let exp = Expander::new(Some("Düşünme süreci"));
+                    let t_lbl = Label::new(Some(msg.thinking_text.trim()));
+                    t_lbl.add_css_class("blazeai-msg-note");
+                    t_lbl.set_wrap(true);
+                    t_lbl.set_xalign(0.0);
+                    t_lbl.set_halign(gtk4::Align::Start);
+                    exp.set_child(Some(&t_lbl));
+                    card.append(&exp);
+                }
+
                 let body = Label::new(Some(&msg.content));
                 body.add_css_class("blazeai-msg-text");
                 body.set_wrap(true);
@@ -824,6 +973,80 @@ fn rebuild_chat_view(
                 body.set_halign(gtk4::Align::Start);
                 body.set_selectable(true);
                 card.append(&body);
+
+                // Inline Approval Cards for proposed user files (never written silently!)
+                for prop in &msg.file_proposals {
+                    let p_card = GtkBox::new(Orientation::Vertical, 6);
+                    p_card.add_css_class("blazeai-proposal-card");
+
+                    let p_hdr = Label::new(Some(&format!("Dosya önerisi: {}", prop.display_path)));
+                    p_hdr.add_css_class("blazeai-msg-speaker");
+                    p_hdr.set_halign(gtk4::Align::Start);
+                    p_hdr.set_wrap(true);
+                    p_card.append(&p_hdr);
+
+                    let preview_lines: String = prop
+                        .content
+                        .lines()
+                        .take(6)
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let p_code = Label::new(Some(&truncate_chars(&preview_lines, 240)));
+                    p_code.add_css_class("blazeai-proposal-code");
+                    p_code.set_wrap(true);
+                    p_code.set_xalign(0.0);
+                    p_code.set_halign(gtk4::Align::Start);
+                    p_card.append(&p_code);
+
+                    let p_btns = GtkBox::new(Orientation::Horizontal, 6);
+                    let approve_btn = Button::with_label("Onayla ve Oluştur");
+                    approve_btn.add_css_class("companion-reset-btn");
+                    let reject_btn = Button::with_label("Reddet");
+                    reject_btn.add_css_class("blazeai-chip-toggle");
+                    p_btns.append(&approve_btn);
+                    p_btns.append(&reject_btn);
+                    p_card.append(&p_btns);
+
+                    let prop_clone = prop.clone();
+                    let cloud_prop = fluid_cloud.clone();
+                    let rej_ref = reject_btn.clone();
+                    approve_btn.connect_clicked(move |btn| {
+                        let home = std::path::PathBuf::from(
+                            std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()),
+                        );
+                        match apply_approved_file_proposal(&prop_clone, &home) {
+                            Ok(saved_path) => {
+                                let _ = BrainStore::open_default().record_task_summary(
+                                    &format!("Dosya oluşturuldu: {}", prop_clone.display_path),
+                                    &format!("Hedef: {}", saved_path.display()),
+                                );
+                                btn.set_label("Oluşturuldu");
+                                btn.set_sensitive(false);
+                                rej_ref.set_visible(false);
+                                cloud_prop.pulse(
+                                    "Dosya güvenle oluşturuldu",
+                                    FluidCloudTone::Success,
+                                    false,
+                                );
+                            }
+                            Err(err) => {
+                                cloud_prop.pulse(
+                                    &truncate_chars(&err, 42),
+                                    FluidCloudTone::Danger,
+                                    false,
+                                );
+                            }
+                        }
+                    });
+                    let app_ref = approve_btn.clone();
+                    let card_ref = p_card.clone();
+                    reject_btn.connect_clicked(move |_| {
+                        app_ref.set_sensitive(false);
+                        card_ref.set_visible(false);
+                    });
+
+                    card.append(&p_card);
+                }
 
                 if !msg.suggested_actions.is_empty() {
                     let action_box = GtkBox::new(Orientation::Vertical, 4);
@@ -873,6 +1096,11 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
         initial_cfg.omnibar.ai_persist_chat,
     )));
     let is_sending = Rc::new(Cell::new(false));
+    let voice_speaker = VoiceSpeaker::new();
+    let active_recording: Rc<RefCell<Option<ActiveRecording>>> = Rc::new(RefCell::new(None));
+    let pending_vision: Rc<RefCell<Option<VisionAttachment>>> = Rc::new(RefCell::new(None));
+    let local_pull_cancel = Arc::new(AtomicBool::new(false));
+    let voice_dl_cancel = Arc::new(AtomicBool::new(false));
 
     let window = Window::builder()
         .title("Solar Omnibar")
@@ -883,7 +1111,13 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
         .build();
 
     let loop_quit = main_loop.clone();
+    let spk_on_close = voice_speaker.clone();
+    let rec_on_close = active_recording.clone();
     window.connect_close_request(move |_| {
+        spk_on_close.stop();
+        if let Some(rec) = rec_on_close.borrow_mut().take() {
+            rec.cancel();
+        }
         let _ = std::fs::remove_file(omnibar_pid_file());
         loop_quit.quit();
         glib::Propagation::Proceed
@@ -1003,7 +1237,84 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
     chat_scroll.set_child(Some(&chat_box));
     left_pane.append(&chat_scroll);
 
-    // Bottom prompt bar (Entry + Send button, NO microphone icon)
+    // Explicit Vision attachment preview badge (hidden until user clicks Screen button)
+    let vision_badge_row = GtkBox::new(Orientation::Horizontal, 6);
+    vision_badge_row.add_css_class("blazeai-vision-badge");
+    vision_badge_row.set_visible(false);
+    let vision_badge_lbl = Label::new(Some("Ekran görüntüsü eklendi"));
+    vision_badge_lbl.add_css_class("companion-banner-desc");
+    vision_badge_lbl.set_hexpand(true);
+    vision_badge_lbl.set_halign(gtk4::Align::Start);
+    vision_badge_row.append(&vision_badge_lbl);
+    let vision_clear_btn = Button::new();
+    vision_clear_btn.add_css_class("blazeai-copy-btn");
+    vision_clear_btn.set_tooltip_text(Some("Ekran görüntüsünü kaldır"));
+    vision_clear_btn.set_child(Some(&build_symbolic_icon(
+        &["window-close-symbolic"],
+        "omnibar-header-icon",
+    )));
+    vision_badge_row.append(&vision_clear_btn);
+    left_pane.append(&vision_badge_row);
+
+    // Compact multimodal toolbar: Thinking toggle, Web research, Explicit Screen Vision, Mic, Stop TTS
+    let blazeai_tool_bar = GtkBox::new(Orientation::Horizontal, 4);
+    blazeai_tool_bar.add_css_class("blazeai-tool-bar");
+
+    let think_toggle = ToggleButton::with_label("Düşün");
+    think_toggle.add_css_class("blazeai-chip-toggle");
+    think_toggle.set_active(initial_cfg.omnibar.ai_thinking_mode);
+    think_toggle.set_tooltip_text(Some("Hibrit derin düşünme / hızlı yanıt modu"));
+    blazeai_tool_bar.append(&think_toggle);
+
+    let web_toggle = ToggleButton::with_label("Web");
+    web_toggle.add_css_class("blazeai-chip-toggle");
+    web_toggle.set_tooltip_text(Some("Sonraki soruda ücretsiz canlı DuckDuckGo araştırması yap"));
+    blazeai_tool_bar.append(&web_toggle);
+
+    let vision_btn = Button::new();
+    vision_btn.add_css_class("blazeai-chip-toggle");
+    vision_btn.set_tooltip_text(Some("Ekran görüntüsü ekle (açık onaylı grim)"));
+    vision_btn.set_child(Some(&build_symbolic_icon(
+        &["camera-photo-symbolic"],
+        "omnibar-header-icon",
+    )));
+    blazeai_tool_bar.append(&vision_btn);
+
+    let mic_btn = Button::new();
+    mic_btn.add_css_class("blazeai-chip-toggle");
+    mic_btn.set_tooltip_text(Some("Türkçe sesli sor (Bas-başlat / tekrar bas-gönder)"));
+    mic_btn.set_child(Some(&build_symbolic_icon(
+        &["audio-input-microphone-symbolic"],
+        "omnibar-header-icon",
+    )));
+    blazeai_tool_bar.append(&mic_btn);
+
+    let stop_speak_btn = Button::new();
+    stop_speak_btn.add_css_class("blazeai-chip-toggle");
+    stop_speak_btn.set_tooltip_text(Some("Konuşmayı durdur (Barge-in)"));
+    stop_speak_btn.set_child(Some(&build_symbolic_icon(
+        &["audio-volume-muted-symbolic"],
+        "omnibar-header-icon",
+    )));
+    stop_speak_btn.set_visible(false);
+    blazeai_tool_bar.append(&stop_speak_btn);
+
+    let tool_spacer = GtkBox::new(Orientation::Horizontal, 0);
+    tool_spacer.set_hexpand(true);
+    blazeai_tool_bar.append(&tool_spacer);
+
+    let local_hub_shortcut_btn = Button::new();
+    local_hub_shortcut_btn.add_css_class("blazeai-chip-toggle");
+    local_hub_shortcut_btn.set_tooltip_text(Some("Yerel model indir veya yönet (1.5B–16B)"));
+    local_hub_shortcut_btn.set_child(Some(&build_symbolic_icon(
+        &["folder-download-symbolic"],
+        "omnibar-header-icon",
+    )));
+    blazeai_tool_bar.append(&local_hub_shortcut_btn);
+
+    left_pane.append(&blazeai_tool_bar);
+
+    // Bottom prompt bar
     let blazeai_input_wrap = GtkBox::new(Orientation::Horizontal, 4);
     blazeai_input_wrap.add_css_class("blazeai-input-wrap");
 
@@ -1081,7 +1392,9 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
     close_btn.set_tooltip_text(Some("Kapat"));
     let win_close = window.downgrade();
     let loop_close = main_loop.clone();
+    let spk_close_btn = voice_speaker.clone();
     close_btn.connect_clicked(move |_| {
+        spk_close_btn.stop();
         let _ = std::fs::remove_file(omnibar_pid_file());
         if let Some(w) = win_close.upgrade() {
             w.close();
@@ -1130,6 +1443,8 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
         &initial_cfg.omnibar,
         &BlazeAiSecrets::load(),
         &fluid_cloud,
+        &voice_speaker,
+        &stop_speak_btn,
         false,
     );
 
@@ -1142,6 +1457,8 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
         let model_lbl = model_btn_lbl.clone();
         let b_entry = blazeai_entry.clone();
         let send_flag = is_sending.clone();
+        let spk_ref = voice_speaker.clone();
+        let stop_btn_ref = stop_speak_btn.clone();
         Rc::new(move || {
             let cfg = SolarConfig::load();
             let secrets = BlazeAiSecrets::load();
@@ -1154,6 +1471,8 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
                 &cfg.omnibar,
                 &secrets,
                 &cloud_c,
+                &spk_ref,
+                &stop_btn_ref,
                 send_flag.get(),
             );
         })
@@ -1213,16 +1532,72 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
         .hscrollbar_policy(gtk4::PolicyType::Never)
         .vscrollbar_policy(gtk4::PolicyType::Automatic)
         .propagate_natural_height(true)
-        .max_content_height(430)
-        .min_content_width(326)
+        .max_content_height(460)
+        .min_content_width(356)
         .build();
-    let gear_box = GtkBox::new(Orientation::Vertical, 10);
-    gear_box.add_css_class("blazeai-gear-box");
+    let gear_outer = GtkBox::new(Orientation::Vertical, 8);
+    gear_outer.add_css_class("blazeai-gear-box");
 
-    let gear_title = Label::new(Some("BlazeAI ve yerel hafıza"));
+    let gear_title = Label::new(Some("BlazeAI, Yerel Modeller ve Ses"));
     gear_title.add_css_class("companion-banner-title");
     gear_title.set_halign(gtk4::Align::Start);
-    gear_box.append(&gear_title);
+    gear_outer.append(&gear_title);
+
+    // 3-tab navigation row inside Gear Popover
+    let gear_tabs_row = GtkBox::new(Orientation::Horizontal, 4);
+    let tab_api_btn = Button::with_label("API & Genel");
+    tab_api_btn.add_css_class("blazeai-tab-btn");
+    tab_api_btn.add_css_class("blazeai-tab-active");
+    tab_api_btn.set_hexpand(true);
+    let tab_local_btn = Button::with_label("Yerel Modeller");
+    tab_local_btn.add_css_class("blazeai-tab-btn");
+    tab_local_btn.set_hexpand(true);
+    let tab_voice_btn = Button::with_label("Ses & Beyin");
+    tab_voice_btn.add_css_class("blazeai-tab-btn");
+    tab_voice_btn.set_hexpand(true);
+    gear_tabs_row.append(&tab_api_btn);
+    gear_tabs_row.append(&tab_local_btn);
+    gear_tabs_row.append(&tab_voice_btn);
+    gear_outer.append(&gear_tabs_row);
+
+    let gear_stack = Stack::new();
+    let gear_box = GtkBox::new(Orientation::Vertical, 8);
+    let local_hub_box = GtkBox::new(Orientation::Vertical, 8);
+    let voice_brain_box = GtkBox::new(Orientation::Vertical, 8);
+    gear_stack.add_named(&gear_box, Some("api"));
+    gear_stack.add_named(&local_hub_box, Some("local"));
+    gear_stack.add_named(&voice_brain_box, Some("voice"));
+    gear_stack.set_visible_child_name("api");
+    gear_outer.append(&gear_stack);
+
+    let switch_gear_tab: Rc<dyn Fn(&'static str)> = {
+        let st = gear_stack.clone();
+        let b1 = tab_api_btn.clone();
+        let b2 = tab_local_btn.clone();
+        let b3 = tab_voice_btn.clone();
+        Rc::new(move |tab: &'static str| {
+            st.set_visible_child_name(tab);
+            for (btn, id) in [(&b1, "api"), (&b2, "local"), (&b3, "voice")] {
+                if id == tab {
+                    btn.add_css_class("blazeai-tab-active");
+                } else {
+                    btn.remove_css_class("blazeai-tab-active");
+                }
+            }
+        })
+    };
+    {
+        let sw = switch_gear_tab.clone();
+        tab_api_btn.connect_clicked(move |_| sw("api"));
+    }
+    {
+        let sw = switch_gear_tab.clone();
+        tab_local_btn.connect_clicked(move |_| sw("local"));
+    }
+    {
+        let sw = switch_gear_tab.clone();
+        tab_voice_btn.connect_clicked(move |_| sw("voice"));
+    }
 
     let syncing_gear = Rc::new(Cell::new(false));
 
@@ -1279,9 +1654,13 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
     let chk_persist = CheckButton::with_label("Sohbet geçmişini koru");
     let chk_local_mem = CheckButton::with_label("Uzun vadeli yerel hafıza");
     let chk_guide = CheckButton::with_label("Yerleşik BlazeOS rehberini ekle");
+    let chk_web_research = CheckButton::with_label("Otomatik web araştırması (DuckDuckGo)");
+    let chk_agent_tools = CheckButton::with_label("Onay kartlı dosya oluşturma araçları");
     gear_box.append(&chk_persist);
     gear_box.append(&chk_local_mem);
     gear_box.append(&chk_guide);
+    gear_box.append(&chk_web_research);
+    gear_box.append(&chk_agent_tools);
 
     gear_box.append(&Separator::new(Orientation::Horizontal));
 
@@ -1307,7 +1686,117 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
     clear_all_btn.add_css_class("danger-btn");
     gear_box.append(&clear_all_btn);
 
-    gear_scroll.set_child(Some(&gear_box));
+    // =========================================================================
+    // TAB 2: LOCAL MODEL HUB (1.5B-16B, Hardware Probe, User-Space Ollama)
+    // =========================================================================
+    let hw_summary_lbl = Label::new(Some("Donanım algılanıyor..."));
+    hw_summary_lbl.add_css_class("companion-banner-desc");
+    hw_summary_lbl.set_wrap(true);
+    hw_summary_lbl.set_xalign(0.0);
+    hw_summary_lbl.set_halign(gtk4::Align::Start);
+    local_hub_box.append(&hw_summary_lbl);
+
+    let ollama_engine_row = GtkBox::new(Orientation::Horizontal, 6);
+    let ollama_status_lbl = Label::new(Some("Yerel motor durumu kontrol ediliyor..."));
+    ollama_status_lbl.add_css_class("blazeai-msg-note");
+    ollama_status_lbl.set_hexpand(true);
+    ollama_status_lbl.set_wrap(true);
+    ollama_status_lbl.set_xalign(0.0);
+    ollama_status_lbl.set_halign(gtk4::Align::Start);
+    ollama_engine_row.append(&ollama_status_lbl);
+
+    let ollama_setup_btn = Button::with_label("Motoru kur");
+    ollama_setup_btn.add_css_class("companion-reset-btn");
+    ollama_engine_row.append(&ollama_setup_btn);
+    local_hub_box.append(&ollama_engine_row);
+
+    let pull_progress_box = GtkBox::new(Orientation::Vertical, 4);
+    pull_progress_box.set_visible(false);
+    let pull_status_lbl = Label::new(Some("İndiriliyor..."));
+    pull_status_lbl.add_css_class("blazeai-msg-note");
+    pull_status_lbl.set_halign(gtk4::Align::Start);
+    pull_progress_box.append(&pull_status_lbl);
+    let pull_bar_row = GtkBox::new(Orientation::Horizontal, 6);
+    let pull_progress_bar = ProgressBar::new();
+    pull_progress_bar.set_hexpand(true);
+    pull_progress_bar.set_show_text(true);
+    pull_bar_row.append(&pull_progress_bar);
+    let pull_cancel_btn = Button::with_label("İptal");
+    pull_cancel_btn.add_css_class("danger-btn");
+    pull_bar_row.append(&pull_cancel_btn);
+    pull_progress_box.append(&pull_bar_row);
+    local_hub_box.append(&pull_progress_box);
+
+    let local_tiers_box = GtkBox::new(Orientation::Vertical, 6);
+    local_hub_box.append(&local_tiers_box);
+
+    // =========================================================================
+    // TAB 3: VOICE (whisper.cpp + Piper Turkish TTS) & LOCAL BRAIN FOLDER
+    // =========================================================================
+    let voice_hdr = Label::new(Some("Türkçe sesli sohbet (Piper TTS + Whisper)"));
+    voice_hdr.add_css_class("companion-section-lbl");
+    voice_hdr.set_halign(gtk4::Align::Start);
+    voice_brain_box.append(&voice_hdr);
+
+    let chk_tts_auto = CheckButton::with_label("Yanıtları otomatik Türkçe seslendir");
+    voice_brain_box.append(&chk_tts_auto);
+
+    let voice_sel_lbl = Label::new(Some("Karakter sesi"));
+    voice_sel_lbl.add_css_class("companion-section-lbl");
+    voice_sel_lbl.set_halign(gtk4::Align::Start);
+    voice_brain_box.append(&voice_sel_lbl);
+
+    let voice_dropdown = DropDown::new(
+        Some(StringList::new(&[
+            "Otomatik (Persephone / Köz)",
+            "Persephone (tr_TR-dfki-medium)",
+            "Köz (tr_TR-fahrettin-medium)",
+        ])),
+        None::<gtk4::Expression>,
+    );
+    voice_brain_box.append(&voice_dropdown);
+
+    let voice_status_lbl = Label::new(Some("Ses paketleri kontrol ediliyor..."));
+    voice_status_lbl.add_css_class("blazeai-msg-note");
+    voice_status_lbl.set_wrap(true);
+    voice_status_lbl.set_xalign(0.0);
+    voice_status_lbl.set_halign(gtk4::Align::Start);
+    voice_brain_box.append(&voice_status_lbl);
+
+    let dl_tts_btn = Button::with_label("Türkçe ses paketini indir (Piper ~150 MB)");
+    dl_tts_btn.add_css_class("companion-reset-btn");
+    voice_brain_box.append(&dl_tts_btn);
+
+    let dl_stt_btn = Button::with_label("Türkçe dinleme modelini indir (Whisper ~142 MB)");
+    dl_stt_btn.add_css_class("companion-reset-btn");
+    voice_brain_box.append(&dl_stt_btn);
+
+    voice_brain_box.append(&Separator::new(Orientation::Horizontal));
+
+    let brain_hdr = Label::new(Some("Yerel Beyin Klasörü (Antigravity mantığı)"));
+    brain_hdr.add_css_class("companion-section-lbl");
+    brain_hdr.set_halign(gtk4::Align::Start);
+    voice_brain_box.append(&brain_hdr);
+
+    let brain_desc = Label::new(Some(
+        "memory.md, tasks/ ve knowledge/ dosyaları yerel bilgisayarında 0600 izniyle tutulur; doğrudan açıp düzenleyebilirsin.",
+    ));
+    brain_desc.add_css_class("blazeai-msg-note");
+    brain_desc.set_wrap(true);
+    brain_desc.set_xalign(0.0);
+    brain_desc.set_halign(gtk4::Align::Start);
+    voice_brain_box.append(&brain_desc);
+
+    let open_brain_btn = Button::new();
+    open_brain_btn.add_css_class("companion-reset-btn");
+    let open_brain_row = GtkBox::new(Orientation::Horizontal, 6);
+    open_brain_row.set_halign(gtk4::Align::Center);
+    open_brain_row.append(&build_symbolic_icon(&["folder-open-symbolic"], "omnibar-header-icon"));
+    open_brain_row.append(&Label::new(Some("Beyin klasörünü aç")));
+    open_brain_btn.set_child(Some(&open_brain_row));
+    voice_brain_box.append(&open_brain_btn);
+
+    gear_scroll.set_child(Some(&gear_outer));
     gear_popover.set_child(Some(&gear_scroll));
 
     let rebuild_gear_memory_list: Rc<dyn Fn()> = {
@@ -1375,6 +1864,11 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
         let c_persist = chk_persist.clone();
         let c_mem = chk_local_mem.clone();
         let c_guide = chk_guide.clone();
+        let c_web = chk_web_research.clone();
+        let c_tools = chk_agent_tools.clone();
+        let c_tts = chk_tts_auto.clone();
+        let v_dd = voice_dropdown.clone();
+        let v_lbl = voice_status_lbl.clone();
         let rebuild_mem = rebuild_gear_memory_list.clone();
         Rc::new(move || {
             sync_flag.set(true);
@@ -1396,6 +1890,31 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
             c_persist.set_active(cfg.omnibar.ai_persist_chat);
             c_mem.set_active(cfg.omnibar.ai_local_memory_enabled);
             c_guide.set_active(cfg.omnibar.ai_include_blazeos_guide);
+            c_web.set_active(cfg.omnibar.ai_web_research_enabled);
+            c_tools.set_active(cfg.omnibar.ai_agent_tools_enabled);
+            c_tts.set_active(cfg.omnibar.ai_voice_tts_auto);
+            let v_idx = match cfg.omnibar.ai_voice_tts_voice.trim() {
+                PIPER_VOICE_PERSEPHONE => 1,
+                PIPER_VOICE_KOZ => 2,
+                _ => 0,
+            };
+            v_dd.set_selected(v_idx);
+            let vp = VoicePackStatus::probe(&cfg.omnibar.ai_voice_stt_model);
+            v_lbl.set_text(&format!(
+                "Konuşma (Piper): {} · Dinleme (Whisper): {}",
+                if vp.persephone_voice_ready && vp.piper_ready {
+                    "Hazır"
+                } else {
+                    "İndirilmedi"
+                },
+                if vp.stt_ready() {
+                    "Hazır"
+                } else if vp.whisper_model_ready {
+                    "Model hazır (whisper-cli bekleniyor)"
+                } else {
+                    "İndirilmedi"
+                }
+            ));
             rebuild_mem();
             sync_flag.set(false);
         })
@@ -1435,6 +1954,7 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
         let refresh_c = refresh_ui_state.clone();
         let sync_g = sync_gear_fields.clone();
         let cache_rc = discovered_models.clone();
+        let sw_tab_pop = switch_gear_tab.clone();
         Rc::new(move |is_loading: bool| {
             while let Some(ch) = wrap.first_child() {
                 wrap.remove(&ch);
@@ -1483,12 +2003,29 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
                 let pop_c = pop.clone();
                 let gpop_c = gear_pop.clone();
                 let sync_c = sync_g.clone();
+                let sw_api = sw_tab_pop.clone();
                 open_gear_btn.connect_clicked(move |_| {
                     pop_c.popdown();
                     sync_c();
+                    sw_api("api");
                     gpop_c.popup();
                 });
                 wrap.append(&open_gear_btn);
+
+                let open_local_btn = Button::with_label("Yerel model indir (1.5B–16B)");
+                open_local_btn.add_css_class("companion-reset-btn");
+                open_local_btn.set_margin_top(4);
+                let pop_c2 = pop.clone();
+                let gpop_c2 = gear_pop.clone();
+                let sync_c2 = sync_g.clone();
+                let sw_loc = sw_tab_pop.clone();
+                open_local_btn.connect_clicked(move |_| {
+                    pop_c2.popdown();
+                    sync_c2();
+                    sw_loc("local");
+                    gpop_c2.popup();
+                });
+                wrap.append(&open_local_btn);
                 return;
             }
 
@@ -1578,6 +2115,22 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
                     }
                 }
             }
+
+            wrap.append(&Separator::new(Orientation::Horizontal));
+            let footer_local_btn = Button::with_label("Yerel model indir / yönet (1.5B–16B)");
+            footer_local_btn.add_css_class("companion-reset-btn");
+            footer_local_btn.set_margin_top(4);
+            let pop_fl = pop.clone();
+            let gpop_fl = gear_pop.clone();
+            let sync_fl = sync_g.clone();
+            let sw_fl = sw_tab_pop.clone();
+            footer_local_btn.connect_clicked(move |_| {
+                pop_fl.popdown();
+                sync_fl();
+                sw_fl("local");
+                gpop_fl.popup();
+            });
+            wrap.append(&footer_local_btn);
         })
     };
 
@@ -1845,6 +2398,693 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
     }
 
     {
+        let sync_flag = syncing_gear.clone();
+        chk_web_research.connect_toggled(move |cb| {
+            if sync_flag.get() {
+                return;
+            }
+            let active = cb.is_active();
+            let _ = SolarConfig::update(|c| {
+                c.omnibar.ai_web_research_enabled = active;
+            });
+        });
+    }
+
+    {
+        let sync_flag = syncing_gear.clone();
+        chk_agent_tools.connect_toggled(move |cb| {
+            if sync_flag.get() {
+                return;
+            }
+            let active = cb.is_active();
+            let _ = SolarConfig::update(|c| {
+                c.omnibar.ai_agent_tools_enabled = active;
+            });
+        });
+    }
+
+    {
+        let sync_flag = syncing_gear.clone();
+        chk_tts_auto.connect_toggled(move |cb| {
+            if sync_flag.get() {
+                return;
+            }
+            let active = cb.is_active();
+            let _ = SolarConfig::update(|c| {
+                c.omnibar.ai_voice_tts_auto = active;
+            });
+        });
+    }
+
+    {
+        let sync_flag = syncing_gear.clone();
+        voice_dropdown.connect_selected_notify(move |dd| {
+            if sync_flag.get() {
+                return;
+            }
+            let chosen = match dd.selected() {
+                1 => PIPER_VOICE_PERSEPHONE,
+                2 => PIPER_VOICE_KOZ,
+                _ => "",
+            };
+            let _ = SolarConfig::update(|c| {
+                c.omnibar.ai_voice_tts_voice = chosen.to_string();
+            });
+        });
+    }
+
+    {
+        let cloud_b = fluid_cloud.clone();
+        open_brain_btn.connect_clicked(move |_| {
+            let brain_dir = BrainStore::open_default().root_dir;
+            let _ = Command::new("xdg-open").arg(&brain_dir).spawn();
+            cloud_b.pulse("Beyin klasörü açıldı", FluidCloudTone::Info, false);
+        });
+    }
+
+    // On-demand Turkish Piper TTS pack download
+    {
+        let cancel_arc = voice_dl_cancel.clone();
+        let status_lbl = voice_status_lbl.clone();
+        let sync_g = sync_gear_fields.clone();
+        let cloud_v = fluid_cloud.clone();
+        dl_tts_btn.connect_clicked(move |btn| {
+            btn.set_sensitive(false);
+            cancel_arc.store(false, Ordering::Relaxed);
+            let cancel_t = cancel_arc.clone();
+            let (tx, rx) = async_channel::unbounded::<Result<String, String>>();
+            std::thread::spawn(move || {
+                let tx_prog = tx.clone();
+                let res = install_turkish_tts_pack(&cancel_t, move |msg| {
+                    let _ = tx_prog.send_blocking(Ok(msg.to_string()));
+                });
+                match res {
+                    Ok(()) => {
+                        let _ = tx.send_blocking(Ok("__DONE__".to_string()));
+                    }
+                    Err(e) => {
+                        let _ = tx.send_blocking(Err(e));
+                    }
+                }
+            });
+            let btn_ref = btn.clone();
+            let st_ref = status_lbl.clone();
+            let sync_ref = sync_g.clone();
+            let cloud_ref = cloud_v.clone();
+            glib::spawn_future_local(async move {
+                while let Ok(item) = rx.recv().await {
+                    match item {
+                        Ok(s) if s == "__DONE__" => {
+                            btn_ref.set_sensitive(true);
+                            sync_ref();
+                            cloud_ref.pulse("Türkçe ses paketi hazır", FluidCloudTone::Success, false);
+                            break;
+                        }
+                        Ok(msg) => st_ref.set_text(&msg),
+                        Err(e) => {
+                            btn_ref.set_sensitive(true);
+                            st_ref.set_text(&format!("Hata: {}", truncate_chars(&e, 100)));
+                            cloud_ref.pulse("Ses paketi indirilemedi", FluidCloudTone::Danger, false);
+                            break;
+                        }
+                    }
+                }
+            });
+        });
+    }
+
+    // On-demand Whisper Turkish STT model download
+    {
+        let cancel_arc = voice_dl_cancel.clone();
+        let status_lbl = voice_status_lbl.clone();
+        let sync_g = sync_gear_fields.clone();
+        let cloud_v = fluid_cloud.clone();
+        dl_stt_btn.connect_clicked(move |btn| {
+            btn.set_sensitive(false);
+            cancel_arc.store(false, Ordering::Relaxed);
+            let stt_model = SolarConfig::load().omnibar.ai_voice_stt_model;
+            let cancel_t = cancel_arc.clone();
+            let (tx, rx) = async_channel::unbounded::<Result<String, String>>();
+            std::thread::spawn(move || {
+                let tx_prog = tx.clone();
+                let res = install_whisper_stt_model(&stt_model, &cancel_t, move |msg| {
+                    let _ = tx_prog.send_blocking(Ok(msg.to_string()));
+                });
+                match res {
+                    Ok(()) => {
+                        let _ = tx.send_blocking(Ok("__DONE__".to_string()));
+                    }
+                    Err(e) => {
+                        let _ = tx.send_blocking(Err(e));
+                    }
+                }
+            });
+            let btn_ref = btn.clone();
+            let st_ref = status_lbl.clone();
+            let sync_ref = sync_g.clone();
+            let cloud_ref = cloud_v.clone();
+            glib::spawn_future_local(async move {
+                while let Ok(item) = rx.recv().await {
+                    match item {
+                        Ok(s) if s == "__DONE__" => {
+                            btn_ref.set_sensitive(true);
+                            sync_ref();
+                            cloud_ref.pulse("Whisper modeli hazır", FluidCloudTone::Success, false);
+                            break;
+                        }
+                        Ok(msg) => st_ref.set_text(&msg),
+                        Err(e) => {
+                            btn_ref.set_sensitive(true);
+                            st_ref.set_text(&format!("Hata: {}", truncate_chars(&e, 100)));
+                            cloud_ref.pulse("Whisper indirilemedi", FluidCloudTone::Danger, false);
+                            break;
+                        }
+                    }
+                }
+            });
+        });
+    }
+
+    // Local Model Hub (1.5B - 16B) dynamic builder + hardware probe + pull/cancel/delete
+    let hw_profile_rc: Rc<RefCell<Option<HardwareProfile>>> = Rc::new(RefCell::new(None));
+    let pull_busy = Rc::new(Cell::new(false));
+
+    let refresh_local_hub: Rc<dyn Fn()> = {
+        let tiers_box = local_tiers_box.clone();
+        let hw_lbl = hw_summary_lbl.clone();
+        let eng_lbl = ollama_status_lbl.clone();
+        let eng_btn = ollama_setup_btn.clone();
+        let hw_rc = hw_profile_rc.clone();
+        let p_box = pull_progress_box.clone();
+        let p_lbl = pull_status_lbl.clone();
+        let p_bar = pull_progress_bar.clone();
+        let p_busy = pull_busy.clone();
+        let p_cancel = local_pull_cancel.clone();
+        let cache_rc = discovered_models.clone();
+        let refresh_ui = refresh_ui_state.clone();
+        let sync_g = sync_gear_fields.clone();
+        let cloud_l = fluid_cloud.clone();
+        let gear_pop = gear_popover.clone();
+
+        Rc::new(move || {
+            let cfg = SolarConfig::load();
+            let ollama_url = if cfg.omnibar.ai_provider == BlazeAiProvider::Ollama
+                && !cfg.omnibar.ai_custom_base_url.trim().is_empty()
+            {
+                cfg.omnibar.effective_ai_base_url()
+            } else {
+                BlazeAiProvider::Ollama.default_base_url().to_string()
+            };
+            let existing_hw = hw_rc.borrow().clone();
+            let (tx, rx) =
+                async_channel::bounded::<(HardwareProfile, bool, bool, Vec<String>)>(1);
+            std::thread::spawn(move || {
+                let hw = existing_hw.unwrap_or_else(HardwareProfile::probe);
+                let has_bin = find_ollama_binary().is_some();
+                let models = probe_ollama_models(&ollama_url).unwrap_or_default();
+                let serving = is_ollama_serving(&ollama_url);
+                let _ = tx.send_blocking((hw, has_bin, serving, models));
+            });
+
+            let tiers_box_c = tiers_box.clone();
+            let hw_lbl_c = hw_lbl.clone();
+            let eng_lbl_c = eng_lbl.clone();
+            let eng_btn_c = eng_btn.clone();
+            let hw_rc_c = hw_rc.clone();
+            let p_box_c = p_box.clone();
+            let p_lbl_c = p_lbl.clone();
+            let p_bar_c = p_bar.clone();
+            let p_busy_c = p_busy.clone();
+            let p_cancel_c = p_cancel.clone();
+            let cache_rc_c = cache_rc.clone();
+            let refresh_ui_c = refresh_ui.clone();
+            let sync_g_c = sync_g.clone();
+            let cloud_l_c = cloud_l.clone();
+            let gear_pop_c = gear_pop.clone();
+
+            glib::spawn_future_local(async move {
+                let Ok((hw, has_bin, serving, installed_models)) = rx.recv().await else {
+                    return;
+                };
+                *hw_rc_c.borrow_mut() = Some(hw.clone());
+                hw_lbl_c.set_text(&hw.summary_tr());
+                if serving {
+                    cache_rc_c
+                        .borrow_mut()
+                        .insert(BlazeAiProvider::Ollama, Ok(installed_models.clone()));
+                    eng_lbl_c.set_text(&format!(
+                        "Yerel Ollama hazır (127.0.0.1:11434 · {} yüklü model)",
+                        installed_models.len()
+                    ));
+                    eng_btn_c.set_visible(false);
+                } else if has_bin {
+                    eng_lbl_c.set_text("Yerel Ollama kurulu ancak duraklatılmış");
+                    eng_btn_c.set_label("Motoru başlat");
+                    eng_btn_c.set_visible(true);
+                } else {
+                    eng_lbl_c.set_text("Yerel motor kurulu değil (sudo gerektirmez)");
+                    eng_btn_c.set_label("Motoru kur");
+                    eng_btn_c.set_visible(true);
+                }
+
+                while let Some(ch) = tiers_box_c.first_child() {
+                    tiers_box_c.remove(&ch);
+                }
+
+                let cur_cfg = SolarConfig::load();
+                for tier in LOCAL_MODEL_TIERS {
+                    let is_rec = tier.tier_id == hw.recommended_tier_id;
+                    let is_installed = installed_models.iter().any(|m| {
+                        m == tier.primary_tag
+                            || m.starts_with(&format!("{}:", tier.primary_tag))
+                            || m == tier.alt_tag
+                    });
+                    let is_active = cur_cfg.omnibar.ai_provider == BlazeAiProvider::Ollama
+                        && cur_cfg.omnibar.effective_ai_model() == tier.primary_tag;
+
+                    let card = GtkBox::new(Orientation::Vertical, 4);
+                    card.add_css_class("blazeai-local-card");
+
+                    let top = GtkBox::new(Orientation::Horizontal, 6);
+                    let title = Label::new(Some(&format!(
+                        "{} ({})",
+                        tier.label_tr, tier.primary_tag
+                    )));
+                    title.add_css_class("blazeai-msg-speaker");
+                    title.set_hexpand(true);
+                    title.set_halign(gtk4::Align::Start);
+                    top.append(&title);
+
+                    if is_rec {
+                        let rec_b = Label::new(Some("Önerilen"));
+                        rec_b.add_css_class("blazeai-local-rec-badge");
+                        top.append(&rec_b);
+                    }
+                    card.append(&top);
+
+                    let meta_lbl = Label::new(Some(&format!(
+                        "{} · {} · {}{}",
+                        tier.size_hint,
+                        tier.desc_tr,
+                        if tier.supports_vision { "Görsel" } else { "Metin" },
+                        if tier.supports_thinking { " + Düşünme" } else { "" }
+                    )));
+                    meta_lbl.add_css_class("blazeai-msg-note");
+                    meta_lbl.set_wrap(true);
+                    meta_lbl.set_xalign(0.0);
+                    meta_lbl.set_halign(gtk4::Align::Start);
+                    card.append(&meta_lbl);
+
+                    let btn_row = GtkBox::new(Orientation::Horizontal, 6);
+                    if is_installed {
+                        let use_btn = Button::with_label(if is_active { "Aktif" } else { "Kullan" });
+                        use_btn.add_css_class("companion-reset-btn");
+                        use_btn.set_sensitive(!is_active);
+                        let tag = tier.primary_tag.to_string();
+                        let sync_u = sync_g_c.clone();
+                        let ref_u = refresh_ui_c.clone();
+                        let pop_u = gear_pop_c.clone();
+                        let cl_u = cloud_l_c.clone();
+                        use_btn.connect_clicked(move |_| {
+                            let _ = SolarConfig::update(|c| {
+                                c.omnibar.ai_provider = BlazeAiProvider::Ollama;
+                                c.omnibar.ai_model = tag.clone();
+                                if c.omnibar.ai_custom_base_url.trim().is_empty() {
+                                    c.omnibar.ai_custom_base_url =
+                                        BlazeAiProvider::Ollama.default_base_url().to_string();
+                                }
+                            });
+                            sync_u();
+                            ref_u();
+                            pop_u.popdown();
+                            cl_u.pulse("Yerel model seçildi", FluidCloudTone::Success, false);
+                        });
+                        btn_row.append(&use_btn);
+
+                        let del_btn = Button::with_label("Sil");
+                        del_btn.add_css_class("danger-btn");
+                        let tag_d = tier.primary_tag.to_string();
+                        let cl_d = cloud_l_c.clone();
+                        let card_d = card.clone();
+                        del_btn.connect_clicked(move |b| {
+                            b.set_sensitive(false);
+                            let t_owned = tag_d.clone();
+                            let url_d = BlazeAiProvider::Ollama.default_base_url().to_string();
+                            let (dtx, drx) = async_channel::bounded::<Result<(), String>>(1);
+                            std::thread::spawn(move || {
+                                let _ = dtx.send_blocking(delete_ollama_model(&url_d, &t_owned));
+                            });
+                            let cl_in = cl_d.clone();
+                            let b_in = b.clone();
+                            let card_in = card_d.clone();
+                            glib::spawn_future_local(async move {
+                                match drx.recv().await {
+                                    Ok(Ok(())) => {
+                                        card_in.set_opacity(0.65);
+                                        b_in.set_label("Silindi");
+                                        cl_in.pulse("Yerel model silindi", FluidCloudTone::Info, false);
+                                    }
+                                    _ => {
+                                        b_in.set_sensitive(true);
+                                        cl_in.pulse("Model silinemedi", FluidCloudTone::Danger, false);
+                                    }
+                                }
+                            });
+                        });
+                        btn_row.append(&del_btn);
+                    } else {
+                        let dl_btn = Button::with_label(&format!("İndir ({})", tier.size_hint));
+                        dl_btn.add_css_class("companion-reset-btn");
+                        let tag_p = tier.primary_tag.to_string();
+                        let p_box_in = p_box_c.clone();
+                        let p_lbl_in = p_lbl_c.clone();
+                        let p_bar_in = p_bar_c.clone();
+                        let p_busy_in = p_busy_c.clone();
+                        let p_cancel_in = p_cancel_c.clone();
+                        let cache_in = cache_rc_c.clone();
+                        let sync_in = sync_g_c.clone();
+                        let ref_in = refresh_ui_c.clone();
+                        let cl_in = cloud_l_c.clone();
+                        dl_btn.connect_clicked(move |btn| {
+                            if p_busy_in.get() {
+                                cl_in.pulse("Başka bir indirme sürüyor", FluidCloudTone::Warning, false);
+                                return;
+                            }
+                            p_busy_in.set(true);
+                            btn.set_sensitive(false);
+                            p_cancel_in.store(false, Ordering::Relaxed);
+                            p_box_in.set_visible(true);
+                            p_bar_in.set_fraction(0.0);
+                            p_bar_in.set_text(Some("0%"));
+                            p_lbl_in.set_text(&format!("{} hazırlanıyor...", tag_p));
+
+                            let cancel_t = p_cancel_in.clone();
+                            let tag_t = tag_p.clone();
+                            let url_t = BlazeAiProvider::Ollama.default_base_url().to_string();
+                            let (ptx, prx) =
+                                async_channel::unbounded::<Result<PullProgress, String>>();
+                            std::thread::spawn(move || {
+                                if !is_ollama_serving(&url_t) {
+                                    if find_ollama_binary().is_none() {
+                                        let ptx_i = ptx.clone();
+                                        if let Err(e) = install_userspace_ollama(&cancel_t, move |s| {
+                                            let _ = ptx_i.send_blocking(Ok(PullProgress {
+                                                status: s.to_string(),
+                                                completed: 0,
+                                                total: 0,
+                                                fraction: None,
+                                                done: false,
+                                                error: None,
+                                            }));
+                                        }) {
+                                            let _ = ptx.send_blocking(Err(e));
+                                            return;
+                                        }
+                                    }
+                                    if let Err(e) = ensure_ollama_serving(&url_t) {
+                                        let _ = ptx.send_blocking(Err(e));
+                                        return;
+                                    }
+                                }
+                                let ptx_u = ptx.clone();
+                                match pull_ollama_model(&url_t, &tag_t, &cancel_t, move |prog| {
+                                    let _ = ptx_u.send_blocking(Ok(prog));
+                                }) {
+                                    Ok(()) => {
+                                        let _ = ptx.send_blocking(Ok(PullProgress {
+                                            status: "__PULL_DONE__".to_string(),
+                                            completed: 1,
+                                            total: 1,
+                                            fraction: Some(1.0),
+                                            done: true,
+                                            error: None,
+                                        }));
+                                    }
+                                    Err(e) => {
+                                        let _ = ptx.send_blocking(Err(e));
+                                    }
+                                }
+                            });
+
+                            let pb_u = p_box_in.clone();
+                            let pl_u = p_lbl_in.clone();
+                            let pbar_u = p_bar_in.clone();
+                            let busy_u = p_busy_in.clone();
+                            let btn_u = btn.clone();
+                            let tag_done = tag_p.clone();
+                            let cache_done = cache_in.clone();
+                            let sync_done = sync_in.clone();
+                            let ref_done = ref_in.clone();
+                            let cl_done = cl_in.clone();
+                            glib::spawn_future_local(async move {
+                                while let Ok(ev) = prx.recv().await {
+                                    match ev {
+                                        Ok(p) if p.status == "__PULL_DONE__" => {
+                                            busy_u.set(false);
+                                            pb_u.set_visible(false);
+                                            btn_u.set_label("Yüklendi (Aktif)");
+                                            let _ = SolarConfig::update(|c| {
+                                                c.omnibar.ai_provider = BlazeAiProvider::Ollama;
+                                                c.omnibar.ai_model = tag_done.clone();
+                                                c.omnibar.ai_custom_base_url =
+                                                    BlazeAiProvider::Ollama
+                                                        .default_base_url()
+                                                        .to_string();
+                                            });
+                                            cache_done.borrow_mut().remove(&BlazeAiProvider::Ollama);
+                                            sync_done();
+                                            ref_done();
+                                            cl_done.pulse(
+                                                "Yerel model indirildi ve seçildi",
+                                                FluidCloudTone::Success,
+                                                false,
+                                            );
+                                            break;
+                                        }
+                                        Ok(p) => {
+                                            if let Some(frac) = p.fraction {
+                                                pbar_u.set_fraction(frac);
+                                                pbar_u.set_text(Some(&format!(
+                                                    "{}%",
+                                                    (frac * 100.0).round() as u32
+                                                )));
+                                            } else {
+                                                pbar_u.pulse();
+                                            }
+                                            pl_u.set_text(&format!(
+                                                "{}: {}",
+                                                tag_done,
+                                                truncate_chars(&p.status, 48)
+                                            ));
+                                        }
+                                        Err(e) => {
+                                            busy_u.set(false);
+                                            pb_u.set_visible(false);
+                                            btn_u.set_sensitive(true);
+                                            cl_done.pulse(
+                                                &truncate_chars(&e, 44),
+                                                FluidCloudTone::Danger,
+                                                false,
+                                            );
+                                            break;
+                                        }
+                                    }
+                                }
+                            });
+                        });
+                        btn_row.append(&dl_btn);
+                    }
+                    card.append(&btn_row);
+                    tiers_box_c.append(&card);
+                }
+            });
+        })
+    };
+
+    {
+        let cancel_p = local_pull_cancel.clone();
+        pull_cancel_btn.connect_clicked(move |_| {
+            cancel_p.store(true, Ordering::Relaxed);
+        });
+    }
+
+    {
+        let cancel_e = local_pull_cancel.clone();
+        let busy_e = pull_busy.clone();
+        let p_box_e = pull_progress_box.clone();
+        let p_lbl_e = pull_status_lbl.clone();
+        let p_bar_e = pull_progress_bar.clone();
+        let ref_hub = refresh_local_hub.clone();
+        let cl_e = fluid_cloud.clone();
+        ollama_setup_btn.connect_clicked(move |btn| {
+            if busy_e.get() {
+                return;
+            }
+            busy_e.set(true);
+            btn.set_sensitive(false);
+            cancel_e.store(false, Ordering::Relaxed);
+            p_box_e.set_visible(true);
+            p_bar_e.pulse();
+            let cancel_t = cancel_e.clone();
+            let url_t = BlazeAiProvider::Ollama.default_base_url().to_string();
+            let (tx, rx) = async_channel::unbounded::<Result<String, String>>();
+            std::thread::spawn(move || {
+                if find_ollama_binary().is_none() {
+                    let tx_s = tx.clone();
+                    if let Err(e) = install_userspace_ollama(&cancel_t, move |s| {
+                        let _ = tx_s.send_blocking(Ok(s.to_string()));
+                    }) {
+                        let _ = tx.send_blocking(Err(e));
+                        return;
+                    }
+                }
+                let _ = tx.send_blocking(Ok("Yerel Ollama başlatılıyor...".to_string()));
+                match ensure_ollama_serving(&url_t) {
+                    Ok(()) => {
+                        let _ = tx.send_blocking(Ok("__OK__".to_string()));
+                    }
+                    Err(e) => {
+                        let _ = tx.send_blocking(Err(e));
+                    }
+                }
+            });
+            let busy_u = busy_e.clone();
+            let btn_u = btn.clone();
+            let pb_u = p_box_e.clone();
+            let pl_u = p_lbl_e.clone();
+            let ref_u = ref_hub.clone();
+            let cl_u = cl_e.clone();
+            glib::spawn_future_local(async move {
+                while let Ok(msg) = rx.recv().await {
+                    match msg {
+                        Ok(s) if s == "__OK__" => {
+                            busy_u.set(false);
+                            btn_u.set_sensitive(true);
+                            pb_u.set_visible(false);
+                            ref_u();
+                            cl_u.pulse("Yerel Ollama motoru hazır", FluidCloudTone::Success, false);
+                            break;
+                        }
+                        Ok(s) => pl_u.set_text(&s),
+                        Err(e) => {
+                            busy_u.set(false);
+                            btn_u.set_sensitive(true);
+                            pb_u.set_visible(false);
+                            cl_u.pulse(&truncate_chars(&e, 44), FluidCloudTone::Danger, false);
+                            break;
+                        }
+                    }
+                }
+            });
+        });
+    }
+
+    // Refresh live Ollama + Hardware state whenever the Local Models tab becomes active
+    {
+        let ref_hub = refresh_local_hub.clone();
+        gear_stack.connect_visible_child_name_notify(move |st| {
+            if st.visible_child_name().as_deref() == Some("local") {
+                ref_hub();
+            }
+        });
+    }
+    {
+        let pop = gear_popover.clone();
+        let sync_g = sync_gear_fields.clone();
+        let sw = switch_gear_tab.clone();
+        local_hub_shortcut_btn.connect_clicked(move |_| {
+            sync_g();
+            sw("local");
+            pop.popup();
+        });
+    }
+
+    // Multimodal toolbar handlers: Thinking toggle, Vision capture, Stop TTS (Barge-in)
+    {
+        let cloud_t = fluid_cloud.clone();
+        think_toggle.connect_toggled(move |tb| {
+            let active = tb.is_active();
+            let _ = SolarConfig::update(|c| {
+                c.omnibar.ai_thinking_mode = active;
+            });
+            cloud_t.pulse(
+                if active {
+                    "Derin düşünme modu açık"
+                } else {
+                    "Hızlı yanıt modu aktif"
+                },
+                FluidCloudTone::Info,
+                false,
+            );
+        });
+    }
+
+    {
+        let pv = pending_vision.clone();
+        let badge_r = vision_badge_row.clone();
+        vision_clear_btn.connect_clicked(move |_| {
+            *pv.borrow_mut() = None;
+            badge_r.set_visible(false);
+        });
+    }
+
+    {
+        let pv = pending_vision.clone();
+        let badge_r = vision_badge_row.clone();
+        let badge_l = vision_badge_lbl.clone();
+        let win_w = window.downgrade();
+        let cloud_v = fluid_cloud.clone();
+        vision_btn.connect_clicked(move |btn| {
+            btn.set_sensitive(false);
+            if let Some(w) = win_w.upgrade() {
+                w.set_visible(false);
+            }
+            let pv_in = pv.clone();
+            let br_in = badge_r.clone();
+            let bl_in = badge_l.clone();
+            let win_in = win_w.clone();
+            let cl_in = cloud_v.clone();
+            let btn_in = btn.clone();
+            glib::timeout_add_local_once(std::time::Duration::from_millis(180), move || {
+                let (tx, rx) = async_channel::bounded::<Result<VisionAttachment, String>>(1);
+                std::thread::spawn(move || {
+                    let _ = tx.send_blocking(capture_wayland_screen_for_vision());
+                });
+                glib::spawn_future_local(async move {
+                    if let Some(w) = win_in.upgrade() {
+                        w.set_visible(true);
+                        w.present();
+                    }
+                    btn_in.set_sensitive(true);
+                    match rx.recv().await {
+                        Ok(Ok(att)) => {
+                            bl_in.set_text(&format!(
+                                "Ekran eklendi ({}x{})",
+                                att.width, att.height
+                            ));
+                            *pv_in.borrow_mut() = Some(att);
+                            br_in.set_visible(true);
+                            cl_in.pulse("Ekran görüntüsü eklendi", FluidCloudTone::Success, false);
+                        }
+                        Ok(Err(err)) => {
+                            cl_in.pulse(&truncate_chars(&err, 44), FluidCloudTone::Danger, false);
+                        }
+                        Err(_) => {}
+                    }
+                });
+            });
+        });
+    }
+
+    {
+        let spk = voice_speaker.clone();
+        stop_speak_btn.connect_clicked(move |b| {
+            spk.stop();
+            b.set_visible(false);
+        });
+    }
+
+    {
         let st_add = store_rc.clone();
         let m_entry = mem_add_entry.clone();
         let rebuild_mem = rebuild_gear_memory_list.clone();
@@ -2025,12 +3265,21 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
         let left_p = left_pane.clone();
         let root_b = root_box.clone();
         let win_w = window.downgrade();
+        let spk_d = voice_speaker.clone();
+        let stop_b_d = stop_speak_btn.clone();
+        let pv_d = pending_vision.clone();
+        let v_badge_d = vision_badge_row.clone();
+        let web_t_d = web_toggle.clone();
 
         Rc::new(move |raw_prompt: String| {
             let prompt = raw_prompt.trim().to_string();
             if prompt.is_empty() || sending_rc.get() {
                 return;
             }
+
+            // Instant barge-in: stop ongoing speech whenever user sends a new prompt
+            spk_d.stop();
+            stop_b_d.set_visible(false);
 
             // Ensure left panel is open if triggered from right pane AiQuery
             if !left_p.is_visible() {
@@ -2060,6 +3309,8 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
                             timestamp: ts.clone(),
                             speaker_name: "Sen".to_string(),
                             suggested_actions: Vec::new(),
+                            thinking_text: String::new(),
+                            file_proposals: Vec::new(),
                         },
                         cfg.omnibar.ai_persist_chat,
                     );
@@ -2072,6 +3323,8 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
                                 timestamp: chrono::Local::now().to_rfc3339(),
                                 speaker_name: cfg.omnibar.effective_companion_name(),
                                 suggested_actions: Vec::new(),
+                                thinking_text: String::new(),
+                                file_proposals: Vec::new(),
                             },
                             cfg.omnibar.ai_persist_chat,
                         );
@@ -2083,6 +3336,8 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
                                 timestamp: chrono::Local::now().to_rfc3339(),
                                 speaker_name: cfg.omnibar.effective_companion_name(),
                                 suggested_actions: Vec::new(),
+                                thinking_text: String::new(),
+                                file_proposals: Vec::new(),
                             },
                             cfg.omnibar.ai_persist_chat,
                         );
@@ -2110,6 +3365,8 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
                         timestamp: chrono::Local::now().to_rfc3339(),
                         speaker_name: cfg.omnibar.effective_companion_name(),
                         suggested_actions: Vec::new(),
+                        thinking_text: String::new(),
+                        file_proposals: Vec::new(),
                     },
                     cfg.omnibar.ai_persist_chat,
                 );
@@ -2118,16 +3375,29 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
                 return;
             }
 
+            let attached_vision = pv_d.borrow_mut().take();
+            v_badge_d.set_visible(false);
+            let force_web = web_t_d.is_active();
+            web_t_d.set_active(false);
+
+            let display_prompt = if attached_vision.is_some() {
+                format!("[Ekran görüntüsü] {}", prompt)
+            } else {
+                prompt.clone()
+            };
+
             // 3. Append user turn & execute provider request off the GTK main thread
             let (history_snapshot, mem_snapshot) = {
                 let mut st = st_rc.borrow_mut();
                 let _ = st.append_message(
                     ChatMessage {
                         role: ChatRole::User,
-                        content: prompt.clone(),
+                        content: display_prompt,
                         timestamp: chrono::Local::now().to_rfc3339(),
                         speaker_name: "Sen".to_string(),
                         suggested_actions: Vec::new(),
+                        thinking_text: String::new(),
+                        file_proposals: Vec::new(),
                     },
                     cfg.omnibar.ai_persist_chat,
                 );
@@ -2138,18 +3408,28 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
             send_b.set_sensitive(false);
             av.set_waiting(true);
             refresh_c();
-            cloud_c.pulse("BlazeAI düşünüyor", FluidCloudTone::Info, false);
+            cloud_c.pulse(
+                if force_web {
+                    "Web araştırılıyor ve yanıt hazırlanıyor"
+                } else {
+                    "BlazeAI düşünüyor"
+                },
+                FluidCloudTone::Info,
+                false,
+            );
 
             let (tx, rx) = async_channel::bounded::<Result<ChatCompletionOutcome, String>>(1);
             let omnibar_cfg = cfg.omnibar.clone();
             let prompt_clone = prompt.clone();
             std::thread::spawn(move || {
-                let res = send_chat_completion(
+                let res = send_chat_completion_with_options(
                     &omnibar_cfg,
                     &secrets,
                     &mem_snapshot,
                     &history_snapshot,
                     &prompt_clone,
+                    attached_vision.as_ref(),
+                    force_web,
                 );
                 let _ = tx.send_blocking(res);
             });
@@ -2161,6 +3441,8 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
             let refresh_done = refresh_c.clone();
             let rebuild_mem_done = rebuild_mem.clone();
             let cloud_done = cloud_c.clone();
+            let spk_done = spk_d.clone();
+            let stop_b_done = stop_b_d.clone();
 
             glib::spawn_future_local(async move {
                 let outcome = rx.recv().await;
@@ -2182,6 +3464,8 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
                                 timestamp: chrono::Local::now().to_rfc3339(),
                                 speaker_name: latest_cfg.omnibar.effective_companion_name(),
                                 suggested_actions: Vec::new(),
+                                thinking_text: String::new(),
+                                file_proposals: Vec::new(),
                             },
                             latest_cfg.omnibar.ai_persist_chat,
                         );
@@ -2190,8 +3474,10 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
                     }
                     Ok(Ok(ChatCompletionOutcome::Reply {
                         cleaned_text,
+                        thinking_text,
                         extracted_facts,
                         suggested_actions,
+                        file_proposals,
                         upgraded_model,
                         ..
                     })) => {
@@ -2202,6 +3488,7 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
                                 }
                             });
                         }
+                        let speak_copy = cleaned_text.clone();
                         {
                             let mut st = st_done.borrow_mut();
                             if latest_cfg.omnibar.ai_local_memory_enabled {
@@ -2216,6 +3503,8 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
                                     timestamp: chrono::Local::now().to_rfc3339(),
                                     speaker_name: latest_cfg.omnibar.effective_companion_name(),
                                     suggested_actions,
+                                    thinking_text,
+                                    file_proposals,
                                 },
                                 latest_cfg.omnibar.ai_persist_chat,
                             );
@@ -2223,6 +3512,27 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
                         rebuild_mem_done();
                         av_done.pulse_temporary_expression(CompanionExpression::Happy, 2500);
                         cloud_done.pulse("Yanıt hazır", FluidCloudTone::Success, false);
+
+                        if latest_cfg.omnibar.ai_voice_tts_auto && !speak_copy.trim().is_empty() {
+                            let (stx, srx) = async_channel::bounded::<()>(1);
+                            if spk_done
+                                .speak_async(
+                                    speak_copy,
+                                    latest_cfg.omnibar.effective_tts_voice(),
+                                    move || {
+                                        let _ = stx.send_blocking(());
+                                    },
+                                )
+                                .is_ok()
+                            {
+                                stop_b_done.set_visible(true);
+                                let sb_c = stop_b_done.clone();
+                                glib::spawn_future_local(async move {
+                                    let _ = srx.recv().await;
+                                    sb_c.set_visible(false);
+                                });
+                            }
+                        }
                     }
                     Ok(Err(err_msg)) => {
                         let _ = st_done.borrow_mut().append_message(
@@ -2232,6 +3542,8 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
                                 timestamp: chrono::Local::now().to_rfc3339(),
                                 speaker_name: latest_cfg.omnibar.effective_companion_name(),
                                 suggested_actions: Vec::new(),
+                                thinking_text: String::new(),
+                                file_proposals: Vec::new(),
                             },
                             latest_cfg.omnibar.ai_persist_chat,
                         );
@@ -2246,6 +3558,69 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
             });
         })
     };
+
+    // Push-to-talk / click-to-talk microphone handler (PipeWire pw-record -> whisper-cli + Barge-in)
+    {
+        let rec_rc = active_recording.clone();
+        let spk_m = voice_speaker.clone();
+        let stop_b_m = stop_speak_btn.clone();
+        let dispatch_m = dispatch_blazeai_prompt.clone();
+        let cloud_m = fluid_cloud.clone();
+        let av_m = avatar.clone();
+        mic_btn.connect_clicked(move |btn| {
+            // Barge-in: halt active TTS immediately when microphone is pressed
+            spk_m.stop();
+            stop_b_m.set_visible(false);
+
+            let maybe_rec = rec_rc.borrow_mut().take();
+            if let Some(rec) = maybe_rec {
+                btn.remove_css_class("blazeai-mic-active");
+                btn.set_sensitive(false);
+                btn.set_child(Some(&build_symbolic_icon(
+                    &["audio-input-microphone-symbolic"],
+                    "omnibar-header-icon",
+                )));
+                cloud_m.pulse("Ses çözülüyor...", FluidCloudTone::Info, false);
+                let stt_model = SolarConfig::load().omnibar.ai_voice_stt_model;
+                let (tx, rx) = async_channel::bounded::<Result<String, String>>(1);
+                std::thread::spawn(move || {
+                    let _ = tx.send_blocking(rec.stop_and_transcribe(&stt_model));
+                });
+                let btn_u = btn.clone();
+                let disp_u = dispatch_m.clone();
+                let cl_u = cloud_m.clone();
+                glib::spawn_future_local(async move {
+                    btn_u.set_sensitive(true);
+                    match rx.recv().await {
+                        Ok(Ok(transcript)) => {
+                            cl_u.pulse("Ses anlaşıldı", FluidCloudTone::Success, false);
+                            disp_u(transcript);
+                        }
+                        Ok(Err(err)) => {
+                            cl_u.pulse(&truncate_chars(&err, 44), FluidCloudTone::Warning, false);
+                        }
+                        Err(_) => {}
+                    }
+                });
+            } else {
+                match ActiveRecording::start() {
+                    Ok(rec) => {
+                        *rec_rc.borrow_mut() = Some(rec);
+                        btn.add_css_class("blazeai-mic-active");
+                        btn.set_child(Some(&build_symbolic_icon(
+                            &["media-playback-stop-symbolic"],
+                            "omnibar-header-icon",
+                        )));
+                        av_m.pulse_temporary_expression(CompanionExpression::Curious, 3500);
+                        cloud_m.pulse("Dinliyorum (bitirmek için tekrar bas)", FluidCloudTone::Info, false);
+                    }
+                    Err(err) => {
+                        cloud_m.pulse(&truncate_chars(&err, 44), FluidCloudTone::Danger, false);
+                    }
+                }
+            }
+        });
+    }
 
     {
         let b_entry = blazeai_entry.clone();
@@ -2347,6 +3722,7 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
         let right_entry = entry.clone();
         let left_entry = blazeai_entry.clone();
         let act_fn = activate_omnibar_item.clone();
+        let spk_on_esc = voice_speaker.clone();
 
         key_controller.connect_key_pressed(move |_ctrl, key, _code, _modifier| {
             if key == gdk::Key::Escape {
@@ -2362,6 +3738,7 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
                     pop_gear.popdown();
                     return glib::Propagation::Stop;
                 }
+                spk_on_esc.stop();
                 let _ = std::fs::remove_file(omnibar_pid_file());
                 if let Some(win) = win_weak.upgrade() {
                     win.close();
