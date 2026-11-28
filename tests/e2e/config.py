@@ -103,11 +103,11 @@ EXPECTED_CORE_RPMS = (
     "blaze-house-2.1.0-2.blaze.x86_64.rpm",
     "blaze-oobe-5.05.1-2.blaze.noarch.rpm",
     "blaze-recovery-5.05.1-2.blaze.x86_64.rpm",
-    "blaze-release-5.05.1-4.blaze.noarch.rpm",
+    "blaze-release-5.05.1-5.blaze.noarch.rpm",
     "blaze-scap-compat-5.05.1-1.blaze.noarch.rpm",
     "blaze-sentinel-0.3.1-3.blaze.x86_64.rpm",
-    "blaze-tools-5.05.1-2.blaze.noarch.rpm",
-    "solarui-5.05.1-4.blaze.x86_64.rpm",
+    "blaze-tools-5.05.1-3.blaze.noarch.rpm",
+    "solarui-5.05.1-5.blaze.x86_64.rpm",
     "solarui-config-5.05.1-3.blaze.noarch.rpm",
 )
 EXPECTED_8_RPMS = EXPECTED_CORE_RPMS

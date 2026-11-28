@@ -14,7 +14,7 @@ use gtk4::{
     ScrolledWindow, Window,
 };
 use solar_common::{
-    CompanionExpression, CompanionShape, SolarConfig, COMPANION_PALETTE,
+    CompanionCharacter, CompanionExpression, CompanionShape, SolarConfig, COMPANION_PALETTE,
 };
 use std::cell::{Cell, RefCell};
 use std::f64::consts::{PI, TAU};
@@ -681,6 +681,144 @@ pub fn draw_companion_eyes(
     }
 }
 
+/// Draws round scholar spectacles for Stolas (subtle translucent lenses, diagonal glint,
+/// curved nose bridge, and side temple stems) adapting contrast to dark vs light body colors.
+pub fn draw_companion_round_glasses(
+    cr: &cairo::Context,
+    color_hex: &str,
+    cx: f64,
+    cy: f64,
+    radius: f64,
+    gaze_x: f64,
+    gaze_y: f64,
+    draw_rims: bool,
+) {
+    let s = radius / 22.0;
+    let gx = gaze_x * 0.48;
+    let gy = gaze_y * 0.48;
+    let lens_dx = 5.55 * s;
+    let lens_r = 4.65 * s;
+    let ly = cy + gy - 1.3 * s;
+    let lx = cx + gx - lens_dx;
+    let rx = cx + gx + lens_dx;
+    let light_body = relative_luminance(color_hex) > 0.65;
+
+    if !draw_rims {
+        // Soft lens tint behind/under rims before eyes so lenses have depth
+        let _ = cr.save();
+        if light_body {
+            cr.set_source_rgba(0.08, 0.09, 0.14, 0.08);
+        } else {
+            cr.set_source_rgba(0.96, 0.97, 1.0, 0.09);
+        }
+        cr.new_path();
+        cr.arc(lx, ly, lens_r, 0.0, TAU);
+        let _ = cr.fill();
+        cr.new_path();
+        cr.arc(rx, ly, lens_r, 0.0, TAU);
+        let _ = cr.fill();
+        let _ = cr.restore();
+        return;
+    }
+
+    let _ = cr.save();
+    // Subtle diagonal glass highlight inside each round lens
+    if light_body {
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.42);
+    } else {
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.24);
+    }
+    cr.set_line_width((0.95 * s).max(0.8));
+    cr.set_line_cap(cairo::LineCap::Round);
+    for center_x in [lx, rx] {
+        cr.new_path();
+        cr.move_to(center_x - 2.3 * s, ly - 1.2 * s);
+        cr.line_to(center_x - 0.9 * s, ly - 2.6 * s);
+        let _ = cr.stroke();
+    }
+
+    // Round spectacle rims + curved bridge + short side stems
+    if light_body {
+        cr.set_source_rgba(0.14, 0.14, 0.17, 0.94);
+    } else {
+        // Warm scholarly gold/ivory frame
+        cr.set_source_rgba(0.96, 0.85, 0.56, 0.95);
+    }
+    cr.set_line_width((1.42 * s).max(1.05));
+    cr.set_line_cap(cairo::LineCap::Round);
+    cr.set_line_join(cairo::LineJoin::Round);
+
+    cr.new_path();
+    cr.arc(lx, ly, lens_r, 0.0, TAU);
+    let _ = cr.stroke();
+
+    cr.new_path();
+    cr.arc(rx, ly, lens_r, 0.0, TAU);
+    let _ = cr.stroke();
+
+    // Nose bridge arch connecting inner rims
+    let inner_gap_l = lx + lens_r * 0.96;
+    let inner_gap_r = rx - lens_r * 0.96;
+    cr.new_path();
+    cr.move_to(inner_gap_l, ly - 0.55 * s);
+    cr.curve_to(
+        cx + gx - 0.45 * s,
+        ly - 1.55 * s,
+        cx + gx + 0.45 * s,
+        ly - 1.55 * s,
+        inner_gap_r,
+        ly - 0.55 * s,
+    );
+    let _ = cr.stroke();
+
+    // Temple stems extending slightly toward outer body edge
+    cr.new_path();
+    cr.move_to(lx - lens_r, ly - 0.35 * s);
+    cr.line_to(lx - lens_r - 2.4 * s, ly - 0.95 * s);
+    let _ = cr.stroke();
+
+    cr.new_path();
+    cr.move_to(rx + lens_r, ly - 0.35 * s);
+    cr.line_to(rx + lens_r + 2.4 * s, ly - 0.95 * s);
+    let _ = cr.stroke();
+
+    let _ = cr.restore();
+}
+
+/// Complete vector draw routine supporting optional round spectacles (Stolas).
+pub fn render_companion_with_accessories(
+    cr: &cairo::Context,
+    width: f64,
+    height: f64,
+    shape: CompanionShape,
+    expr: CompanionExpression,
+    color_hex: &str,
+    gaze_x: f64,
+    gaze_y: f64,
+    is_blinking: bool,
+    wears_round_glasses: bool,
+) {
+    let (cx, cy, r) = draw_companion_body(cr, shape, color_hex, width, height);
+    if wears_round_glasses {
+        draw_companion_round_glasses(cr, color_hex, cx, cy, r, gaze_x, gaze_y, false);
+        let eye_r = r * 0.84;
+        draw_companion_eyes(
+            cr,
+            expr,
+            color_hex,
+            cx,
+            cy,
+            eye_r,
+            gaze_x * 0.62,
+            gaze_y * 0.62,
+            is_blinking,
+        );
+        draw_companion_round_glasses(cr, color_hex, cx, cy, r, gaze_x, gaze_y, true);
+    } else {
+        draw_companion_eyes(cr, expr, color_hex, cx, cy, r, gaze_x, gaze_y, is_blinking);
+    }
+}
+
 /// Complete vector draw routine for both full-size avatar and mini customizer previews.
 pub fn render_companion(
     cr: &cairo::Context,
@@ -693,8 +831,18 @@ pub fn render_companion(
     gaze_y: f64,
     is_blinking: bool,
 ) {
-    let (cx, cy, r) = draw_companion_body(cr, shape, color_hex, width, height);
-    draw_companion_eyes(cr, expr, color_hex, cx, cy, r, gaze_x, gaze_y, is_blinking);
+    render_companion_with_accessories(
+        cr,
+        width,
+        height,
+        shape,
+        expr,
+        color_hex,
+        gaze_x,
+        gaze_y,
+        is_blinking,
+        false,
+    );
 }
 
 #[derive(Debug)]
@@ -703,6 +851,7 @@ struct CompanionAvatarState {
     base_expression: CompanionExpression,
     temporary_expression: Option<(CompanionExpression, Instant)>,
     color_hex: String,
+    wears_glasses: bool,
     pointer_pos: Option<(f64, f64)>,
     is_blinking: bool,
     blink_generation: u64,
@@ -735,6 +884,16 @@ impl CompanionAvatarWidget {
         color_hex: &str,
         size: i32,
     ) -> Self {
+        Self::new_with_glasses(shape, expression, color_hex, false, size)
+    }
+
+    pub fn new_with_glasses(
+        shape: CompanionShape,
+        expression: CompanionExpression,
+        color_hex: &str,
+        wears_glasses: bool,
+        size: i32,
+    ) -> Self {
         let area = DrawingArea::new();
         area.set_content_width(size);
         area.set_content_height(size);
@@ -748,6 +907,7 @@ impl CompanionAvatarWidget {
             base_expression: expression,
             temporary_expression: None,
             color_hex: color_hex.to_string(),
+            wears_glasses,
             pointer_pos: None,
             is_blinking: false,
             blink_generation: 0,
@@ -776,7 +936,7 @@ impl CompanionAvatarWidget {
                 (0.0, 0.0)
             };
 
-            render_companion(
+            render_companion_with_accessories(
                 cr,
                 wf,
                 hf,
@@ -786,6 +946,7 @@ impl CompanionAvatarWidget {
                 gx,
                 gy,
                 st.is_blinking,
+                st.wears_glasses,
             );
         });
 
@@ -864,6 +1025,11 @@ impl CompanionAvatarWidget {
         self.area.queue_draw();
     }
 
+    pub fn set_glasses(&self, wears_glasses: bool) {
+        self.state.borrow_mut().wears_glasses = wears_glasses;
+        self.area.queue_draw();
+    }
+
     pub fn set_waiting(&self, waiting: bool) {
         if waiting {
             self.set_temporary_expression(CompanionExpression::Curious, Duration::from_secs(60));
@@ -924,18 +1090,75 @@ pub fn build_companion_customizer_popover(
     let active_shape = Rc::new(Cell::new(cfg.omnibar.companion_shape));
     let active_expr = Rc::new(Cell::new(cfg.omnibar.companion_expression));
     let active_color = Rc::new(RefCell::new(cfg.omnibar.companion_color.clone()));
+    let active_glasses = Rc::new(Cell::new(cfg.omnibar.wears_round_glasses()));
     let programmatic_name_edit = Rc::new(Cell::new(false));
 
     let scroller = ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Never)
         .vscrollbar_policy(gtk4::PolicyType::Automatic)
         .propagate_natural_height(true)
-        .max_content_height(430)
-        .min_content_width(326)
+        .max_content_height(460)
+        .min_content_width(336)
         .build();
 
     let content = GtkBox::new(Orientation::Vertical, 12);
     content.add_css_class("companion-popover-box");
+
+    // 0. Official 6-Character Roster (3x2 grid: Persephone, Köz, Solar, Stolas, Kıvılcım, Sis)
+    let roster_hdr = Label::new(Some("Hazır karakterler"));
+    roster_hdr.add_css_class("companion-section-lbl");
+    roster_hdr.set_halign(gtk4::Align::Start);
+    content.append(&roster_hdr);
+
+    let roster_grid = Grid::new();
+    roster_grid.set_row_spacing(6);
+    roster_grid.set_column_spacing(6);
+    roster_grid.set_column_homogeneous(true);
+    let char_buttons: Rc<RefCell<Vec<(CompanionCharacter, Button)>>> =
+        Rc::new(RefCell::new(Vec::new()));
+    let init_char = cfg.omnibar.active_character();
+
+    for (idx, ch) in CompanionCharacter::ALL.iter().copied().enumerate() {
+        let btn = Button::new();
+        btn.add_css_class("companion-opt-btn");
+        btn.set_tooltip_text(Some(&format!(
+            "{} ({}) — {}",
+            ch.display_name(),
+            ch.role_title_tr(),
+            ch.focus_summary_tr()
+        )));
+        if init_char == Some(ch) {
+            btn.add_css_class("companion-opt-active");
+        }
+        let col_box = GtkBox::new(Orientation::Vertical, 2);
+        col_box.set_halign(gtk4::Align::Center);
+        let mini = DrawingArea::new();
+        mini.set_content_width(30);
+        mini.set_content_height(30);
+        mini.set_size_request(30, 30);
+        mini.set_draw_func(move |_, cr, w, h| {
+            render_companion_with_accessories(
+                cr,
+                w as f64,
+                h as f64,
+                ch.default_shape(),
+                ch.default_expression(),
+                ch.default_color(),
+                0.6,
+                -0.4,
+                false,
+                ch.wears_round_glasses(),
+            );
+        });
+        col_box.append(&mini);
+        let lbl = Label::new(Some(ch.display_name()));
+        lbl.add_css_class("companion-opt-lbl");
+        col_box.append(&lbl);
+        btn.set_child(Some(&col_box));
+        roster_grid.attach(&btn, (idx % 3) as i32, (idx / 3) as i32, 1, 1);
+        char_buttons.borrow_mut().push((ch, btn));
+    }
+    content.append(&roster_grid);
 
     // 1. Name section
     let name_hdr = Label::new(Some("Karakter adı"));
@@ -958,19 +1181,19 @@ pub fn build_companion_customizer_popover(
     name_row.append(&reset_name_btn);
     content.append(&name_row);
 
-    // 2. Live Expression Archetype Banner
+    // 2. Live Character & Expression Banner
     let banner = GtkBox::new(Orientation::Vertical, 4);
     banner.add_css_class("companion-meaning-banner");
     let banner_title = Label::new(Some(&format!(
         "{} · {}",
-        cfg.omnibar.companion_expression.title_tr(),
-        cfg.omnibar.companion_expression.default_name()
+        cfg.omnibar.effective_companion_name(),
+        cfg.omnibar.effective_companion_subtitle()
     )));
     banner_title.add_css_class("companion-banner-title");
     banner_title.set_halign(gtk4::Align::Start);
     banner.append(&banner_title);
 
-    let banner_desc = Label::new(Some(cfg.omnibar.companion_expression.meaning_tr()));
+    let banner_desc = Label::new(Some(cfg.omnibar.effective_companion_summary()));
     banner_desc.add_css_class("companion-banner-desc");
     banner_desc.set_wrap(true);
     banner_desc.set_xalign(0.0);
@@ -1009,9 +1232,10 @@ pub fn build_companion_customizer_popover(
         mini.set_content_height(28);
         mini.set_size_request(28, 28);
         let col_rc = active_color.clone();
+        let gl_rc = active_glasses.clone();
         mini.set_draw_func(move |_, cr, w, h| {
             let color = col_rc.borrow().clone();
-            render_companion(
+            render_companion_with_accessories(
                 cr,
                 w as f64,
                 h as f64,
@@ -1021,6 +1245,7 @@ pub fn build_companion_customizer_popover(
                 0.8,
                 -0.6,
                 false,
+                gl_rc.get(),
             );
         });
         col_box.append(&mini);
@@ -1093,9 +1318,10 @@ pub fn build_companion_customizer_popover(
         mini.set_size_request(28, 28);
         let sh_rc = active_shape.clone();
         let col_rc = active_color.clone();
+        let gl_rc = active_glasses.clone();
         mini.set_draw_func(move |_, cr, w, h| {
             let color = col_rc.borrow().clone();
-            render_companion(
+            render_companion_with_accessories(
                 cr,
                 w as f64,
                 h as f64,
@@ -1105,6 +1331,7 @@ pub fn build_companion_customizer_popover(
                 0.0,
                 0.0,
                 false,
+                gl_rc.get(),
             );
         });
         col_box.append(&mini);
@@ -1118,7 +1345,10 @@ pub fn build_companion_customizer_popover(
 
         let av = avatar.clone();
         let ex_state = active_expr.clone();
+        let gl_state = active_glasses.clone();
         let eb_ref = expr_buttons.clone();
+        let sb_ref_e = shape_buttons.clone();
+        let cb_roster_e = char_buttons.clone();
         let bt_lbl = banner_title.clone();
         let bd_lbl = banner_desc.clone();
         let n_entry = name_entry.clone();
@@ -1140,14 +1370,34 @@ pub fn build_companion_customizer_popover(
                 updated = Some(c.omnibar.clone());
             });
 
-            bt_lbl.set_text(&format!("{} · {}", expr.title_tr(), expr.default_name()));
-            bd_lbl.set_text(expr.meaning_tr());
-
             if let Some(ref c) = updated {
+                let wears = c.wears_round_glasses();
+                gl_state.set(wears);
+                av.set_glasses(wears);
+                bt_lbl.set_text(&format!(
+                    "{} · {}",
+                    c.effective_companion_name(),
+                    c.effective_companion_subtitle()
+                ));
+                bd_lbl.set_text(c.effective_companion_summary());
+                let cur_ch = c.active_character();
+                for (ch_item, cb_btn) in cb_roster_e.borrow().iter() {
+                    if cur_ch == Some(*ch_item) {
+                        cb_btn.add_css_class("companion-opt-active");
+                    } else {
+                        cb_btn.remove_css_class("companion-opt-active");
+                    }
+                }
                 if !c.companion_name_custom {
                     prog_flag.set(true);
                     n_entry.set_text(&next_name);
                     prog_flag.set(false);
+                }
+                for (_, _, d) in sb_ref_e.borrow().iter() {
+                    d.queue_draw();
+                }
+                for (_, _, d) in eb_ref.borrow().iter() {
+                    d.queue_draw();
                 }
                 on_change(c);
             }
@@ -1246,9 +1496,104 @@ pub fn build_companion_customizer_popover(
     }
     content.append(&color_grid);
 
+    // Wire 6-character roster buttons now that shape/expr/color button collections are populated
+    for (ch, btn) in char_buttons.borrow().iter().cloned() {
+        let av = avatar.clone();
+        let sh_state = active_shape.clone();
+        let ex_state = active_expr.clone();
+        let col_state = active_color.clone();
+        let gl_state = active_glasses.clone();
+        let cb_roster = char_buttons.clone();
+        let sb_ref = shape_buttons.clone();
+        let eb_ref = expr_buttons.clone();
+        let col_btns_ref = color_buttons.clone();
+        let bt_lbl = banner_title.clone();
+        let bd_lbl = banner_desc.clone();
+        let n_entry = name_entry.clone();
+        let prog_flag = programmatic_name_edit.clone();
+        let on_change = callbacks.on_appearance_changed.clone();
+        let on_trans = callbacks.on_persona_transition.clone();
+        btn.connect_clicked(move |_| {
+            let mut prev_name = String::new();
+            let mut updated = None;
+            let _ = SolarConfig::update(|c| {
+                prev_name = c.omnibar.effective_companion_name();
+                c.omnibar.apply_character_preset(ch);
+                updated = Some(c.omnibar.clone());
+            });
+            if let Some(ref c) = updated {
+                sh_state.set(c.companion_shape);
+                ex_state.set(c.companion_expression);
+                *col_state.borrow_mut() = c.companion_color.clone();
+                let wears = c.wears_round_glasses();
+                gl_state.set(wears);
+
+                av.set_shape(c.companion_shape);
+                av.set_expression(c.companion_expression);
+                av.set_color(&c.companion_color);
+                av.set_glasses(wears);
+
+                prog_flag.set(true);
+                n_entry.set_text(&c.effective_companion_name());
+                prog_flag.set(false);
+
+                bt_lbl.set_text(&format!(
+                    "{} · {}",
+                    c.effective_companion_name(),
+                    c.effective_companion_subtitle()
+                ));
+                bd_lbl.set_text(c.effective_companion_summary());
+
+                for (ch_item, cb_btn) in cb_roster.borrow().iter() {
+                    if *ch_item == ch {
+                        cb_btn.add_css_class("companion-opt-active");
+                    } else {
+                        cb_btn.remove_css_class("companion-opt-active");
+                    }
+                }
+                for (s, b, d) in sb_ref.borrow().iter() {
+                    if *s == c.companion_shape {
+                        b.add_css_class("companion-opt-active");
+                    } else {
+                        b.remove_css_class("companion-opt-active");
+                    }
+                    d.queue_draw();
+                }
+                for (e, b, d) in eb_ref.borrow().iter() {
+                    if *e == c.companion_expression {
+                        b.add_css_class("companion-opt-active");
+                    } else {
+                        b.remove_css_class("companion-opt-active");
+                    }
+                    d.queue_draw();
+                }
+                for (c_hex, b) in col_btns_ref.borrow().iter() {
+                    if c_hex.eq_ignore_ascii_case(&c.companion_color) {
+                        b.add_css_class("companion-color-active");
+                    } else {
+                        b.remove_css_class("companion-color-active");
+                    }
+                }
+
+                let next_name = c.effective_companion_name();
+                if prev_name != next_name && !prev_name.is_empty() && !next_name.is_empty() {
+                    on_trans(&prev_name, &next_name, c.companion_expression);
+                }
+                on_change(c);
+            }
+        });
+    }
+
     // Name entry & reset wiring
     let prog_edit_chg = programmatic_name_edit.clone();
     let on_change_name = callbacks.on_appearance_changed.clone();
+    let av_name = avatar.clone();
+    let gl_name = active_glasses.clone();
+    let bt_name = banner_title.clone();
+    let bd_name = banner_desc.clone();
+    let cb_roster_name = char_buttons.clone();
+    let sb_name = shape_buttons.clone();
+    let eb_name = expr_buttons.clone();
     name_entry.connect_changed(move |entry| {
         if prog_edit_chg.get() {
             return;
@@ -1264,6 +1609,29 @@ pub fn build_companion_customizer_popover(
             updated = Some(c.omnibar.clone());
         });
         if let Some(ref c) = updated {
+            let wears = c.wears_round_glasses();
+            gl_name.set(wears);
+            av_name.set_glasses(wears);
+            bt_name.set_text(&format!(
+                "{} · {}",
+                c.effective_companion_name(),
+                c.effective_companion_subtitle()
+            ));
+            bd_name.set_text(c.effective_companion_summary());
+            let cur_ch = c.active_character();
+            for (ch_item, cb_btn) in cb_roster_name.borrow().iter() {
+                if cur_ch == Some(*ch_item) {
+                    cb_btn.add_css_class("companion-opt-active");
+                } else {
+                    cb_btn.remove_css_class("companion-opt-active");
+                }
+            }
+            for (_, _, d) in sb_name.borrow().iter() {
+                d.queue_draw();
+            }
+            for (_, _, d) in eb_name.borrow().iter() {
+                d.queue_draw();
+            }
             on_change_name(c);
         }
     });
@@ -1271,6 +1639,13 @@ pub fn build_companion_customizer_popover(
     let prog_edit_rst = programmatic_name_edit.clone();
     let n_entry_rst = name_entry.clone();
     let on_change_rst = callbacks.on_appearance_changed.clone();
+    let av_rst = avatar.clone();
+    let gl_rst = active_glasses.clone();
+    let bt_rst = banner_title.clone();
+    let bd_rst = banner_desc.clone();
+    let cb_roster_rst = char_buttons.clone();
+    let sb_rst = shape_buttons.clone();
+    let eb_rst = expr_buttons.clone();
     reset_name_btn.connect_clicked(move |_| {
         let mut next_name = String::new();
         let mut updated = None;
@@ -1283,6 +1658,29 @@ pub fn build_companion_customizer_popover(
         n_entry_rst.set_text(&next_name);
         prog_edit_rst.set(false);
         if let Some(ref c) = updated {
+            let wears = c.wears_round_glasses();
+            gl_rst.set(wears);
+            av_rst.set_glasses(wears);
+            bt_rst.set_text(&format!(
+                "{} · {}",
+                c.effective_companion_name(),
+                c.effective_companion_subtitle()
+            ));
+            bd_rst.set_text(c.effective_companion_summary());
+            let cur_ch = c.active_character();
+            for (ch_item, cb_btn) in cb_roster_rst.borrow().iter() {
+                if cur_ch == Some(*ch_item) {
+                    cb_btn.add_css_class("companion-opt-active");
+                } else {
+                    cb_btn.remove_css_class("companion-opt-active");
+                }
+            }
+            for (_, _, d) in sb_rst.borrow().iter() {
+                d.queue_draw();
+            }
+            for (_, _, d) in eb_rst.borrow().iter() {
+                d.queue_draw();
+            }
             on_change_rst(c);
         }
     });
@@ -1465,5 +1863,58 @@ mod tests {
         let blink_eyes = count_bright_or_dark_eye_pixels(&mut blink_surf, "#1e1e22");
         assert!(open_eyes > blink_eyes);
         assert!(blink_eyes > 4);
+    }
+
+    #[test]
+    fn stolas_round_glasses_render_distinct_frame_on_dark_and_light_bodies() {
+        for color in ["#6366f1", "#1e1e22", "#e4e4e7"] {
+            let mut plain = cairo::ImageSurface::create(cairo::Format::ARgb32, 52, 52).unwrap();
+            {
+                let cr = cairo::Context::new(&plain).unwrap();
+                render_companion_with_accessories(
+                    &cr,
+                    52.0,
+                    52.0,
+                    CompanionShape::Squircle,
+                    CompanionExpression::Curious,
+                    color,
+                    0.0,
+                    0.0,
+                    false,
+                    false,
+                );
+            }
+            let mut glasses = cairo::ImageSurface::create(cairo::Format::ARgb32, 52, 52).unwrap();
+            {
+                let cr = cairo::Context::new(&glasses).unwrap();
+                render_companion_with_accessories(
+                    &cr,
+                    52.0,
+                    52.0,
+                    CompanionShape::Squircle,
+                    CompanionExpression::Curious,
+                    color,
+                    0.0,
+                    0.0,
+                    false,
+                    true,
+                );
+            }
+            plain.flush();
+            glasses.flush();
+            let d1 = plain.data().unwrap();
+            let d2 = glasses.data().unwrap();
+            let diff_px = d1
+                .chunks_exact(4)
+                .zip(d2.chunks_exact(4))
+                .filter(|(a, b)| a != b)
+                .count();
+            assert!(
+                diff_px > 120,
+                "Stolas round glasses on {} modified too few pixels ({})",
+                color,
+                diff_px
+            );
+        }
     }
 }

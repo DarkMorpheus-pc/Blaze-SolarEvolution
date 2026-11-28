@@ -1904,6 +1904,43 @@ class BerpBereSolarUISecurityAuditTests(unittest.TestCase):
         for sym in ('Yerel Modeller', 'Ses & Beyin', 'Onayla ve Oluştur', 'Düşünme süreci', 'capture_wayland_screen_for_vision', 'install_turkish_tts_pack'):
             self.assertIn(sym, omni_rs)
 
+    def test_six_personas_stolas_glasses_slang_toggle_and_gemini_503_fallback(self):
+        """6 official personas, Stolas round glasses, default-off Argo serbest, and Gemini 503/timeout fallback."""
+        cfg_rs = (ROOT / 'solarui/crates/solar-common/src/config.rs').read_text(encoding='utf-8')
+        for sym in (
+            'pub enum CompanionCharacter',
+            'Persephone',
+            'Solar',
+            'Stolas',
+            'Kivilcim',
+            'Sis',
+            'pub ai_slang_enabled: bool',
+            'ai_slang_enabled: false',
+            'wears_round_glasses',
+        ):
+            self.assertIn(sym, cfg_rs)
+
+        avatar_rs = (ROOT / 'solarui/crates/solar-shell/src/companion_avatar.rs').read_text(encoding='utf-8')
+        self.assertIn('draw_companion_round_glasses', avatar_rs)
+        self.assertIn('render_companion_with_accessories', avatar_rs)
+        self.assertIn('Hazır karakterler', avatar_rs)
+
+        ai_rs = (ROOT / 'solarui/crates/solar-shell/src/blazeai.rs').read_text(encoding='utf-8')
+        for sym in (
+            'should_auto_research_for_stolas',
+            'persona_temperature',
+            'Argo serbest modu (AÇIK)',
+            'Argo serbest modu (KAPALI)',
+            'gemini_overload_fallback_candidates',
+            'is_transient_gemini_overload_or_quota',
+            '"gemini-3.5-flash-lite"',
+        ):
+            self.assertIn(sym, ai_rs)
+
+        omni_rs = (ROOT / 'solarui/crates/solar-shell/src/omnibar.rs').read_text(encoding='utf-8')
+        self.assertIn('Argo serbest (samimi halk dili)', omni_rs)
+        self.assertIn('yoğunluk yedeği', omni_rs)
+
 
 if __name__ == '__main__':
     unittest.main()

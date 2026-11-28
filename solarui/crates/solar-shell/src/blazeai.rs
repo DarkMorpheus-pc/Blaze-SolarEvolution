@@ -17,7 +17,9 @@ use crate::local_ai::{ensure_ollama_serving, model_supports_thinking};
 use crate::voice_pipeline::VisionAttachment;
 use chrono::Local;
 use serde::{Deserialize, Serialize};
-use solar_common::{BlazeAiProvider, CompanionExpression, OmnibarConfig, SolarConfig};
+use solar_common::{
+    BlazeAiProvider, CompanionCharacter, CompanionExpression, OmnibarConfig, SolarConfig,
+};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -441,8 +443,60 @@ pub fn extract_memory_tags_from_reply(reply: &str) -> (String, Vec<String>) {
     (final_text, facts)
 }
 
+/// Returns character-tuned sampling temperature matching each bot's behavioral focus.
+pub fn persona_temperature(cfg: &OmnibarConfig) -> f64 {
+    match cfg.active_character() {
+        Some(CompanionCharacter::Kivilcim) => 0.25,
+        Some(CompanionCharacter::Stolas) => 0.45,
+        Some(CompanionCharacter::Koz) => 0.70,
+        Some(CompanionCharacter::Sis) => 0.85,
+        Some(CompanionCharacter::Persephone | CompanionCharacter::Solar) | None => 0.65,
+    }
+}
+
+/// Automatically enables live web research when Stolas (the encyclopedic teacher)
+/// is asked about exams, country curricula, official syllabi, or research topics.
+pub fn should_auto_research_for_stolas(cfg: &OmnibarConfig, prompt: &str) -> bool {
+    if cfg.active_character() != Some(CompanionCharacter::Stolas) || !cfg.ai_web_research_enabled {
+        return false;
+    }
+    let norm = prompt
+        .to_lowercase()
+        .replace("i\u{307}", "i")
+        .replace('ı', "i")
+        .replace('ö', "o")
+        .replace('ü', "u")
+        .replace('ş', "s")
+        .replace('ğ', "g")
+        .replace('ç', "c");
+    const TRIGGERS: &[&str] = &[
+        "sinav",
+        "mufredat",
+        "yks",
+        "tyt",
+        "ayt",
+        "kpss",
+        "lgs",
+        "ales",
+        "meb",
+        "osym",
+        "soru hazirla",
+        "cikmis soru",
+        "resmi egitim",
+        "ulke",
+        "arastir",
+        "kaynak bul",
+        "exam",
+        "syllabus",
+        "curriculum",
+        "olimpiyat",
+    ];
+    TRIGGERS.iter().any(|kw| norm.contains(kw))
+}
+
 /// Builds the 2-layer system prompt combining immutable technical grounding,
-/// optional BlazeOS guide + local Brain memory + safe tool instructions, and active persona.
+/// optional BlazeOS guide + local Brain memory + safe tool instructions + slang gate,
+/// and the 6 official character engines (Persephone, Köz, Solar, Stolas, Kıvılcım, Sis).
 pub fn build_system_prompt(cfg: &OmnibarConfig, memory_facts: &[MemoryFact]) -> String {
     build_system_prompt_with_brain(cfg, memory_facts, "")
 }
@@ -457,12 +511,29 @@ pub fn build_system_prompt_with_brain(
     // Layer 1: Immutable technical & safety core
     parts.push(
         "Sen BlazeOS / SolarEvolution masaüstünde çalışan yerel bir asistansın. \
-Teknik olarak doğru, dürüst, kısa ve net yanıt ver. Bilmediğin bir bayrağı veya \
+Teknik olarak doğru ve dürüst yanıt ver. Bilmediğin bir bayrağı veya \
 komutu uydurma; veri kaybı yaratabilecek komutlarda kullanıcıyı uyar. \
-Emoji ve gereksiz süslü ifade kullanma. Kullanıcı Türkçe yazarsa Türkçe, \
-İngilizce yazarsa İngilizce yanıtla."
+Emoji kullanma. Kullanıcı Türkçe yazarsa Türkçe, İngilizce yazarsa İngilizce yanıtla."
             .to_string(),
     );
+
+    // Slang / Colloquial Turkish Friend-Banter Gate (default: OFF, opt-in across all 6 bots)
+    if cfg.ai_slang_enabled {
+        parts.push(
+            "Argo serbest modu (AÇIK): Kullanıcı ayarlardan samimi halk dili / argo seçeneğini kendi isteğiyle açtı. \
+Türkiye'de iki yakın arkadaşın günlük muhabbetindeki doğal, samimi ve mizahi halk argosunu \
+(örneğin şaşırınca 'Vay amk', inanmadığında 'Siktir la öyle şey mi olur', takılırken 'aq', 'lan', 'valla', 'be' gibi doğal ünlemleri) \
+karakterinin üslubuna yedirerek rahatça kullanabilirsin. Bu kullanım asla nefret söylemi veya kötü niyetli düşmanlık olmamalı; \
+tamamen yakın arkadaş sıcaklığı, samimiyet ve mizah taşımalıdır. Yapay durmaması için her cümleye zorla sıkıştırma, tam yerinde doğal kullan."
+                .to_string(),
+        );
+    } else {
+        parts.push(
+            "Argo serbest modu (KAPALI): Küfür, kaba sokak argosu veya argo kısaltmalar kullanma; \
+karakterinin mizahını, eleştirisini veya şakalarını temiz ve zeki bir Türkçe ile yansıt."
+                .to_string(),
+        );
+    }
 
     if cfg.ai_local_memory_enabled {
         parts.push(
@@ -474,7 +545,7 @@ en fazla bir adet [HAFIZA: kısa gerçek] etiketi ekleyebilirsin; gerekmiyorsa e
 
     if cfg.ai_web_research_enabled {
         parts.push(
-            "Güncel internet bilgisi (haber, hava durumu, yeni yazılım sürümü vb.) gerektiren sorularda \
+            "Güncel internet bilgisi (haber, resmi eğitim müfredatı, sınav konuları, yeni yazılım sürümü vb.) gerektiren sorularda \
 tahmin yürütmek yerine yalnızca şu tek etiketi üret: [WEB_ARA: kısa arama sorgusu]. Sistem aramayı \
 yapıp sonuçları sana geri verecektir."
                 .to_string(),
@@ -483,7 +554,7 @@ yapıp sonuçları sana geri verecektir."
 
     if cfg.ai_agent_tools_enabled {
         parts.push(
-            "Kullanıcı senden bilgisayarında bir metin/kod/belge dosyası oluşturmanı açıkça isterse \
+            "Kullanıcı senden bilgisayarında bir metin/kod/belge/çalışma kağıdı dosyası oluşturmanı açıkça isterse \
 dosya içeriğini şu blokla öner (kullanıcı onaylamadan diske yazılmaz): \
 [DOSYA_ONER: ~/Documents/dosya.md]\\niçerik\\n[/DOSYA_ONER]"
                 .to_string(),
@@ -507,42 +578,76 @@ dosya içeriğini şu blokla öner (kullanıcı onaylamadan diske yazılmaz): \
         parts.push(brain_context.trim().to_string());
     }
 
-    // Layer 2: Dynamic persona based on character name + expression archetype
+    // Layer 2: Character-specific behavioral engine + active facial expression nuance
     let name = cfg.effective_companion_name();
-    let lower_name = name.to_lowercase();
     let expr = cfg.companion_expression;
 
-    let persona_block = if lower_name == "persephone" {
-        format!(
-            "Karakter kimliği: Adın Persephone. Dengeli, dost canlısı ve korumacısın; \
-riskli adımlarda nazikçe uyarır, net ve güven verici teknik rehberlik sunarsın. \
-Aktif ifade tonu ({}): {}",
+    let persona_block = match cfg.active_character() {
+        Some(CompanionCharacter::Persephone) => format!(
+            "Karakter kimliği: Adın Persephone. Ana odağın kullanıcıyla dost canlısı, sıcak sohbet etmek, \
+sorularında içtenlikle yardımcı olmak ve yerinde mizahi, esprili cevaplar verebilmektir. \
+Resmi veya robotik konuşma; bilgili, esprili ve güvenilir bir yakın dost gibi yaklaş. \
+Ek ifade tonu ({}): {}",
             expr.title_tr(),
             expr.persona_prompt_tr()
-        )
-    } else if lower_name == "köz" || lower_name == "koz" {
-        format!(
-            "Karakter kimliği: Adın Köz. Ciddi, doğrudan ve tavizsiz bir mühendislik \
-eleştirmenisin; zayıf fikirleri, üşengeç çözümleri ve güvenlik hatalarını açıkça \
-yüzüne vurur, hemen ardından en sağlam teknik çözümünü söylersin. \
-Aktif ifade tonu ({}): {}",
+        ),
+        Some(CompanionCharacter::Koz) => {
+            let roast_example = if cfg.ai_slang_enabled {
+                "Örneğin kullanıcı kodda bariz bir hata yaptığında 'Kod yazarken Windows kullanıcısı gibi davranıyorsun aq' tadında keskin ve komik taşlamalar yapabilirsin."
+            } else {
+                "Örneğin kullanıcı kodda bariz bir hata yaptığında 'Kod yazarken Windows kullanıcısı gibi davranıyorsun, o satır ne öyle' tadında küfürsüz ama keskin esprili taşlamalar yapabilirsin."
+            };
+            format!(
+                "Karakter kimliği: Adın Köz. Tavizsiz, sert ama çok esprili bir mühendislik ve kod eleştirmenisin. \
+Kullanıcı kod yazarken veya sistem yönetirken hata yaptığında, üşengeç bir çözüm kurduğunda mizahi bir dille yüzüne vur; \
+{} Eleştirinin hemen ardından en sağlam, çalışan teknik çözümü net biçimde ver. \
+Ek ifade tonu ({}): {}",
+                roast_example,
+                expr.title_tr(),
+                expr.persona_prompt_tr()
+            )
+        }
+        Some(CompanionCharacter::Solar) => format!(
+            "Karakter kimliği: Adın Solar. Ana odağın sakin, huzur verici bir üslupla kullanıcıyı motive etmek, \
+stresini azaltmak ve moral vermektir. Kullanıcı istediğinde veya moral aradığında ona ritmik, akıcı şarkı sözleri, \
+kıtalar ve melodik dizeler yazıp söyleyebilirsin. Aceleci olma; dingin, sıcak ve yüreklendirici konuş. \
+Ek ifade tonu ({}): {}",
             expr.title_tr(),
             expr.persona_prompt_tr()
-        )
-    } else if lower_name == "kıvılcım" || lower_name == "kivilcim" {
-        format!(
-            "Karakter kimliği: Adın Kıvılcım. Meraklı, çevik ve analitik bir araştırmacısın. \
-Aktif ifade tonu ({}): {}",
+        ),
+        Some(CompanionCharacter::Stolas) => format!(
+            "Karakter kimliği: Adın Stolas (yuvarlak gözlüklü bilge öğretmen). Ana odağın karmaşık matematiksel problemler, \
+derin teknik/akademik konular, kodlama mantığı ve sınav hazırlığında kullanıcıya gerçek bir öğretmen ve yürüyen bir Wikipedia ansiklopedisi gibi yaklaşmaktır. \
+Temel kuralın: Asla doğrudan kuru cevabı verip geçme! Bir matematik sorusunda, kod hatasında veya kavramsal soruda işlemin neden öyle yapıldığını, \
+arkasındaki mantığı ve adımları anlaşılır, akıcı ve hafif mizahi bir öğretmen diliyle anlat ki kullanıcı sıkılmadan ders dinlesin ve kendini geliştirsin. \
+Kullanıcı bir ülkenin sınavına (ör. YKS, TYT, AYT, LGS, KPSS veya başka ülke müfredatları) hazırlanıyorsa, resmi eğitim kazanımlarına uygun öğretici sorular hazırla \
+ve çözümlerde her adımın sebebini öğret. Güncel sınav/müfredat bilgisi gerektiğinde [WEB_ARA: ...] ile araştır. \
+Ek ifade tonu ({}): {}",
             expr.title_tr(),
             expr.persona_prompt_tr()
-        )
-    } else {
-        format!(
+        ),
+        Some(CompanionCharacter::Kivilcim) => format!(
+            "Karakter kimliği: Adın Kıvılcım. Ana odağın maksimum hız ve doğrudan cevap vermektir! \
+Uzun giriş cümleleri, tarihçe veya uzun hata nedeni anlatımları yapma. Örneğin kullanıcı bir programcıysa ve kodda hata aldıysa \
+doğrudan düzeltilmiş çalışan kodu veya komutu gönder; gerekirse en fazla 1-2 kısa cümlelik özet not ekle. \
+Ek ifade tonu ({}): {}",
+            expr.title_tr(),
+            expr.persona_prompt_tr()
+        ),
+        Some(CompanionCharacter::Sis) => format!(
+            "Karakter kimliği: Adın Sis. Ana odağın tamamen mizah, şaka ve eğlencedir! \
+Kullanıcıyla sohbet ederken zeki şakalar yap, komik benzetmeler kur ve eğlenceli bir muhabbet ortamı yarat. \
+Teknik bir soru sorulduğunda bile doğru bilgiyi eğlenceli esprilerin arasına katarak sun. \
+Ek ifade tonu ({}): {}",
+            expr.title_tr(),
+            expr.persona_prompt_tr()
+        ),
+        None => format!(
             "Karakter kimliği: Adın {}. Aktif arketip ({}): {}",
             name,
             expr.title_tr(),
             expr.persona_prompt_tr()
-        )
+        ),
     };
     parts.push(persona_block);
 
@@ -679,9 +784,10 @@ pub fn curated_models_for_provider(provider: BlazeAiProvider) -> &'static [&'sta
     match provider {
         BlazeAiProvider::Gemini => &[
             "gemini-3.8-flash",
-            "gemini-3.8-pro",
-            "gemini-3.5-flash",
-            "gemini-2.5-pro",
+            "gemini-3.5-flash-lite",
+            "gemini-flash-lite-latest",
+            "gemini-3.1-flash-lite",
+            "gemini-3-flash-preview",
         ],
         BlazeAiProvider::OpenAi => &["gpt-4o-mini", "gpt-4o", "o4-mini"],
         BlazeAiProvider::Anthropic => &[
@@ -717,8 +823,26 @@ pub fn extract_recommended_gemini_model(err_msg: &str) -> Option<String> {
     }
 }
 
-/// Parses Google AI Studio `/v1beta/models` JSON and returns chat-capable Gemini models
-/// supporting `generateContent`, excluding embedding/media/specialized endpoints.
+fn gemini_model_priority_tier(short: &str) -> u8 {
+    let lower = short.to_ascii_lowercase();
+    if lower.starts_with("gemini-3.")
+        || lower.starts_with("gemini-3-")
+        || lower.starts_with("gemini-2.5-")
+        || lower == "gemini-flash-latest"
+        || lower == "gemini-flash-lite-latest"
+        || lower == "gemini-pro-latest"
+    {
+        0
+    } else if lower.starts_with("gemma-") {
+        1
+    } else {
+        2
+    }
+}
+
+/// Parses Google AI Studio `/v1beta/models` JSON and returns chat-capable Gemini/Gemma models
+/// supporting `generateContent`, excluding embedding/image/audio/specialized endpoints and
+/// keeping fast Flash-Lite / Flash / Pro models at the top.
 pub fn parse_gemini_models_list(raw_body: &str) -> Vec<String> {
     let Ok(val) = serde_json::from_str::<serde_json::Value>(raw_body) else {
         return Vec::new();
@@ -744,15 +868,20 @@ pub fn parse_gemini_models_list(raw_body: &str) -> Vec<String> {
         };
         let short = full_name.strip_prefix("models/").unwrap_or(full_name).trim();
         let lower = short.to_ascii_lowercase();
-        if !lower.starts_with("gemini-") {
+        if !(lower.starts_with("gemini-") || lower.starts_with("gemma-")) {
             continue;
         }
         if lower.contains("embedding")
             || lower.contains("imagen")
+            || lower.contains("image")
+            || lower.contains("nano-banana")
             || lower.contains("veo")
             || lower.contains("tts")
             || lower.contains("audio")
+            || lower.contains("transcribe")
             || lower.contains("robotics")
+            || lower.contains("computer-use")
+            || lower.contains("customtools")
             || lower.contains("lyria")
             || lower.contains("aqa")
             || lower.contains("bisect")
@@ -763,8 +892,12 @@ pub fn parse_gemini_models_list(raw_body: &str) -> Vec<String> {
             models.push(short.to_string());
         }
     }
-    models.sort_by(|a, b| b.cmp(a));
-    models.truncate(12);
+    models.sort_by(|a, b| {
+        gemini_model_priority_tier(a)
+            .cmp(&gemini_model_priority_tier(b))
+            .then_with(|| b.cmp(a))
+    });
+    models.truncate(24);
     models
 }
 
@@ -861,7 +994,15 @@ fn execute_get_with_status(
     cfg_stdin.push_str("write-out = \"\\n__BLAZEAI_HTTP_STATUS:%{http_code}\"\n");
 
     let mut child = Command::new("/usr/bin/curl")
-        .args(["-sS", "--max-time", timeout_secs, "-K", "-"])
+        .args([
+            "-sS",
+            "--connect-timeout",
+            "8",
+            "--max-time",
+            timeout_secs,
+            "-K",
+            "-",
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1236,15 +1377,25 @@ pub fn build_provider_request_payload_with_vision(
                     })
                 })
                 .collect();
-            serde_json::json!({
+            let temp = persona_temperature(cfg);
+            let mut body = serde_json::json!({
                 "system_instruction": {
                     "parts": [{ "text": system_prompt }]
                 },
                 "contents": contents,
                 "generationConfig": {
-                    "temperature": 0.6
+                    "temperature": temp
                 }
-            })
+            });
+            if cfg.ai_slang_enabled {
+                body["safetySettings"] = serde_json::json!([
+                    {
+                        "category": "HARM_CATEGORY_HARASSMENT",
+                        "threshold": "BLOCK_ONLY_HIGH"
+                    }
+                ]);
+            }
+            body
         }
         BlazeAiProvider::OpenAi | BlazeAiProvider::OpenAiCompatible => {
             let mut msgs = vec![serde_json::json!({
@@ -1341,10 +1492,15 @@ pub fn build_provider_request_payload_with_vision(
                 "model": model,
                 "stream": false,
                 "keep_alive": cfg.effective_local_keep_alive(),
+                "options": {
+                    "temperature": persona_temperature(cfg)
+                },
                 "messages": msgs
             });
             if model_supports_thinking(&model) {
-                body["think"] = serde_json::Value::Bool(cfg.ai_thinking_mode);
+                let want_think = cfg.ai_thinking_mode
+                    && cfg.active_character() != Some(CompanionCharacter::Kivilcim);
+                body["think"] = serde_json::Value::Bool(want_think);
             }
             body
         }
@@ -1374,20 +1530,50 @@ pub fn parse_provider_response_with_thinking(
 
     let mut native_thinking = String::new();
     let extracted = match provider {
-        BlazeAiProvider::Gemini => val
-            .get("candidates")
-            .and_then(|c| c.as_array())
-            .and_then(|arr| arr.first())
-            .and_then(|cand| cand.get("content"))
-            .and_then(|c| c.get("parts"))
-            .and_then(|p| p.as_array())
-            .map(|parts| {
-                parts
-                    .iter()
-                    .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            }),
+        BlazeAiProvider::Gemini => {
+            let first_cand = val
+                .get("candidates")
+                .and_then(|c| c.as_array())
+                .and_then(|arr| arr.first());
+            if let Some(cand) = first_cand {
+                if let Some(parts) = cand
+                    .get("content")
+                    .and_then(|c| c.get("parts"))
+                    .and_then(|p| p.as_array())
+                {
+                    let mut answer_chunks = Vec::new();
+                    let mut thought_chunks = Vec::new();
+                    for p in parts {
+                        let Some(txt) = p.get("text").and_then(|t| t.as_str()) else {
+                            continue;
+                        };
+                        if p.get("thought").and_then(|b| b.as_bool()) == Some(true) {
+                            if !txt.trim().is_empty() {
+                                thought_chunks.push(txt.trim());
+                            }
+                        } else {
+                            answer_chunks.push(txt);
+                        }
+                    }
+                    if !thought_chunks.is_empty() {
+                        native_thinking = thought_chunks.join("\n\n");
+                    }
+                    if !answer_chunks.is_empty() {
+                        Some(answer_chunks.join("\n"))
+                    } else if !native_thinking.is_empty() {
+                        Some(native_thinking.clone())
+                    } else {
+                        None
+                    }
+                } else if cand.get("finishReason").and_then(|r| r.as_str()) == Some("SAFETY") {
+                    return Err("Yanıt sağlayıcının güvenlik filtresine takıldı".to_string());
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
         BlazeAiProvider::OpenAi | BlazeAiProvider::OpenAiCompatible => val
             .get("choices")
             .and_then(|c| c.as_array())
@@ -1491,6 +1677,7 @@ pub enum ChatCompletionOutcome {
         suggested_actions: Vec<SuggestedAction>,
         file_proposals: Vec<PendingFileProposal>,
         upgraded_model: Option<String>,
+        fallback_model_used: Option<String>,
     },
     FallbackToWebSearch {
         url: String,
@@ -1551,12 +1738,60 @@ pub fn probe_ollama_models(base_url: &str) -> Result<Vec<String>, String> {
     Ok(models)
 }
 
+/// Fast fallback models used when the primary Gemini model stalls (`curl 28`) or
+/// returns `503 UNAVAILABLE` ("experiencing high demand") / per-model `429`.
+pub fn gemini_overload_fallback_candidates(current_model: &str) -> Vec<&'static str> {
+    const CANDIDATES: &[&str] = &[
+        "gemini-3.5-flash-lite",
+        "gemini-flash-lite-latest",
+        "gemini-3.1-flash-lite",
+    ];
+    let cur = current_model.trim();
+    CANDIDATES
+        .iter()
+        .copied()
+        .filter(|m| !m.eq_ignore_ascii_case(cur))
+        .collect()
+}
+
+pub fn is_transient_gemini_overload_or_quota(res: &Result<(u16, String), String>) -> bool {
+    match res {
+        Ok((code, _)) => matches!(*code, 429 | 500 | 502 | 503 | 504 | 529),
+        Err(err) => {
+            let lower = err.to_ascii_lowercase();
+            lower.contains("(28)") || lower.contains("timed out")
+        }
+    }
+}
+
 fn execute_provider_http(
     cfg: &OmnibarConfig,
     api_key: &str,
     system_prompt: &str,
     history: &[ChatMessage],
     vision: Option<&VisionAttachment>,
+) -> Result<(u16, String), String> {
+    let default_timeout = if cfg.ai_provider == BlazeAiProvider::Ollama {
+        "120"
+    } else if cfg.ai_provider == BlazeAiProvider::Gemini {
+        if cfg.active_character() == Some(CompanionCharacter::Kivilcim) {
+            "12"
+        } else {
+            "18"
+        }
+    } else {
+        "45"
+    };
+    execute_provider_http_with_timeout(cfg, api_key, system_prompt, history, vision, default_timeout)
+}
+
+fn execute_provider_http_with_timeout(
+    cfg: &OmnibarConfig,
+    api_key: &str,
+    system_prompt: &str,
+    history: &[ChatMessage],
+    vision: Option<&VisionAttachment>,
+    timeout_secs: &str,
 ) -> Result<(u16, String), String> {
     let endpoint = build_provider_endpoint(cfg, api_key)?;
     let payload = build_provider_request_payload_with_vision(cfg, system_prompt, history, vision);
@@ -1574,14 +1809,17 @@ fn execute_provider_http(
         path: payload_path.clone(),
     };
 
-    let timeout_secs = if cfg.ai_provider == BlazeAiProvider::Ollama {
-        "120"
-    } else {
-        "45"
-    };
     let stdin_cfg = format_curl_stdin_config(&endpoint, &payload_path);
     let mut child = Command::new("/usr/bin/curl")
-        .args(["-sS", "--max-time", timeout_secs, "-K", "-"])
+        .args([
+            "-sS",
+            "--connect-timeout",
+            "8",
+            "--max-time",
+            timeout_secs,
+            "-K",
+            "-",
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1676,7 +1914,10 @@ pub fn send_chat_completion_with_options(
         String::new()
     };
 
-    if force_web_research && cfg.ai_web_research_enabled {
+    let want_initial_web =
+        (force_web_research || should_auto_research_for_stolas(cfg, latest_prompt))
+            && cfg.ai_web_research_enabled;
+    if want_initial_web {
         if let Ok(results) = execute_web_research(latest_prompt, 4) {
             let web_block = format_web_research_context(latest_prompt, &results);
             if !web_block.is_empty() {
@@ -1689,9 +1930,41 @@ pub fn send_chat_completion_with_options(
     }
 
     let system_prompt = build_system_prompt_with_brain(cfg, memory_facts, &extra_context);
-    let (mut http_code, mut raw_body) =
-        execute_provider_http(cfg, api_key, &system_prompt, history, vision)?;
+    let primary_res = execute_provider_http(cfg, api_key, &system_prompt, history, vision);
     let mut upgraded_model: Option<String> = None;
+    let mut fallback_model_used: Option<String> = None;
+    let mut effective_call_cfg = cfg.clone();
+
+    let (mut http_code, mut raw_body) = if cfg.ai_provider == BlazeAiProvider::Gemini
+        && is_transient_gemini_overload_or_quota(&primary_res)
+    {
+        let mut recovered: Option<(u16, String)> = None;
+        for fb_model in gemini_overload_fallback_candidates(&cfg.effective_ai_model()) {
+            let mut fb_cfg = cfg.clone();
+            fb_cfg.ai_model = fb_model.to_string();
+            if let Ok((fb_code, fb_body)) = execute_provider_http_with_timeout(
+                &fb_cfg,
+                api_key,
+                &system_prompt,
+                history,
+                vision,
+                "14",
+            ) {
+                if fb_code < 400 {
+                    fallback_model_used = Some(fb_model.to_string());
+                    effective_call_cfg = fb_cfg;
+                    recovered = Some((fb_code, fb_body));
+                    break;
+                }
+            }
+        }
+        match recovered {
+            Some(pair) => pair,
+            None => primary_res?,
+        }
+    } else {
+        primary_res?
+    };
 
     // If Google AI Studio reports HTTP 404 for a deprecated Gemini model and suggests a replacement,
     // automatically retry once with the recommended model so chat never silently breaks on deprecation.
@@ -1709,6 +1982,7 @@ pub fn send_chat_completion_with_options(
                     http_code = retry_code;
                     raw_body = retry_body;
                     if retry_code < 400 {
+                        effective_call_cfg = retry_cfg;
                         upgraded_model = Some(recommended);
                     }
                 }
@@ -1727,15 +2001,19 @@ pub fn send_chat_completion_with_options(
         parse_provider_response_with_thinking(cfg.ai_provider, &raw_body)?;
 
     // Single grounded web-research follow-up when model explicitly emits [WEB_ARA: query]
-    if cfg.ai_web_research_enabled && !force_web_research {
+    if cfg.ai_web_research_enabled && !want_initial_web {
         if let Some(web_query) = extract_web_search_tag(&raw_reply) {
             if let Ok(results) = execute_web_research(&web_query, 4) {
                 let web_block = format_web_research_context(&web_query, &results);
                 if !web_block.is_empty() {
                     let grounded_prompt = format!("{}\n\n{}", system_prompt, web_block);
-                    if let Ok((code2, body2)) =
-                        execute_provider_http(cfg, api_key, &grounded_prompt, history, vision)
-                    {
+                    if let Ok((code2, body2)) = execute_provider_http(
+                        &effective_call_cfg,
+                        api_key,
+                        &grounded_prompt,
+                        history,
+                        vision,
+                    ) {
                         if code2 < 400 {
                             if let Ok((reply2, think2)) =
                                 parse_provider_response_with_thinking(cfg.ai_provider, &body2)
@@ -1773,6 +2051,7 @@ pub fn send_chat_completion_with_options(
         suggested_actions,
         file_proposals,
         upgraded_model,
+        fallback_model_used,
     })
 }
 
@@ -2340,5 +2619,72 @@ mod tests {
         g_cfg.ai_provider = BlazeAiProvider::Gemini;
         let g_pay = build_provider_request_payload_with_vision(&g_cfg, "sys", &hist, Some(&vis));
         assert_eq!(g_pay["contents"][0]["parts"][1]["inline_data"]["data"], "AQID");
+        assert!(g_pay.get("safetySettings").is_none());
+
+        // When Argo serbest is enabled, Gemini relaxes HARM_CATEGORY_HARASSMENT to BLOCK_ONLY_HIGH
+        g_cfg.ai_slang_enabled = true;
+        let g_slang_pay = build_provider_request_payload_with_vision(&g_cfg, "sys", &hist, None);
+        assert_eq!(
+            g_slang_pay["safetySettings"][0]["threshold"],
+            "BLOCK_ONLY_HIGH"
+        );
+
+        // Gemini native thought:true separation
+        let (gem_ans, gem_thought) = parse_provider_response_with_thinking(
+            BlazeAiProvider::Gemini,
+            r#"{"candidates":[{"content":{"parts":[{"thought":true,"text":"Adım adım türev alalım"},{"text":"Sonuç 2x olur."}]}}]}"#,
+        )
+        .unwrap();
+        assert_eq!(gem_ans, "Sonuç 2x olur.");
+        assert_eq!(gem_thought, "Adım adım türev alalım");
+
+        // Gemini 503/timeout detection & fallback candidates + expanded live filter
+        assert!(is_transient_gemini_overload_or_quota(&Ok((503, String::new()))));
+        assert!(is_transient_gemini_overload_or_quota(&Err(
+            "Ağ hatası: curl: (28) Operation timed out after 18001 milliseconds".to_string()
+        )));
+        let fb = gemini_overload_fallback_candidates("gemini-3.8-flash");
+        assert_eq!(fb[0], "gemini-3.5-flash-lite");
+
+        let real_ai_studio_sample = r#"{
+            "models": [
+                {"name": "models/gemini-3.8-flash", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-3.5-flash-lite", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-nano-banana-2.1", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-3.1-flash-image", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemma-4-31b-it", "supportedGenerationMethods": ["generateContent"]}
+            ]
+        }"#;
+        let filtered = parse_gemini_models_list(real_ai_studio_sample);
+        assert!(filtered.contains(&"gemini-3.8-flash".to_string()));
+        assert!(filtered.contains(&"gemini-3.5-flash-lite".to_string()));
+        assert!(filtered.contains(&"gemma-4-31b-it".to_string()));
+        assert!(!filtered.iter().any(|m| m.contains("banana") || m.contains("image")));
+
+        // Verify all 6 personas + Argo serbest toggle + Stolas auto-research & Kıvılcım fast temp
+        for ch in CompanionCharacter::ALL {
+            let mut p_cfg = OmnibarConfig::default();
+            p_cfg.apply_character_preset(ch);
+            let prompt_off = build_system_prompt(&p_cfg, &[]);
+            assert!(prompt_off.contains(ch.display_name()));
+            assert!(prompt_off.contains("Argo serbest modu (KAPALI)"));
+
+            p_cfg.ai_slang_enabled = true;
+            let prompt_on = build_system_prompt(&p_cfg, &[]);
+            assert!(prompt_on.contains("Argo serbest modu (AÇIK)"));
+            assert!(prompt_on.contains("Vay amk"));
+        }
+
+        let mut stolas_cfg = OmnibarConfig::default();
+        stolas_cfg.apply_character_preset(CompanionCharacter::Stolas);
+        assert!(should_auto_research_for_stolas(
+            &stolas_cfg,
+            "Türkiye YKS AYT matematik türev müfredatına uygun soru hazırla"
+        ));
+        assert!(!should_auto_research_for_stolas(&stolas_cfg, "2+2 kaç eder"));
+
+        let mut kivilcim_cfg = OmnibarConfig::default();
+        kivilcim_cfg.apply_character_preset(CompanionCharacter::Kivilcim);
+        assert!(persona_temperature(&kivilcim_cfg) < persona_temperature(&stolas_cfg));
     }
 }

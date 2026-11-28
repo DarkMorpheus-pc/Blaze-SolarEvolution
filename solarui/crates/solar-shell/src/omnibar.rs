@@ -823,13 +823,13 @@ fn rebuild_chat_view(
         let title = Label::new(Some(&format!(
             "{} · {}",
             cfg.effective_companion_name(),
-            cfg.companion_expression.title_tr()
+            cfg.effective_companion_subtitle()
         )));
         title.add_css_class("blazeai-msg-speaker");
         title.set_halign(gtk4::Align::Start);
         card.append(&title);
 
-        let desc = Label::new(Some(cfg.companion_expression.meaning_tr()));
+        let desc = Label::new(Some(cfg.effective_companion_summary()));
         desc.add_css_class("companion-banner-desc");
         desc.set_wrap(true);
         desc.set_xalign(0.0);
@@ -1140,10 +1140,11 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
     let left_top = GtkBox::new(Orientation::Horizontal, 10);
     left_top.set_valign(gtk4::Align::Center);
 
-    let avatar = CompanionAvatarWidget::new(
+    let avatar = CompanionAvatarWidget::new_with_glasses(
         initial_cfg.omnibar.companion_shape,
         initial_cfg.omnibar.companion_expression,
         &initial_cfg.omnibar.companion_color,
+        initial_cfg.omnibar.wears_round_glasses(),
         52,
     );
     avatar.bind_window(&window);
@@ -1195,7 +1196,7 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
     let sub_model_row = GtkBox::new(Orientation::Horizontal, 6);
     sub_model_row.set_valign(gtk4::Align::Center);
 
-    let companion_arch_lbl = Label::new(Some(initial_cfg.omnibar.companion_expression.title_tr()));
+    let companion_arch_lbl = Label::new(Some(initial_cfg.omnibar.effective_companion_subtitle()));
     companion_arch_lbl.add_css_class("companion-archetype-sub");
     companion_arch_lbl.set_hexpand(true);
     companion_arch_lbl.set_halign(gtk4::Align::Start);
@@ -1492,7 +1493,7 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
             CompanionCustomizerCallbacks {
                 on_appearance_changed: Rc::new(move |omnibar_cfg: &OmnibarConfig| {
                     name_lbl_c.set_text(&omnibar_cfg.effective_companion_name());
-                    arch_lbl_c.set_text(omnibar_cfg.companion_expression.title_tr());
+                    arch_lbl_c.set_text(omnibar_cfg.effective_companion_subtitle());
                     refresh_c();
                 }),
                 on_persona_transition: Rc::new(move |from_n, to_n, expr| {
@@ -1656,11 +1657,16 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
     let chk_guide = CheckButton::with_label("Yerleşik BlazeOS rehberini ekle");
     let chk_web_research = CheckButton::with_label("Otomatik web araştırması (DuckDuckGo)");
     let chk_agent_tools = CheckButton::with_label("Onay kartlı dosya oluşturma araçları");
+    let chk_slang = CheckButton::with_label("Argo serbest (samimi halk dili)");
+    chk_slang.set_tooltip_text(Some(
+        "Açıldığında tüm karakterler yakın arkadaş muhabbeti tadında doğal Türkçe argo kullanabilir (varsayılan: kapalı)",
+    ));
     gear_box.append(&chk_persist);
     gear_box.append(&chk_local_mem);
     gear_box.append(&chk_guide);
     gear_box.append(&chk_web_research);
     gear_box.append(&chk_agent_tools);
+    gear_box.append(&chk_slang);
 
     gear_box.append(&Separator::new(Orientation::Horizontal));
 
@@ -1748,9 +1754,9 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
 
     let voice_dropdown = DropDown::new(
         Some(StringList::new(&[
-            "Otomatik (Persephone / Köz)",
-            "Persephone (tr_TR-dfki-medium)",
-            "Köz (tr_TR-fahrettin-medium)",
+            "Otomatik (Karaktere göre)",
+            "Persephone / Solar / Kıvılcım / Sis (dfki)",
+            "Köz / Stolas (fahrettin)",
         ])),
         None::<gtk4::Expression>,
     );
@@ -1866,6 +1872,7 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
         let c_guide = chk_guide.clone();
         let c_web = chk_web_research.clone();
         let c_tools = chk_agent_tools.clone();
+        let c_slang = chk_slang.clone();
         let c_tts = chk_tts_auto.clone();
         let v_dd = voice_dropdown.clone();
         let v_lbl = voice_status_lbl.clone();
@@ -1892,6 +1899,7 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
             c_guide.set_active(cfg.omnibar.ai_include_blazeos_guide);
             c_web.set_active(cfg.omnibar.ai_web_research_enabled);
             c_tools.set_active(cfg.omnibar.ai_agent_tools_enabled);
+            c_slang.set_active(cfg.omnibar.ai_slang_enabled);
             c_tts.set_active(cfg.omnibar.ai_voice_tts_auto);
             let v_idx = match cfg.omnibar.ai_voice_tts_voice.trim() {
                 PIPER_VOICE_PERSEPHONE => 1,
@@ -2393,6 +2401,19 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
             let active = cb.is_active();
             let _ = SolarConfig::update(|c| {
                 c.omnibar.ai_include_blazeos_guide = active;
+            });
+        });
+    }
+
+    {
+        let sync_flag = syncing_gear.clone();
+        chk_slang.connect_toggled(move |cb| {
+            if sync_flag.get() {
+                return;
+            }
+            let active = cb.is_active();
+            let _ = SolarConfig::update(|c| {
+                c.omnibar.ai_slang_enabled = active;
             });
         });
     }
@@ -3479,6 +3500,7 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
                         suggested_actions,
                         file_proposals,
                         upgraded_model,
+                        fallback_model_used,
                         ..
                     })) => {
                         if let Some(new_model) = upgraded_model {
@@ -3488,6 +3510,15 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
                                 }
                             });
                         }
+                        let speaker_badge = if let Some(ref fb) = fallback_model_used {
+                            format!(
+                                "{} · {} (yoğunluk yedeği)",
+                                latest_cfg.omnibar.effective_companion_name(),
+                                fb
+                            )
+                        } else {
+                            latest_cfg.omnibar.effective_companion_name()
+                        };
                         let speak_copy = cleaned_text.clone();
                         {
                             let mut st = st_done.borrow_mut();
@@ -3501,7 +3532,7 @@ fn build_omnibar_ui(main_loop: glib::MainLoop) {
                                     role: ChatRole::Assistant,
                                     content: cleaned_text,
                                     timestamp: chrono::Local::now().to_rfc3339(),
-                                    speaker_name: latest_cfg.omnibar.effective_companion_name(),
+                                    speaker_name: speaker_badge,
                                     suggested_actions,
                                     thinking_text,
                                     file_proposals,

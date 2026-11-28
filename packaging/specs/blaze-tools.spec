@@ -4,7 +4,7 @@
 # Binary repack of artefacts built from the repositories listed in SOURCES.md
 Name:           blaze-tools
 Version:        5.05.1
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        BlazeOS helper tools and installers
 License:        GPL-3.0-or-later
 URL:            https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
@@ -54,6 +54,8 @@ rm -f %{buildroot}/%{name}-%{version}.tar
 /etc/dnf/libdnf5-plugins/actions.d/blaze-snapshot.actions
 
 %changelog
+* Sat Nov 28 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-3
+- Use capability-only 0755 + cap_setuid/cap_setgid instead of SUID 4755 on newuidmap/newgidmap in blazeos-postinstall
 * Thu Nov 26 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-2
 - Ship unprivileged BlazeHouse desktop update notifier and trigger armored BERE vault refresh during offline updates
 * Tue Nov 24 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-1

@@ -4,7 +4,7 @@
 # Binary repack of artefacts built from the repositories listed in SOURCES.md
 Name:           solarui
 Version:        5.05.1
-Release:        4%{?dist}
+Release:        5%{?dist}
 Summary:        SolarUI desktop shell manager, session and settings
 License:        GPL-3.0-or-later
 URL:            https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
@@ -43,6 +43,8 @@ rm -f %{buildroot}/%{name}-%{version}.tar
 /usr/share/backgrounds/blazeos/we10x
 
 %changelog
+* Sat Nov 28 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-5
+- Add 6 distinct BlazeAI companion personas (Persephone, Koz, Solar, Stolas with round vector glasses, Kivilcim, Sis), opt-in Argo serbest colloquial Turkish mode, improved Gemini model filtering/ranking, automatic HTTP 503/timeout Flash-Lite fallback, and Gemini native thought separation
 * Fri Nov 27 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-4
 - Add Omnibar Local AI Model Hub (1.5B-16B hardware-recommended tiers, user-space Ollama installer/puller, hybrid thinking toggle), Antigravity-style local Brain folder, safe web/file agent tools with approval cards, Turkish voice mode (whisper.cpp + Piper TTS with barge-in), and explicit Wayland grim Vision capture
 * Fri Nov 27 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-3

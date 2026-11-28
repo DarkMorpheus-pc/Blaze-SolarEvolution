@@ -777,21 +777,21 @@ impl CompanionExpression {
     pub fn default_name(&self) -> &'static str {
         match self {
             CompanionExpression::Attentive
-            | CompanionExpression::Neutral
             | CompanionExpression::Happy
-            | CompanionExpression::Proud
-            | CompanionExpression::Laughing => "Persephone",
+            | CompanionExpression::Proud => "Persephone",
             CompanionExpression::Angry
             | CompanionExpression::Suspicious
             | CompanionExpression::Unimpressed => "Köz",
-            CompanionExpression::Curious
-            | CompanionExpression::Excited
-            | CompanionExpression::Surprised => "Kıvılcım",
-            CompanionExpression::Confused => "Pus",
-            CompanionExpression::Sad
-            | CompanionExpression::Scared
-            | CompanionExpression::Shy => "Sis",
-            CompanionExpression::Sleepy => "Gece",
+            CompanionExpression::Neutral
+            | CompanionExpression::Sad
+            | CompanionExpression::Sleepy => "Solar",
+            CompanionExpression::Confused
+            | CompanionExpression::Curious
+            | CompanionExpression::Scared => "Stolas",
+            CompanionExpression::Excited
+            | CompanionExpression::Surprised
+            | CompanionExpression::Shy => "Kıvılcım",
+            CompanionExpression::Laughing => "Sis",
         }
     }
 
@@ -930,6 +930,140 @@ impl std::str::FromStr for CompanionExpression {
             "unimpressed" => Ok(CompanionExpression::Unimpressed),
             "sleepy" => Ok(CompanionExpression::Sleepy),
             other => Err(format!("Bilinmeyen karakter ifadesi: '{}'", other)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum CompanionCharacter {
+    Persephone,
+    Koz,
+    Solar,
+    Stolas,
+    Kivilcim,
+    Sis,
+}
+
+impl CompanionCharacter {
+    pub const ALL: [CompanionCharacter; 6] = [
+        CompanionCharacter::Persephone,
+        CompanionCharacter::Koz,
+        CompanionCharacter::Solar,
+        CompanionCharacter::Stolas,
+        CompanionCharacter::Kivilcim,
+        CompanionCharacter::Sis,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CompanionCharacter::Persephone => "persephone",
+            CompanionCharacter::Koz => "koz",
+            CompanionCharacter::Solar => "solar",
+            CompanionCharacter::Stolas => "stolas",
+            CompanionCharacter::Kivilcim => "kivilcim",
+            CompanionCharacter::Sis => "sis",
+        }
+    }
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            CompanionCharacter::Persephone => "Persephone",
+            CompanionCharacter::Koz => "Köz",
+            CompanionCharacter::Solar => "Solar",
+            CompanionCharacter::Stolas => "Stolas",
+            CompanionCharacter::Kivilcim => "Kıvılcım",
+            CompanionCharacter::Sis => "Sis",
+        }
+    }
+
+    pub fn role_title_tr(&self) -> &'static str {
+        match self {
+            CompanionCharacter::Persephone => "Dost Canlısı Sohbet",
+            CompanionCharacter::Koz => "Sert ve Esprili Eleştirmen",
+            CompanionCharacter::Solar => "Sakin Motivasyon ve Şarkı",
+            CompanionCharacter::Stolas => "Ansiklopedik Öğretmen",
+            CompanionCharacter::Kivilcim => "Hızlı ve Doğrudan Çözüm",
+            CompanionCharacter::Sis => "Tam Mizah ve Eğlence",
+        }
+    }
+
+    pub fn focus_summary_tr(&self) -> &'static str {
+        match self {
+            CompanionCharacter::Persephone => {
+                "Dost canlısı sohbet eder; sorularında samimi ve mizahi bir dille yardımcı olur."
+            }
+            CompanionCharacter::Koz => {
+                "Kod ve sistem hatalarını sert ama esprili bir dille yüzüne vurur, ardından sağlam çözümü gösterir."
+            }
+            CompanionCharacter::Solar => {
+                "Sakin bir üslupla motive eder, moral verir ve istendiğinde şarkı sözleri söyler."
+            }
+            CompanionCharacter::Stolas => {
+                "Karmaşık matematik, kod ve ülke sınav konularını web'den araştırıp doğrudan cevap yerine nedenleriyle öğretir."
+            }
+            CompanionCharacter::Kivilcim => {
+                "Uzun açıklama yapmaz; kod hatası veya teknik soruda doğrudan düzeltilmiş kodu ve net cevabı verir."
+            }
+            CompanionCharacter::Sis => {
+                "Tamamen mizah ve eğlence odaklıdır; şakalar yaparak yakın bir arkadaş gibi sohbet eder."
+            }
+        }
+    }
+
+    pub fn default_shape(&self) -> CompanionShape {
+        match self {
+            CompanionCharacter::Persephone => CompanionShape::Pebble,
+            CompanionCharacter::Koz => CompanionShape::Hexagon,
+            CompanionCharacter::Solar => CompanionShape::Circle,
+            CompanionCharacter::Stolas => CompanionShape::Squircle,
+            CompanionCharacter::Kivilcim => CompanionShape::Triangle,
+            CompanionCharacter::Sis => CompanionShape::Cloud,
+        }
+    }
+
+    pub fn default_expression(&self) -> CompanionExpression {
+        match self {
+            CompanionCharacter::Persephone => CompanionExpression::Attentive,
+            CompanionCharacter::Koz => CompanionExpression::Angry,
+            CompanionCharacter::Solar => CompanionExpression::Neutral,
+            CompanionCharacter::Stolas => CompanionExpression::Curious,
+            CompanionCharacter::Kivilcim => CompanionExpression::Excited,
+            CompanionCharacter::Sis => CompanionExpression::Laughing,
+        }
+    }
+
+    pub fn default_color(&self) -> &'static str {
+        match self {
+            CompanionCharacter::Persephone => "#1e1e22",
+            CompanionCharacter::Koz => "#c83b22",
+            CompanionCharacter::Solar => "#d9a03f",
+            CompanionCharacter::Stolas => "#6366f1",
+            CompanionCharacter::Kivilcim => "#3b82f6",
+            CompanionCharacter::Sis => "#d9468f",
+        }
+    }
+
+    pub fn wears_round_glasses(&self) -> bool {
+        matches!(self, CompanionCharacter::Stolas)
+    }
+
+    pub fn from_name(raw: &str) -> Option<Self> {
+        let norm = raw
+            .trim()
+            .to_lowercase()
+            .replace("i\u{307}", "i")
+            .replace('ı', "i")
+            .replace('ö', "o")
+            .replace('ş', "s");
+        match norm.as_str() {
+            "persephone" => Some(CompanionCharacter::Persephone),
+            "koz" => Some(CompanionCharacter::Koz),
+            "solar" | "gece" => Some(CompanionCharacter::Solar),
+            "stolas" | "pus" => Some(CompanionCharacter::Stolas),
+            "kivilcim" => Some(CompanionCharacter::Kivilcim),
+            "sis" => Some(CompanionCharacter::Sis),
+            _ => None,
         }
     }
 }
@@ -1074,6 +1208,8 @@ pub struct OmnibarConfig {
     pub ai_voice_stt_model: String,
     #[serde(default)]
     pub ai_voice_tts_voice: String,
+    #[serde(default)]
+    pub ai_slang_enabled: bool,
 }
 
 fn default_search_engine() -> String {
@@ -1128,6 +1264,7 @@ impl Default for OmnibarConfig {
             ai_voice_tts_auto: false,
             ai_voice_stt_model: default_ai_voice_stt_model(),
             ai_voice_tts_voice: String::new(),
+            ai_slang_enabled: false,
         }
     }
 }
@@ -1137,9 +1274,48 @@ impl OmnibarConfig {
         let trimmed = self.companion_name.trim();
         if trimmed.is_empty() {
             self.companion_expression.default_name().to_string()
+        } else if !self.companion_name_custom {
+            match trimmed {
+                "Pus" => "Stolas".to_string(),
+                "Gece" => "Solar".to_string(),
+                _ => trimmed.to_string(),
+            }
         } else {
             trimmed.to_string()
         }
+    }
+
+    pub fn active_character(&self) -> Option<CompanionCharacter> {
+        CompanionCharacter::from_name(&self.effective_companion_name())
+    }
+
+    pub fn wears_round_glasses(&self) -> bool {
+        self.active_character()
+            .is_some_and(|ch| ch.wears_round_glasses())
+    }
+
+    pub fn effective_companion_subtitle(&self) -> &'static str {
+        if let Some(ch) = self.active_character() {
+            ch.role_title_tr()
+        } else {
+            self.companion_expression.title_tr()
+        }
+    }
+
+    pub fn effective_companion_summary(&self) -> &'static str {
+        if let Some(ch) = self.active_character() {
+            ch.focus_summary_tr()
+        } else {
+            self.companion_expression.meaning_tr()
+        }
+    }
+
+    pub fn apply_character_preset(&mut self, ch: CompanionCharacter) {
+        self.companion_name = ch.display_name().to_string();
+        self.companion_name_custom = true;
+        self.companion_shape = ch.default_shape();
+        self.companion_expression = ch.default_expression();
+        self.companion_color = ch.default_color().to_string();
     }
 
     pub fn set_companion_expression(&mut self, expr: CompanionExpression) {
@@ -1201,22 +1377,23 @@ impl OmnibarConfig {
     }
 
     /// Resolves the active Piper Turkish voice model ID, defaulting to
-    /// `tr_TR-dfki-medium` for Persephone / balanced personas and
-    /// `tr_TR-fahrettin-medium` for Köz / stern personas unless overridden.
+    /// `tr_TR-fahrettin-medium` for Köz / Stolas and `tr_TR-dfki-medium` for
+    /// Persephone / Solar / Kıvılcım / Sis unless overridden.
     pub fn effective_tts_voice(&self) -> String {
         let custom = self.ai_voice_tts_voice.trim();
         if !custom.is_empty() {
             return custom.to_string();
         }
-        let name = self.effective_companion_name().to_lowercase();
-        if name == "köz"
-            || name == "koz"
-            || matches!(
+        if matches!(
+            self.active_character(),
+            Some(CompanionCharacter::Koz | CompanionCharacter::Stolas)
+        ) || (self.active_character().is_none()
+            && matches!(
                 self.companion_expression,
                 CompanionExpression::Angry
                     | CompanionExpression::Suspicious
                     | CompanionExpression::Unimpressed
-            )
+            ))
         {
             "tr_TR-fahrettin-medium".to_string()
         } else {
@@ -1483,26 +1660,46 @@ enable_web_search = false
         }
 
         let mut omnibar = OmnibarConfig::default();
+        assert!(!omnibar.ai_slang_enabled, "Argo serbest must default to false!");
         assert_eq!(omnibar.effective_companion_name(), "Persephone");
+        assert!(!omnibar.wears_round_glasses());
         omnibar.set_companion_expression(CompanionExpression::Angry);
         assert_eq!(omnibar.effective_companion_name(), "Köz");
-        omnibar.set_companion_expression(CompanionExpression::Curious);
+        omnibar.set_companion_expression(CompanionExpression::Excited);
         assert_eq!(omnibar.effective_companion_name(), "Kıvılcım");
-        omnibar.set_companion_expression(CompanionExpression::Confused);
-        assert_eq!(omnibar.effective_companion_name(), "Pus");
-        omnibar.set_companion_expression(CompanionExpression::Sad);
+        omnibar.set_companion_expression(CompanionExpression::Curious);
+        assert_eq!(omnibar.effective_companion_name(), "Stolas");
+        assert!(omnibar.wears_round_glasses());
+        omnibar.set_companion_expression(CompanionExpression::Laughing);
         assert_eq!(omnibar.effective_companion_name(), "Sis");
+        assert!(!omnibar.wears_round_glasses());
         omnibar.set_companion_expression(CompanionExpression::Sleepy);
-        assert_eq!(omnibar.effective_companion_name(), "Gece");
+        assert_eq!(omnibar.effective_companion_name(), "Solar");
+
+        // Preset locking: selecting Stolas keeps Stolas + glasses even when expression changes
+        omnibar.apply_character_preset(CompanionCharacter::Stolas);
+        assert_eq!(omnibar.effective_companion_name(), "Stolas");
+        assert!(omnibar.wears_round_glasses());
+        omnibar.set_companion_expression(CompanionExpression::Happy);
+        assert_eq!(omnibar.effective_companion_name(), "Stolas");
+        assert!(omnibar.wears_round_glasses());
 
         omnibar.set_custom_companion_name("Ateş");
         assert!(omnibar.companion_name_custom);
         omnibar.set_companion_expression(CompanionExpression::Happy);
         assert_eq!(omnibar.effective_companion_name(), "Ateş");
+        assert!(!omnibar.wears_round_glasses());
 
         omnibar.reset_companion_name();
         assert!(!omnibar.companion_name_custom);
         assert_eq!(omnibar.effective_companion_name(), "Persephone");
+
+        assert_eq!(CompanionCharacter::ALL.len(), 6);
+        for ch in CompanionCharacter::ALL {
+            assert_eq!(CompanionCharacter::from_name(ch.display_name()), Some(ch));
+            assert!(!ch.role_title_tr().is_empty());
+            assert!(!ch.focus_summary_tr().is_empty());
+        }
     }
 
     #[test]

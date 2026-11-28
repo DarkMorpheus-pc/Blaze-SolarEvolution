@@ -3966,6 +3966,33 @@ fn build_omnibar_tab() -> GtkBox {
 
     let syncing_ai_tab = Rc::new(Cell::new(false));
 
+    // Official 6-Character Preset Selector row
+    let preset_row = GtkBox::new(Orientation::Horizontal, 12);
+    let preset_lbl = Label::new(Some("Hazır karakter profili"));
+    preset_lbl.add_css_class("setting-label");
+    preset_lbl.set_hexpand(true);
+    preset_lbl.set_halign(gtk4::Align::Start);
+    preset_row.append(&preset_lbl);
+
+    let preset_titles: Vec<String> = solar_common::CompanionCharacter::ALL
+        .iter()
+        .map(|ch| format!("{} — {}", ch.display_name(), ch.role_title_tr()))
+        .collect();
+    let preset_refs: Vec<&str> = preset_titles.iter().map(|s| s.as_str()).collect();
+    let preset_dd = DropDown::new(Some(StringList::new(&preset_refs)), None::<gtk4::Expression>);
+    let cur_char_idx = ai_cfg
+        .omnibar
+        .active_character()
+        .and_then(|cur| {
+            solar_common::CompanionCharacter::ALL
+                .iter()
+                .position(|c| *c == cur)
+        })
+        .unwrap_or(0);
+    preset_dd.set_selected(cur_char_idx as u32);
+    preset_row.append(&preset_dd);
+    ai_sec.append(&preset_row);
+
     // Companion Name row
     let cname_row = GtkBox::new(Orientation::Horizontal, 12);
     let cname_lbl = Label::new(Some("Karakter adı"));
@@ -4033,12 +4060,49 @@ fn build_omnibar_tab() -> GtkBox {
     expr_row.append(&expr_dd);
     ai_sec.append(&expr_row);
 
-    let expr_meaning_lbl = Label::new(Some(ai_cfg.omnibar.companion_expression.meaning_tr()));
+    let expr_meaning_lbl = Label::new(Some(ai_cfg.omnibar.effective_companion_summary()));
     expr_meaning_lbl.add_css_class("setting-subtext");
     expr_meaning_lbl.set_wrap(true);
     expr_meaning_lbl.set_xalign(0.0);
     expr_meaning_lbl.set_halign(gtk4::Align::Start);
     ai_sec.append(&expr_meaning_lbl);
+
+    {
+        let sync_flag = syncing_ai_tab.clone();
+        let entry_c = cname_entry.clone();
+        let shape_c = shape_dd.clone();
+        let expr_c = expr_dd.clone();
+        let meaning_c = expr_meaning_lbl.clone();
+        preset_dd.connect_selected_notify(move |dd| {
+            if sync_flag.get() {
+                return;
+            }
+            if let Some(ch) = solar_common::CompanionCharacter::ALL
+                .get(dd.selected() as usize)
+                .copied()
+            {
+                let _ = SolarConfig::update(|c| {
+                    c.omnibar.apply_character_preset(ch);
+                });
+                sync_flag.set(true);
+                entry_c.set_text(ch.display_name());
+                if let Some(si) = CompanionShape::ALL
+                    .iter()
+                    .position(|s| *s == ch.default_shape())
+                {
+                    shape_c.set_selected(si as u32);
+                }
+                if let Some(ei) = CompanionExpression::ALL
+                    .iter()
+                    .position(|e| *e == ch.default_expression())
+                {
+                    expr_c.set_selected(ei as u32);
+                }
+                meaning_c.set_text(ch.focus_summary_tr());
+                sync_flag.set(false);
+            }
+        });
+    }
 
     {
         let sync_flag = syncing_ai_tab.clone();
@@ -4277,6 +4341,17 @@ fn build_omnibar_tab() -> GtkBox {
         });
     });
     ai_sec.append(&chk_ai_guide);
+
+    let chk_ai_slang =
+        CheckButton::with_label("Argo serbest (samimi halk dili — tüm karakterler için)");
+    chk_ai_slang.set_active(ai_cfg.omnibar.ai_slang_enabled);
+    chk_ai_slang.connect_toggled(|cb| {
+        let active = cb.is_active();
+        let _ = SolarConfig::update(|c| {
+            c.omnibar.ai_slang_enabled = active;
+        });
+    });
+    ai_sec.append(&chk_ai_slang);
 
     let clear_row = GtkBox::new(Orientation::Horizontal, 12);
     let clear_mem_btn = Button::with_label("Yerel sohbet ve hafıza verilerini temizle");

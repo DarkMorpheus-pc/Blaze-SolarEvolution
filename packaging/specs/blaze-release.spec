@@ -1,6 +1,6 @@
 Name:           blaze-release
 Version:        5.05.1
-Release:        4%{?dist}
+Release:        5%{?dist}
 Summary:        Blaze repository definition, GPG key and OS identity guard
 License:        GPL-3.0-or-later
 URL:            https://github.com/DarkMorpheus-pc/Blaze-SolarEvolution
@@ -55,13 +55,13 @@ for suid_bin in /usr/bin/fusermount3 /usr/bin/fusermount /usr/bin/fusermount-glu
 done
 # Ensure newuidmap/newgidmap use file capabilities ONLY (0755 + cap_setuid/cap_setgid)
 # because combining SUID 4755 with file caps drops cap_dac_override and breaks rootless podman!
-if [ -f /usr/bin/newuidmap ] && [ -u /usr/bin/newuidmap ] && command -v setcap >/dev/null 2>&1; then
+if [ -f /usr/bin/newuidmap ] && [ -x /usr/sbin/setcap ]; then
     chmod 0755 /usr/bin/newuidmap 2>/dev/null || :
-    setcap cap_setuid+ep /usr/bin/newuidmap 2>/dev/null || chmod 4755 /usr/bin/newuidmap 2>/dev/null || :
+    /usr/sbin/setcap cap_setuid+ep /usr/bin/newuidmap 2>/dev/null || chmod 4755 /usr/bin/newuidmap 2>/dev/null || :
 fi
-if [ -f /usr/bin/newgidmap ] && [ -u /usr/bin/newgidmap ] && command -v setcap >/dev/null 2>&1; then
+if [ -f /usr/bin/newgidmap ] && [ -x /usr/sbin/setcap ]; then
     chmod 0755 /usr/bin/newgidmap 2>/dev/null || :
-    setcap cap_setgid+ep /usr/bin/newgidmap 2>/dev/null || chmod 4755 /usr/bin/newgidmap 2>/dev/null || :
+    /usr/sbin/setcap cap_setgid+ep /usr/bin/newgidmap 2>/dev/null || chmod 4755 /usr/bin/newgidmap 2>/dev/null || :
 fi
 # Heal dconf baseline icon-theme when Papirus-Dark is not installed so GTK4 symbolic icons resolve via Adwaita
 if [ -f /etc/dconf/db/local.d/00-blaze-theme ] && [ ! -f /usr/share/icons/Papirus-Dark/index.theme ]; then
@@ -72,6 +72,20 @@ if [ -f /etc/dconf/db/local.d/00-blaze-theme ] && [ ! -f /usr/share/icons/Papiru
 fi
 if [ -x /usr/bin/blazeos-sync-identity ]; then
     /usr/bin/blazeos-sync-identity --quiet || :
+fi
+
+%transfiletriggerin -- /usr/bin
+if grep -E '^/usr/bin/new(uid|gid)map$' >/dev/null 2>&1; then
+    if [ -x /usr/sbin/setcap ]; then
+        if [ -f /usr/bin/newuidmap ]; then
+            chmod 0755 /usr/bin/newuidmap 2>/dev/null || :
+            /usr/sbin/setcap cap_setuid+ep /usr/bin/newuidmap 2>/dev/null || :
+        fi
+        if [ -f /usr/bin/newgidmap ]; then
+            chmod 0755 /usr/bin/newgidmap 2>/dev/null || :
+            /usr/sbin/setcap cap_setgid+ep /usr/bin/newgidmap 2>/dev/null || :
+        fi
+    fi
 fi
 
 %transfiletriggerin -- /etc /usr/lib /boot/loader/entries /usr/share/pixmaps /usr/share/icons
@@ -105,6 +119,8 @@ fi
 /etc/blazeos/update-channel.conf
 
 %changelog
+* Sat Nov 28 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-5
+- Add RPM file trigger on /usr/bin/newuidmap and /usr/bin/newgidmap using explicit /usr/sbin/setcap so shadow-utils upgrades never combine SUID 4755 with file capabilities
 * Fri Nov 27 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-4
 - Shorten blaze.repo metadata_expire to 15m so new BlazeHouse OTA releases appear promptly
 * Fri Nov 27 2026 Blaze Release <release@blazeos.com.tr> - 5.05.1-3
